@@ -303,6 +303,80 @@ def write_exports(result, outdir, min_y, max_y, skript_opts=None) -> dict:
 
 
 # --------------------------------------------------------- v2: Skript generator
+
+_WALL_CELL = 128        # spatial bucket size (blocks); must stay >= the render radius
+_WALL_SEG = 24.0        # target max segment length before draw-time interpolation
+_WALL_CAP = 1200        # max stored segments per ring group (spacing grows past this)
+
+
+def _split_ring_segments(rings: list, max_seg: float, cap: int) -> list:
+    """Closed ring(s) of (x,z) points -> list of ((ax,az),(bx,bz)) segments no longer
+    than max_seg blocks (re-split coarser if the cap would be exceeded)."""
+    raw = []
+    for ring in rings:
+        n = len(ring)
+        for i in range(n):
+            a, b = ring[i], ring[(i + 1) % n]
+            if a != b:
+                raw.append((a, b))
+    total = sum(math.dist(a, b) for a, b in raw)
+    if total <= 0:
+        return []
+    seg = max(max_seg, total / max(1, cap))
+    out = []
+    for (ax, az), (bx, bz) in raw:
+        d = math.dist((ax, az), (bx, bz))
+        steps = max(1, int(math.ceil(d / seg)))
+        for i in range(steps):
+            t0, t1 = i / steps, (i + 1) / steps
+            out.append(((ax + (bx - ax) * t0, az + (bz - az) * t0),
+                        (ax + (bx - ax) * t1, az + (bz - az) * t1)))
+    return out
+
+
+def _wall_var_lines(tree: str, rings: list) -> str:
+    """Skript `set` lines that embed a ring group as two parallel vector list-vars
+    ({tree::cX_Z::i} = segment start, {tree}b = segment end), bucketed by the
+    segment midpoint into _WALL_CELL cells for cheap near-player lookup."""
+    segs = _split_ring_segments(rings, _WALL_SEG, _WALL_CAP)
+    counters: dict = {}
+    lines = []
+    for (ax, az), (bx, bz) in segs:
+        cx = math.floor((ax + bx) / 2 / _WALL_CELL)
+        cz = math.floor((az + bz) / 2 / _WALL_CELL)
+        key = f"c{cx}_{cz}"
+        counters[key] = counters.get(key, 0) + 1
+        i = counters[key]
+        lines.append(f"    set {{{tree}::{key}::{i}}} to vector({ax:.0f}, 0, {az:.0f})")
+        lines.append(f"    set {{{tree}b::{key}::{i}}} to vector({bx:.0f}, 0, {bz:.0f})")
+    return "\n".join(lines)
+
+
+def _wall_draw_block(tree: str, color: str) -> str:
+    """The per-ring draw pass: scan the player's 3x3 bucket neighbourhood, interpolate
+    each in-radius segment at ~4-block steps, stack SkBee dust from -wall-h..+wall-h."""
+    base = " " * 12
+    body = f"""loop {{_k::*}}:
+    loop {{{tree}::%loop-value-1%::*}}:
+        set {{_a}} to loop-value-2
+        set {{_dx}} to (x of {{_a}}) - {{_px}}
+        set {{_dz}} to (z of {{_a}}) - {{_pz}}
+        if ({{_dx}} * {{_dx}}) + ({{_dz}} * {{_dz}}) <= {{@radius}} * {{@radius}}:
+            set {{_b}} to {{{tree}b::%loop-value-1%::%loop-index-2%}}
+            set {{_ax}} to x of {{_a}}
+            set {{_az}} to z of {{_a}}
+            set {{_bx}} to x of {{_b}}
+            set {{_bz}} to z of {{_b}}
+            set {{_n}} to ceil(sqrt(({{_bx}} - {{_ax}}) ^ 2 + ({{_bz}} - {{_az}}) ^ 2) / 4)
+            if {{_n}} < 1:
+                set {{_n}} to 1
+            loop integers from 0 to {{_n}}:
+                set {{_t}} to loop-value-3 / {{_n}}
+                set {{_x}} to {{_ax}} + ({{_bx}} - {{_ax}}) * {{_t}}
+                set {{_z}} to {{_az}} + ({{_bz}} - {{_az}}) * {{_t}}
+                loop integers from -{{@wall-h}} to {{@wall-h}}:
+                    make 1 of dust using dustOption({color}, 1.5) at location({{_x}}, {{_py}} + loop-value-4, {{_z}}, {{_w}}) to loop-player"""
+    return "\n".join(base + ln if ln.strip() else ln for ln in body.split("\n"))
 def write_skript(result: dict, opts: dict) -> str:
     """Generate a server-side border.sk: country titles, the soft->hard escalating kill-zone, the
     hard fling-back wall, and packet-particle walls (skript-particle). Parameterised by the UI opts.
@@ -312,7 +386,8 @@ def write_skript(result: dict, opts: dict) -> str:
     base = max(1, int(opts.get("base", 1)))
     curve = (opts.get("curve") or "double").lower()
     knock = float(opts.get("knockback", 1.8))
-    radius = int(opts.get("render_radius", 56))
+    # radius must stay within one bucket cell so the 3x3 neighbourhood scan covers it
+    radius = max(16, min(_WALL_CELL - 8, int(opts.get("render_radius", 56))))
     wallh = int(opts.get("wall_height", 4))
     ticks = max(1, int(opts.get("update_ticks", 8)))
     zone_ids = [_rid(z["spec"].get("name")) for z in result["zones"]]
@@ -322,18 +397,24 @@ def write_skript(result: dict, opts: dict) -> str:
         f'    else if "{zid}" is in the regions at the player:\n'
         f'        send title "&bEntering {zone_titles[zid]}" with subtitle "" to the player for 2 seconds'
         for zid in zone_ids)
-    wall_files = '"border_hard", "border_soft"' + (", " if zone_ids else "") + ", ".join(f'"{z}_actual"' for z in zone_ids)
+    cl = result["clump"]
+    hard_lines = _wall_var_lines("bhard", [cl["hard_xz"]])
+    soft_lines = _wall_var_lines("bsoft", [cl["soft_xz"]])
+    zone_lines = _wall_var_lines("bzone", [z["xz"] for z in result["zones"]])
+    draw_hard = _wall_draw_block("bhard", "yellow")
+    draw_soft = _wall_draw_block("bsoft", "orange")
+    draw_zone = _wall_draw_block("bzone", "aqua")
     return f"""# border.sk  -  generated by Meld (Border & zones, v2).
 # Server runtime for the country-border system. Meld owns geometry; this owns titles, the kill-zone,
 # the fling-back wall, and the packet-particle walls.
 #
-# REQUIRES (confirm for your exact MC / Leaf version):
-#   WorldGuard, WorldEdit, Skript, skript-worldguard (region enter/exit events),
-#   and a packet-particle provider: skript-particle (preferred) or SkBee.
+# REQUIRES (Meld's server setup installs all of these automatically):
+#   WorldGuard, WorldEdit, Skript, skworldguard (region enter/exit events),
+#   SkBee (dust particles for the walls — the wall geometry is EMBEDDED below,
+#   no point files or other addons needed).
 # SETUP:
 #   1. /rg load   (after copying the exported regions.yml into the world's WorldGuard data)
-#   2. Put the exported *_*.txt point files in  plugins/Skript/scripts/border/
-#   3. /sk reload border
+#   2. /sk reload border
 #
 # Regions used (from regions.yml): border_hard (outer wall, build allowed), border_soft (safe edge),
 #   {", ".join(zone_ids) or "<zones>"} (country identity).
@@ -396,21 +477,48 @@ on death of player:
     delete {{kz_start::%uuid of victim%}}
     delete {{kz_tick::%uuid of victim%}}
 
-# ---- packet-particle walls (per-player, near segments only) ----
-# Loads the exported point files once, then every {{@ticks}} ticks draws the wall segments within
-# {{@radius}} blocks of each player. Colors: hard=YELLOW, soft=ORANGE, <zone>_actual=CYAN.
-# NOTE: this is the straightforward version (per-player near-scan). For very large player counts,
-# bucket the segments per 64-block cell first (see BORDER_V2_SKRIPT.md).
+# ---- packet-particle walls (SkBee dust, per-player, near segments only) ----
+# Wall geometry is EMBEDDED below: segment endpoints are baked into bucketed list variables on
+# load ({_WALL_CELL}-block cells), so every {{@ticks}} ticks each in-border player only scans the
+# 3x3 cells around them, interpolates the in-radius segments at ~4-block steps and gets a dust
+# curtain from y-{{@wall-h}} to y+{{@wall-h}} sent ONLY to them (packet particles, no world lag).
+# Colors: hard wall = yellow, soft (safe edge) = orange, country borders = aqua.
+# If your SkBee build rejects the trailing "to loop-player", delete that tail — the wall then
+# renders for everyone near it instead of per-player (same visual, slightly more packets).
 on load:
-    # expects files in plugins/Skript/scripts/border/ : border_hard.txt, border_soft.txt, {", ".join(f"{z}_actual.txt" for z in zone_ids) or "..."}
-    # (loader left to skript-reflect / skBee CSV read on your build; point format: x,z,lon,lat)
+    delete {{bhard::*}}
+    delete {{bhardb::*}}
+    delete {{bsoft::*}}
+    delete {{bsoftb::*}}
+    delete {{bzone::*}}
+    delete {{bzoneb::*}}
+{hard_lines}
+{soft_lines}
+{zone_lines}
 
 every {{@ticks}} ticks:
     loop all players:
-        # pseudo: for each loaded segment within {{@radius}} of loop-player, draw a vertical dust
-        # wall from y-{{@wall-h}} to y+{{@wall-h}} in the ring color. Wire to skript-particle's
-        # 'draw line'/'draw' effect on your build.
-        # draw the near border_hard segments in yellow, border_soft in orange, <zone>_actual in cyan.
+        # region gate = right world AND inside the playable area, one cheap check
+        if "border_hard" is in the regions at loop-player:
+            set {{_px}} to x-coordinate of loop-player
+            set {{_py}} to y-coordinate of loop-player
+            set {{_pz}} to z-coordinate of loop-player
+            set {{_w}} to world of loop-player
+            set {{_cx}} to floor({{_px}} / {_WALL_CELL})
+            set {{_cz}} to floor({{_pz}} / {_WALL_CELL})
+            delete {{_k::*}}
+            set {{_k::1}} to "c%{{_cx}} - 1%_%{{_cz}} - 1%"
+            set {{_k::2}} to "c%{{_cx}}%_%{{_cz}} - 1%"
+            set {{_k::3}} to "c%{{_cx}} + 1%_%{{_cz}} - 1%"
+            set {{_k::4}} to "c%{{_cx}} - 1%_%{{_cz}}%"
+            set {{_k::5}} to "c%{{_cx}}%_%{{_cz}}%"
+            set {{_k::6}} to "c%{{_cx}} + 1%_%{{_cz}}%"
+            set {{_k::7}} to "c%{{_cx}} - 1%_%{{_cz}} + 1%"
+            set {{_k::8}} to "c%{{_cx}}%_%{{_cz}} + 1%"
+            set {{_k::9}} to "c%{{_cx}} + 1%_%{{_cz}} + 1%"
+{draw_hard}
+{draw_soft}
+{draw_zone}
 
 # end border.sk
 """

@@ -31,6 +31,26 @@ from pathlib import Path
 from .coords import recommended_elev_zoom, ELEV_ZOOM_MIN, ELEV_ZOOM_MAX
 from .osm_grid import OSM_GRID_Z
 
+# Cave biome names the fork's --cave-biomes accepts, in display order.
+CAVE_BIOMES = ["lush", "dripstone", "deepdark", "mushroom", "ice", "amethyst",
+               "volcanic", "coral"]
+
+
+def cave_biomes_spec(settings: dict) -> str:
+    """`--cave-biomes` value from the cave_biome_amounts setting, or '' when every
+    biome sits at its default 100 (so default runs stay byte-identical)."""
+    amounts = settings.get("cave_biome_amounts") or {}
+    parts = []
+    for name in CAVE_BIOMES:
+        try:
+            pct = int(amounts.get(name, 100))
+        except (TypeError, ValueError):
+            pct = 100
+        pct = max(0, min(200, pct))
+        if pct != 100:
+            parts.append(f"{name}={pct}")
+    return ",".join(parts)
+
 
 # Biogeographic realm -> tree pack dir, picked from the selection centre (lat, lon). Ordered:
 # the first box that contains the point wins (finer/subset realms first so they take priority).
@@ -136,6 +156,14 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
         cmd.append("--no-buildings")
     if settings.get("fill_ground"):
         cmd.append("--fillground")
+    if settings.get("caves"):
+        # Vanilla-noise cave worldgen in the arnis fork; --caves auto-enables --fillground.
+        # Themed biomes + formations come from the cave-pack/ directory that ships NEXT TO
+        # arnis.exe (auto-discovered; no CLI flag). Without it caves still generate, un-themed.
+        cmd.append("--caves")
+        spec = cave_biomes_spec(settings)
+        if spec:
+            cmd += ["--cave-biomes", spec]
     if settings.get("disable_height_limit"):
         cmd.append("--disable-height-limit")
     # NOTE: stream-to-disk is NOT a CLI flag in the merged Arnis (upstream removed the

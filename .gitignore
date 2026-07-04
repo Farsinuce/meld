@@ -42,3 +42,13 @@ experimental/_work/
 # them do not (they hardcode local scratch paths and need the raw art, so they cannot run for a cloner).
 # Kept on disk for local re-bakes; just untracked from the public repo.
 tools/
+
+# Local run scratch (benchmark/debug output, never committed)
+run*.log
+run*_result.json
+
+# Cave asset packs: third-party .schem collections (redistribution license unclear) and the
+# old engine's cave.json format. The fork generates full caves without them; drop your own
+# cave-pack/ next to arnis.exe to enable stamped formations.
+cave-pack/
+cave-packs/

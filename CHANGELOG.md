@@ -4,6 +4,124 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.5.0] - 2026-07-04 — "Meld Depths"
+
+The long-awaited underground release. Worlds are no longer solid rock below the surface: one
+**Caves** toggle carves a full vanilla-style cave system into every cell at generation time —
+caverns, tunnels, rivers, lakes, ores, geodes and eight themed cave biomes — deterministic and
+seam-safe across tiles. Around it, this release makes the finished world go further: an
+**Export & compression** suite (zip / tar.zst / Linear / B_Linear, up to ~4.9× smaller), a
+**one-click Leaf server** builder that turns the world into a running localhost server with the
+border plugins pre-staged, and the Border & zones Skript completing its **real particle wall**.
+
+> Engine note: the bundled Arnis fork moves Teddy563/arnis 2.9.2 -> 2.9.3. The entire cave
+> system lives in the fork (`--caves`, +6,178 lines); Meld drives it with one toggle. Existing
+> worlds are untouched — caves appear in newly generated cells only.
+
+### Added
+
+- **Caves.** One Settings toggle. The fork ports Minecraft 1.21.8 cave worldgen to Rust and
+  carves it into the filled ground during generation: cheese caverns, spaghetti tunnels and
+  noodle worms from the vanilla noise density field (vanilla's own 4x8x4 cell interpolation),
+  random-walk tunnel and ravine carvers, pool caves and long snake rivers that breach into
+  caves only while descending, a contained deep lava sea below y=-54, the vanilla ore table
+  plus stone-variety patches, amethyst geodes, and **8 cave biome themes** (lush, dripstone,
+  deep dark, mushroom, ice under mountains, amethyst, volcanic at the world floor, coral pools)
+  covering about half the underground. Every pass is a pure function of (seed, position), so
+  adjacent cells carve the same caves at their shared seam. A `cave-pack/` folder of `.schem`
+  formations (ice spikes, dripstone columns, crystal clusters) decorates floors and ceilings
+  when present; caves generate fully without it.
+  - **Configurable biome mix + zone preview.** With Caves on, a **Cave biomes** panel gives
+    every theme its own slider (drag in 10% steps, click the % to type any exact value,
+    double-click a slider to reset it; 0 = off, defaults untouched when you don't touch
+    them). **🗺 Preview** renders the REAL zone layout for your world's seed right in the
+    panel: a zoomed-in window with the patches in their noise shapes over gray rock, one
+    canvas for the upper caves and one for the deep, with the measured share of every theme
+    — and hovering a biome in the list lights up just its patches. Backed by the fork's
+    `--cave-biomes` / `--cave-zone-map`; a changed mix stays deterministic and seam-safe,
+    and untouched sliders keep the world byte-identical to the default.
+  - **Cave polish (bundled fork 2.9.3):** deep dark is now deep-only (below the deepslate
+    line, like vanilla — no more sculk in shallow caves), and the diorite/granite/andesite/
+    dirt patches are placed relative to the local surface instead of absolute Y, so they
+    fill the rock under every column at any terrain height (a valley region went from 4
+    diorite blocks to ~173,000 — the proper vanilla stone-variety look).
+- **Export & compression.** An Export format dropdown on the Project & world card:
+  - **Zip / tar.zst** — universal archives, extract back to a vanilla single-player world
+    (~1.85× smaller; Anvil chunks are already compressed, which is the honest ceiling for
+    archives).
+  - **Linear** — per-region `.linear` for Leaf/Folia servers, ~4.85× smaller at level 9. Write
+    it next to the `.mca` or as a separate `<name> [Linear]` sibling world (the original stays
+    untouched). Optional stream-and-free keeps peak disk near the compressed size, and overlap
+    mode compresses while generation still runs.
+  - **B_Linear** — builds a `<name> [BLinear]` sibling world for Leaf's `B_LINEAR` through a
+    bundled cross-platform Rust converter (`region-convert/`, based on LuminolMC's
+    region_converter, MIT, ~1.2-2.5× faster than the Python codec). Keep-modes after the new
+    world verifies: keep both (default), B_Linear only, or archive the `.mca` as a zip first.
+    The `.mca` is only ever removed after everything verifies.
+  - **`meldconvert.py`** — a standalone CLI for `mca <-> linear <-> blinear` conversion using
+    the same verified codecs, plus an `info` inspector.
+- **Server setup (one-click Leaf server).** A new card next to Border & zones turns the
+  finished world into a ready-to-run local server:
+  - Pick any Leaf version (1.21.4 to latest, fetched live), mount the world as the server's
+    main world or as a Multiverse sub-world, and choose the **world files** (auto-follow the
+    export settings, or explicitly `.mca` / `[Linear]` / `[BLinear]`) — the server's
+    region-format config always matches the files actually staged.
+  - Five explicit steps: **Plan** (dry run listing the exact jar build and every plugin version
+    with hashes), **Stage** (configs + a copy of the world), **Download** (confirmation
+    required; every file hash-verified — sha256 from Leaf, sha512 from Modrinth), **Accept
+    EULA** (its own deliberate step), **Start / Stop** — with a live console and command input.
+    The border plugins (WorldGuard, WorldEdit, Skript, skWorldGuard, SkBee) install
+    automatically and the exported border files are pushed and loaded on first start.
+  - **Localhost only, by design**: servers are set up for `127.0.0.1:25565`, offline mode.
+    Meld never touches reachability; going further is your own `server.properties` edit.
+  - **Voxy option**: installs Voxy Server Side (exact-version matched) and writes its config,
+    so players with the Voxy client see the whole map as distant terrain the moment they join.
+    Works with MCA, Linear and B_Linear alike (it requests chunks through the server, never
+    parses region files).
+  - **Crash watchdog**: if the server dies without a Stop, Meld restarts it (max 3 per 10
+    minutes), and the first Start zips a world backup automatically — **optional**: a
+    "backup world before first start" toggle (default on) skips it for big worlds, where a
+    1 GB world means a ~1 GB zip (region data barely recompresses); the manual 💾 button
+    stays available either way. Version, mode, folder and extras persist per project.
+  - **RAM + CPU sliders, adapted to your machine**: set the server's heap (slider at 0 =
+    auto — a quarter of your RAM, 2-8 GB, always capped 2 GB below total) and a CPU % that
+    maps to the JVM's `ActiveProcessorCount` (the lever that actually sizes its GC and
+    worker thread pools). Live readouts show the resolved result ("50% = 12/24 cores");
+    values persist per project, apply on the next Start, and the written
+    `start.bat`/`start.sh` stay in sync with every launch.
+  - **Pop-out console**: the live server console opens in its own window (like the Log
+    pop-out) with a command input, backed by a lightweight console feed endpoint.
+  - Voxy / extras checkboxes persist the moment they change, not only when a Plan runs.
+- **Border & zones: the particle wall is real.** The generated `border.sk` now embeds its wall
+  geometry (bucketed segments built on load) and draws per-player dust curtains with SkBee —
+  hard wall yellow, safe edge orange, country borders aqua — scanning only the cells around
+  each player. No point-file loading, no extra Skript addons beyond SkBee.
+
+### Changed
+
+- **Flat cards.** Border & zones and Server setup no longer nest a dropdown inside the card;
+  the card header is the one collapse and opens straight onto the controls.
+- **Export defaults stay raw.** `none` remains the default format, so an untouched build still
+  yields a working vanilla `.mca` world; compression is always opt-in.
+
+### Fixed
+
+- **Region-format mismatches are impossible by construction.** The staged world folder and
+  Leaf's `region-format` are decided together and validated against the files on disk, so a
+  Linear world is never served as MCA or vice versa. Verified against the Leaf 26.1.2 binary
+  itself (disassembled constants + on-disk files): our `.b_linear` output is byte-identical to
+  Leaf's B_LINEAR bucketed v3 layout (same superblock, version byte, header fields, hash
+  seed), and our classic Linear v1 files load under Leaf's LINEAR_V2 (it reads v1/v2/v3).
+- **Server-written Linear worlds convert back cleanly.** A Leaf server rewrites `.linear`
+  regions as version 3, which Meld's native v1 codec cannot read; `meldconvert.py` now
+  detects v2/v3 sources and routes the conversion through the bundled region_converter
+  (which reads all versions) instead of failing, and the codec's error message says exactly
+  what to do if hit directly.
+- **The server card survives a Meld restart.** Backup, EULA and Start fall back to the
+  per-project server profile when Meld was restarted after staging, so an already-built
+  server works with just a fresh Plan — no re-Stage (which would re-copy the world)
+  required. Live-verified: restart → Plan → Start = 12 s warm boot on a B_LINEAR world.
+
 ## [1.4.0] - 2026-06-22
 
 The "real trees, shape the land, and bound a world to a country" release. Meld now places a

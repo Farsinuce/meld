@@ -33,7 +33,7 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-from flask import Flask, request, jsonify, send_from_directory, abort, Response
+from flask import Flask, request, jsonify, send_from_directory, send_file, abort, Response
 
 BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))
@@ -43,17 +43,20 @@ from src.grid import cells_for_bbox, cells_for_polygons, _point_in_poly
 from src.coords import expand_bbox_for_seam, cell_bbox, snap_to_region_grid
 from src.arnis_cmd import (build_arnis_cmd, run_arnis, find_world_dir, clean_output_dir,
                            parse_progress, effective_elev_zoom)
+from src import arnis_cmd
 from src.prefetch import (run_prefetch, preview_clumps, run_terrain_prefetch,
                           purge_small_tiles)
 from src import datapack as dp
 from src import osm_pack as op
 from src import osm_grid
 from src import border
+from src import mcserver as mcs
 from src import runreport
 from src.merge import (merge_cell_into_master, strip_buffer_regions,
                         MeldCoordinateDriftError, MeldCollisionError)
 from src.survey import survey_elevation
 from src.workers import WorkerPool
+from src import export as exportmod
 
 # psutil powers the live CPU/RAM gauges. Optional: Flask must boot without it (disk still
 # works via shutil, RAM via the ctypes fallback).
@@ -162,6 +165,234 @@ _RUN_LOCK = threading.Lock()
 _RUN = {"started": None, "ended": None, "total": 0, "done": 0, "failed": 0,
         "est_regions": 0, "est_mb": 0, "actual_mb": None, "phase": "idle"}
 MB_PER_REGION = 4   # rough estimate for the size report
+
+# ── post-generation export/compression status (drives the progress view) ──────
+# Populated by the export post-pass that runs once all cells are merged. See
+# src/export.py + repo MELD_EXPORT_PLAN.md. Reset at the start of each run.
+_EXPORT_LOCK = threading.Lock()
+_EXPORT = {"format": "none", "phase": "idle", "total": 0, "done": 0, "failed": 0,
+           "raw_mb": 0.0, "out_mb": 0.0, "ratio": 0.0, "message": "", "out_name": None}
+_EXPORT_STARTED = {"run": None}   # guards one export per finished run (by _RUN['started'])
+
+# ── one-click Leaf server setup status (drives the Server setup card) ─────────
+# Same shape/convention as _EXPORT: a lock-guarded dict folded into /api/status.
+# `proc` holds the live mcserver.ServerProc when running (not serialized).
+_MCSERVER_LOCK = threading.Lock()
+_MCSERVER = {"phase": "idle", "message": "", "version": None, "mode": "main",
+             "server_dir": None, "target_world": None, "plan": None, "eula": False,
+             "console": [], "running": False, "port": 25565,
+             # voxy = plan resolved the vss plugin
+             "voxy": False,
+             # crash watchdog: auto_restart flips via the UI toggle; restarts = recent count
+             "auto_restart": True, "restarts": 0, "world_choice": "auto"}
+_MCSERVER_PROC = {"proc": None}
+# crash-restart bookkeeping (epoch seconds of recent auto-restarts, max 3 per 10 min)
+_MCSERVER_RESTARTS: list = []
+
+
+def _machine_specs() -> dict:
+    """Total RAM (GB) + logical cores, for adapting the server's RAM/CPU knobs."""
+    try:
+        import psutil
+        ram = round(psutil.virtual_memory().total / (1024 ** 3))
+    except Exception:  # noqa: BLE001
+        ram = 8
+    return {"ram_gb": ram, "cores": os.cpu_count() or 4}
+
+
+def _mcs_resources() -> tuple[str, int]:
+    """(heap string, JVM cpu count) from the project profile, clamped to this machine."""
+    st = PROJECT.settings()
+    m = _machine_specs()
+    return mcs.launch_resources(int(st.get("server_ram_gb") or 0),
+                                int(st.get("server_cpu_pct") or 100),
+                                m["ram_gb"], m["cores"])
+
+
+def _mcs_set(**kw) -> None:
+    with _MCSERVER_LOCK:
+        _MCSERVER.update(**kw)
+
+
+def _mcs_console(line: str) -> None:
+    with _MCSERVER_LOCK:
+        tail = _MCSERVER["console"]
+        tail.append(line)
+        if len(tail) > 40:
+            del tail[: len(tail) - 40]
+
+
+def _reset_export_status() -> None:
+    with _EXPORT_LOCK:
+        _EXPORT.update(format="none", phase="idle", total=0, done=0, failed=0,
+                       raw_mb=0.0, out_mb=0.0, ratio=0.0, message="", out_name=None)
+    _EXPORT_STARTED["run"] = None
+    # Drop any lingering streaming session from a prior (e.g. stopped) run. Raws are intact
+    # (keep-both is forced for archive streaming), so a later post-pass / Compress-now sweep
+    # finalizes via the manifest. The orphaned daemon threads idle harmlessly.
+    with _STREAM_LOCK:
+        _STREAM["session"] = None
+
+# Streaming-overlap session (linear pool or single-writer archive). Lives only while a
+# generate run with export_overlap is in flight. See src/export.py.
+_STREAM_LOCK = threading.Lock()
+_STREAM = {"session": None}
+
+
+def _world_locked(world_dir) -> bool:
+    """Safeguard E: is THIS world open in Minecraft right now? Minecraft holds an
+    exclusive lock on `<world>/session.lock` while a world is loaded, so we test that file —
+    NOT 'is any javaw.exe running' (which false-positives on the launcher or any other Java
+    app). Fail-open (return False on doubt): the export is safe-by-verify anyway, so a missed
+    detection only means a locked region write fails gracefully and keeps its source."""
+    try:
+        lock = Path(world_dir) / "session.lock"
+        if not lock.exists():
+            return False                       # never opened / not open
+        try:
+            f = open(lock, "r+b")              # MC's share mode denies this if the world is open
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                try:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                    return False               # acquired → world not open
+                except OSError:
+                    return True                # couldn't acquire → world open
+            else:
+                import fcntl
+                try:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    return False
+                except OSError:
+                    return True
+        finally:
+            f.close()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _run_had_failures() -> bool:
+    with _RUN_LOCK:
+        return int(_RUN.get("failed", 0) or 0) > 0
+
+
+def _export_destination(s: dict) -> str:
+    d = str(s.get("export_destination", "in_place") or "in_place").strip().lower()
+    return "separate" if d == "separate" else "in_place"
+
+
+def _export_overlap_on(s: dict) -> bool:
+    fmt = str(s.get("export_format", "none") or "none").strip().lower()
+    if _export_destination(s) == "separate" or fmt == exportmod.FMT_BLINEAR:
+        return False   # separate-folder + blinear build a sibling world as a post-pass (never overlap)
+    return bool(s.get("export_overlap", False)) and fmt in exportmod.VALID_FORMATS and fmt != "none"
+
+
+def _stream_on_progress(p) -> None:
+    with _EXPORT_LOCK:
+        _EXPORT.update(format=p.format, phase=p.phase, total=p.total, done=p.done,
+                       failed=p.failed, raw_mb=round(p.raw_bytes / 1048576, 2),
+                       out_mb=round(p.out_bytes / 1048576, 2),
+                       ratio=round(p.ratio, 2), message=p.message)
+
+
+def _post_merge_export_hook(cell_key: str) -> None:
+    """Run right after a cell merges its canonical regions into the master. Two jobs:
+      • Safeguard D — a regenerated region invalidates any prior .linear sibling, so drop it
+        (keeps a converted world from going half-mca/half-linear).
+      • Overlap — if export_overlap is on, lazily start the streaming session on the first
+        merge and enqueue this cell's finalized (disjoint) regions into it.
+    Never raises into the generation path."""
+    try:
+        from src.coords import canonical_region_bounds
+        b = canonical_region_bounds(cell_key)
+        if not b:
+            return
+        rx0, rx1, rz0, rz1 = b
+        region_dir = master_world_path(create=False) / "region"
+        s = PROJECT.settings()
+        want_stream = _export_overlap_on(s)
+        with _STREAM_LOCK:
+            sess = _STREAM["session"]
+            if sess is None and want_stream:
+                sess = _make_stream_session(s)
+                _STREAM["session"] = sess
+        for rx in range(rx0, rx1 + 1):
+            for rz in range(rz0, rz1 + 1):
+                mca = region_dir / f"r.{rx}.{rz}.mca"
+                if not mca.exists():
+                    continue
+                lin = mca.with_suffix(".linear")
+                if lin.exists():
+                    try:
+                        lin.unlink()        # D: stale .linear from a prior export
+                    except OSError:
+                        pass
+                if sess is not None:
+                    sess.submit(mca)
+    except Exception as e:  # noqa: BLE001
+        log(f"[Export] post-merge hook warning: {e}")
+
+
+def _make_stream_session(s: dict):
+    """Build + start a streaming session for the current format. linear → RegionExportPool
+    (parallel per-region); zip/tarzst → ArchiveStreamWriter (single container, keep_both
+    forced)."""
+    fmt = str(s.get("export_format")).strip().lower()
+    world = master_world_path(create=True)
+    level = exportmod.resolve_level(fmt, s.get("export_level", 0))
+    workers = exportmod.resolve_workers(s.get("export_compression_workers", 0))
+    keep_both = bool(s.get("export_keep_both", True))
+    if bool(s.get("export_stream_and_free", False)):
+        keep_both = False
+    manifest = exportmod.Manifest(world, meta={"format": fmt, "overlap": True})
+    if fmt == exportmod.FMT_LINEAR:
+        sess = exportmod.RegionExportPool(
+            level=level, workers=workers, keep_both=keep_both,
+            manifest=manifest, on_progress=_stream_on_progress)
+    else:
+        # Archive streaming keeps raws through the whole stream (a container is only safe once
+        # closed + verified). If the user chose delete-raw, the raws are removed ONLY at the
+        # end, after the verified archive — never mid-stream.
+        sess = exportmod.ArchiveStreamWriter(
+            world, fmt, level=level, threads=workers, manifest=manifest,
+            on_progress=_stream_on_progress, free_raw_at_end=(not keep_both))
+    sess.start()
+    with _EXPORT_LOCK:
+        _EXPORT.update(format=fmt, phase=("compressing" if fmt == exportmod.FMT_LINEAR else "archiving"),
+                       total=0, done=0, failed=0, raw_mb=0.0, out_mb=0.0, ratio=0.0,
+                       message="", out_name=None)
+    log(f"[Export] overlap streaming started ({fmt}, workers={workers}, keep_both={keep_both})")
+    return sess
+
+
+def _finish_stream_session():
+    """Finalize the streaming session (drain + close + verify). Returns its ExportProgress,
+    or None if there was no session."""
+    with _STREAM_LOCK:
+        sess = _STREAM["session"]
+        _STREAM["session"] = None
+    if sess is None:
+        return None
+    prog = sess.finish()
+    if isinstance(sess, exportmod.ArchiveStreamWriter):
+        out_name = sess.dst.name
+    else:
+        out_name = f"{prog.done} .linear region(s)"
+    with _EXPORT_LOCK:
+        _EXPORT.update(format=prog.format, phase=prog.phase, total=prog.total, done=prog.done,
+                       failed=prog.failed, raw_mb=round(prog.raw_bytes / 1048576, 2),
+                       out_mb=round(prog.out_bytes / 1048576, 2),
+                       ratio=round(prog.ratio, 2), message=prog.message, out_name=out_name)
+    log(f"[Export] overlap streaming finished: {prog.phase} {prog.done}/{prog.total}")
+    return prog
 
 # ── per-cell timing + activity timeline (squares graph + end-of-run benchmark) ──
 # Collected live during a run, reset when a fresh batch is submitted. Read by /api/status
@@ -1402,6 +1633,7 @@ def _runner(job: dict, state: dict) -> bool:
     PROJECT.set_cell_status(cell_key, "merged")
     _clear_fail(cell_key)              # succeeded — drop any prior failure reason
     _scan_cell_health(cell_key, out)   # flag the cell if its log predicts an artifact
+    _post_merge_export_hook(cell_key)  # D: drop stale .linear; overlap: stream the new regions
     # Prune the per-cell subregion world now that its canonical regions live in the
     # master world — avoids doubling storage. Toggle via settings.prune_cell_after_merge.
     if settings.get("prune_cell_after_merge", True):
@@ -1432,6 +1664,203 @@ def _runner(job: dict, state: dict) -> bool:
 _RETRYABLE_FAIL = ("timeout", "rate limit", "network", "fetch failed",
                    "out of memory", "generation failed", "no world produced", "overpass")
 _MAX_CELL_RETRIES = 2
+
+
+def _export_in_flight() -> bool:
+    with _EXPORT_LOCK:
+        return _EXPORT["phase"] in ("starting", "compressing", "archiving", "converting")
+
+
+def _start_export_job(kind: str, *, force_keep_both: bool = False,
+                      force: bool = False) -> dict:
+    """Spawn an export/compression job in a daemon thread. kind:
+      'compress' → run_world_export with the selected format (resumable post-pass).
+      'convert'  → convert_linear_world: every region/*.linear back to vanilla .mca.
+    Returns a small dict describing what started. Refuses to start a second job while one
+    is in flight. Honours the safety contract + resumable manifest in src/export.py.
+    Safeguards: E (refuse if THIS world is open in Minecraft), B (force keep-both when asked),
+    A (disk preflight on compress). `force` overrides E + A (the op is safe-by-verify)."""
+    s = PROJECT.settings()
+    world = master_world_path(create=False)
+    if not (world / "region").is_dir():
+        return {"ok": False, "error": "no world to export yet"}
+    if _export_in_flight():
+        return {"ok": False, "error": "an export is already running"}
+    if not force and _world_locked(world):   # safeguard E: this world's session.lock is held
+        return {"ok": False, "locked": True,
+                "error": "This world is open in Minecraft — close it first (its files are "
+                "locked). If it's not actually open, retry to force."}
+
+    keep_both = bool(s.get("export_keep_both", True))
+    stream_and_free = bool(s.get("export_stream_and_free", False))
+    if stream_and_free:
+        keep_both = False   # low-disk: free each raw after its compressed copy verifies
+    if force_keep_both:     # safeguard B: never delete raw of an incomplete/failed world
+        keep_both = True
+        stream_and_free = False
+    # Separate-folder linear builds a sibling world and never touches the source: keep-both
+    # is implicit, and delete-raw / stream-free do not apply.
+    _separate_linear = (kind == "compress"
+                        and _export_destination(s) == "separate"
+                        and str(s.get("export_format", "none") or "none").strip().lower() == exportmod.FMT_LINEAR)
+    if _separate_linear:
+        keep_both = True
+        stream_and_free = False
+
+    # Safeguard A: disk preflight before a compress (convert shrinks, so it's skipped).
+    if kind == "compress" and not force:
+        _fmt = str(s.get("export_format", "none") or "none").strip().lower()
+        if _fmt in exportmod.VALID_FORMATS and _fmt != "none":
+            pf = exportmod.preflight_export(world, _fmt, keep_both=keep_both)
+            if not pf["enough"]:
+                return {"ok": False, "error":
+                        f"low disk: ~{pf['needed'] // 1048576} MB needed, "
+                        f"{(pf['free'] or 0) // 1048576} MB free. Turn on "
+                        f"'Delete raw after compressing', free space, or retry to force.",
+                        "preflight": {k: pf[k] for k in
+                                      ("raw", "out", "additional", "needed", "free", "enough")}}
+
+    def _on_prog(p):
+        with _EXPORT_LOCK:
+            _EXPORT.update(format=p.format, phase=p.phase, total=p.total, done=p.done,
+                           failed=p.failed, raw_mb=round(p.raw_bytes / 1048576, 2),
+                           out_mb=round(p.out_bytes / 1048576, 2),
+                           ratio=round(p.ratio, 2), message=p.message)
+
+    if kind == "convert":
+        def _worker():
+            with _EXPORT_LOCK:
+                _EXPORT.update(format="linear2mca", phase="starting", total=0, done=0,
+                               failed=0, raw_mb=0.0, out_mb=0.0, ratio=0.0, message="", out_name=None)
+            log(f"[Export] linear→mca: starting (keep_both={keep_both})")
+            try:
+                prog = exportmod.convert_linear_world(
+                    world, keep_both=keep_both,
+                    workers=s.get("export_compression_workers", 0), on_progress=_on_prog)
+                with _EXPORT_LOCK:
+                    _EXPORT["out_name"] = f"{prog.done} .mca region(s)"
+                log(f"[Export] linear→mca: {prog.phase} — {prog.done}/{prog.total} ok, {prog.failed} failed")
+            except Exception as e:
+                with _EXPORT_LOCK:
+                    _EXPORT.update(phase="error", message=str(e))
+                log(f"[Export] linear→mca: ERROR {e}")
+        threading.Thread(target=_worker, daemon=True, name="export-convert").start()
+        return {"ok": True, "kind": "convert"}
+
+    # kind == 'compress'
+    fmt = str(s.get("export_format", "none") or "none").strip().lower()
+    if fmt == "none" or fmt not in exportmod.VALID_FORMATS:
+        return {"ok": False, "error": "export format is None — nothing to compress"}
+    if fmt == exportmod.FMT_BLINEAR and exportmod.resolve_region_converter() is None:
+        return {"ok": False, "error":
+                "B_Linear needs the region-convert binary — none found for this OS in "
+                "region-convert/bin (or run region-convert/build.sh|build.ps1)."}
+
+    # Separate-folder builds a sibling world, leaving the source untouched. linear honours the
+    # destination toggle; blinear is ALWAYS a sibling "<name> [BLinear]" world (the Rust tool
+    # only writes to --output). keep-both is implicit for both (the original is never modified).
+    dest_world = None
+    if fmt == exportmod.FMT_BLINEAR:
+        dest_world = world.parent / exportmod.format_folder_name(world.name, fmt)
+    elif _export_destination(s) == "separate" and fmt == exportmod.FMT_LINEAR:
+        dest_world = world.parent / exportmod.format_folder_name(world.name, fmt)
+    blinear_variant = str(s.get("export_blinear_variant", "v3") or "v3").strip().lower()
+    if blinear_variant not in ("v2", "v3"):
+        blinear_variant = "v3"
+    # What to do with the master .mca after the [BLinear] world verifies.
+    blinear_keep = str(s.get("export_blinear_keep", "both") or "both").strip().lower()
+    if blinear_keep not in ("both", "blinear_only", "archive_mca"):
+        blinear_keep = "both"
+    if force_keep_both:        # safeguard B: a failed/partial world keeps its raw .mca
+        blinear_keep = "both"
+
+    def _worker():
+        nworkers = exportmod.resolve_workers(s.get("export_compression_workers", 0))
+        with _EXPORT_LOCK:
+            _EXPORT.update(format=fmt, phase="starting", total=0, done=0, failed=0,
+                           raw_mb=0.0, out_mb=0.0, ratio=0.0, message="", out_name=None)
+        _dest_note = f", -> {dest_world.name}/" if dest_world else ""
+        log(f"[Export] {fmt}: post-pass starting (workers={nworkers}, keep_both={keep_both}{_dest_note})")
+        try:
+            prog = exportmod.run_world_export(
+                world, fmt,
+                level=s.get("export_level", 0),
+                workers=s.get("export_compression_workers", 0),
+                keep_both=keep_both, stream_and_free=stream_and_free,
+                dest_world=dest_world, blinear_variant=blinear_variant,
+                on_progress=_on_prog)
+            if fmt == exportmod.FMT_ZIP:
+                out_name = world.name + ".zip"
+            elif fmt == exportmod.FMT_TARZST:
+                out_name = world.name + ".tar.zst"
+            elif fmt == exportmod.FMT_BLINEAR:
+                out_name = f"{prog.done} .b_linear region(s) -> {dest_world.name}/"
+            elif dest_world is not None:
+                out_name = f"{prog.done} .linear region(s) -> {dest_world.name}/"
+            else:
+                out_name = f"{prog.done} .linear region(s)"
+            # After B_Linear VERIFIES, apply the keep-mode to the master .mca. Never runs on a
+            # failed/partial blinear (prog.phase != done) — the .mca is only touched once the
+            # [BLinear] world (and, for archive_mca, the zip) is proven good.
+            if fmt == exportmod.FMT_BLINEAR and prog.phase == "done" and blinear_keep != "both":
+                if blinear_keep == "blinear_only":
+                    freed = exportmod._free_world_raws(world)
+                    out_name += f" · deleted {freed} master .mca (B_Linear only)"
+                    log(f"[Export] blinear keep=blinear_only — removed {freed} master .mca")
+                elif blinear_keep == "archive_mca":
+                    log("[Export] blinear keep=archive_mca — zipping master .mca then freeing")
+                    zprog = exportmod.run_world_export(
+                        world, exportmod.FMT_ZIP, level=6,
+                        workers=s.get("export_compression_workers", 0),
+                        keep_both=False, on_progress=_on_prog)   # builds <name>.zip + frees .mca on verify
+                    if zprog.phase == "done":
+                        out_name += f" · archived .mca -> {world.name}.zip"
+                    else:
+                        out_name += " · .mca archive FAILED, kept .mca"
+                        log(f"[Export] blinear archive_mca: zip {zprog.phase} {zprog.message}")
+            with _EXPORT_LOCK:
+                _EXPORT["out_name"] = out_name
+            log(f"[Export] {fmt}: {prog.phase} — {prog.done}/{prog.total} ok, "
+                f"{prog.failed} failed, {prog.ratio:.2f}x → {out_name}")
+        except Exception as e:
+            with _EXPORT_LOCK:
+                _EXPORT.update(phase="error", message=str(e))
+            log(f"[Export] {fmt}: ERROR {e}")
+    threading.Thread(target=_worker, daemon=True, name="export-pass").start()
+    return {"ok": True, "kind": "compress", "format": fmt,
+            "dest": (dest_world.name if dest_world else None)}
+
+
+def _maybe_run_export() -> None:
+    """Once per finished run: if a streaming-overlap session is live, finalize it (then a
+    cheap idempotent linear sweep catches any straggler); otherwise run the post-pass. A run
+    with any failed cell forces keep-both (safeguard B) so an incomplete world's raw survives."""
+    s = PROJECT.settings()
+    fmt = str(s.get("export_format", "none") or "none").strip().lower()
+    with _STREAM_LOCK:
+        has_session = _STREAM["session"] is not None
+    if fmt == "none" or fmt not in exportmod.VALID_FORMATS:
+        if has_session:
+            threading.Thread(target=_finish_stream_session, daemon=True, name="export-finish").start()
+        return
+    with _RUN_LOCK:
+        run_id = _RUN.get("started")
+    if _EXPORT_STARTED.get("run") == run_id and not has_session:
+        return   # already exported this run
+    _EXPORT_STARTED["run"] = run_id
+    force_keep = _run_had_failures()
+    if force_keep:
+        log("[Export] run had failures — forcing keep-both so the raw world survives (safeguard B)")
+
+    if has_session:
+        def _finish():
+            _finish_stream_session()
+            if fmt == exportmod.FMT_LINEAR:
+                # idempotent sweep: compress any region the stream missed (manifest skips done)
+                _start_export_job("compress", force_keep_both=force_keep, force=True)
+        threading.Thread(target=_finish, daemon=True, name="export-finish").start()
+        return
+    _start_export_job("compress", force_keep_both=force_keep)
 
 
 def _on_complete(job, ok, err):
@@ -1480,6 +1909,7 @@ def _on_complete(job, ok, err):
             run_done = True
     if run_done:
         _write_run_report()   # benchmark JSON + HTML into the world folder (best-effort)
+        _maybe_run_export()   # compress/export the finished world if a format is selected
 
 
 POOL.configure(_runner, _on_complete)
@@ -1724,6 +2154,53 @@ def api_open_folder():
         return jsonify({"ok": False, "error": str(ex), "path": str(target)}), 200
 
 
+@app.route("/api/export/run", methods=["POST"])
+def api_export_run():
+    """Manually run (or RESUME) the compression export on the current world with the saved
+    settings. Resumable: the manifest skips already-compressed regions. Useful after a kill
+    or to compress an already-generated world without re-generating. Body {force:true}
+    overrides the disk preflight."""
+    force = bool((request.json or {}).get("force"))
+    return jsonify(_start_export_job("compress", force=force))
+
+
+@app.route("/api/export/convert", methods=["POST"])
+def api_export_convert():
+    """Convert the current world's region/*.linear back to vanilla .mca (server world →
+    single-player). Round-trip verified per region; .linear kept unless keep_both is off.
+    Body {force:true} overrides the world-open (session.lock) guard."""
+    force = bool((request.json or {}).get("force"))
+    return jsonify(_start_export_job("convert", force=force))
+
+
+@app.route("/api/export/reveal", methods=["POST"])
+def api_export_reveal():
+    """Open the folder that holds the world + its archive, selecting the archive file on
+    Windows if it exists, so the user can grab the .zip/.tar.zst to share."""
+    world = master_world_path(create=False)
+    folder = world.parent if world.parent.exists() else PROJECT.root
+    archive = None
+    for ext in (".zip", ".tar.zst"):
+        cand = world.parent / (world.name + ext)
+        if cand.exists():
+            archive = cand
+            break
+    try:
+        if sys.platform == "win32" and archive is not None:
+            subprocess.Popen(["explorer", "/select,", str(archive)])
+        elif sys.platform == "win32":
+            os.startfile(str(folder))   # type: ignore[attr-defined]  # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(archive)] if archive else ["open", str(folder)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder)])
+        return jsonify({"ok": True, "folder": str(folder),
+                        "archive": str(archive) if archive else None})
+    except Exception as ex:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(ex), "folder": str(folder),
+                        "archive": str(archive) if archive else None}), 200
+
+
 @app.route("/api/log")
 def api_log():
     return jsonify({"log": _LOG[-400:]})
@@ -1811,12 +2288,45 @@ def api_settings():
         patch["cpu_target_pct"] = max(10, min(95, int(patch["cpu_target_pct"])))
     if patch.get("min_threads_per_worker") is not None:
         patch["min_threads_per_worker"] = max(1, min(8, int(patch["min_threads_per_worker"])))
+    if patch.get("cave_biome_amounts") is not None:
+        raw = patch["cave_biome_amounts"] if isinstance(patch["cave_biome_amounts"], dict) else {}
+        clean = {}
+        for name in arnis_cmd.CAVE_BIOMES:
+            try:
+                clean[name] = max(0, min(200, int(raw.get(name, 100))))
+            except (TypeError, ValueError):
+                clean[name] = 100
+        patch["cave_biome_amounts"] = clean
     if patch.get("cpu_stagger_seconds") is not None:
         patch["cpu_stagger_seconds"] = max(1, min(4, int(round(float(patch["cpu_stagger_seconds"])))))
     if patch.get("cpu_stagger_enabled") is not None:
         patch["cpu_stagger_enabled"] = bool(patch["cpu_stagger_enabled"])
     if patch.get("cpu_stagger_adaptive") is not None:
         patch["cpu_stagger_adaptive"] = bool(patch["cpu_stagger_adaptive"])
+    # Export / compression. Format is validated against the known set; level 0-22 (0=auto);
+    # compression workers 0-256 (0=auto=cores-1, INDEPENDENT of max_workers by contract).
+    if patch.get("export_format") is not None:
+        ef = str(patch["export_format"]).strip().lower()
+        patch["export_format"] = ef if ef in exportmod.VALID_FORMATS else "none"
+    if patch.get("export_level") is not None:
+        patch["export_level"] = max(0, min(22, int(patch["export_level"])))
+    if patch.get("export_compression_workers") is not None:
+        patch["export_compression_workers"] = max(0, min(256, int(patch["export_compression_workers"])))
+    if patch.get("export_keep_both") is not None:
+        patch["export_keep_both"] = bool(patch["export_keep_both"])
+    if patch.get("export_stream_and_free") is not None:
+        patch["export_stream_and_free"] = bool(patch["export_stream_and_free"])
+    if patch.get("export_overlap") is not None:
+        patch["export_overlap"] = bool(patch["export_overlap"])
+    if patch.get("export_destination") is not None:
+        ed = str(patch["export_destination"]).strip().lower()
+        patch["export_destination"] = "separate" if ed == "separate" else "in_place"
+    if patch.get("export_blinear_variant") is not None:
+        bv = str(patch["export_blinear_variant"]).strip().lower()
+        patch["export_blinear_variant"] = bv if bv in ("v2", "v3") else "v3"
+    if patch.get("export_blinear_keep") is not None:
+        bk = str(patch["export_blinear_keep"]).strip().lower()
+        patch["export_blinear_keep"] = bk if bk in ("both", "blinear_only", "archive_mca") else "both"
     s = PROJECT.update_settings(patch)
     POOL.set_max_workers(int(s.get("max_workers") or 4))
     # Stagger off => 0s (all workers start at once).
@@ -2160,6 +2670,7 @@ def _submit_cells(cells: list[dict], osm_files: dict | None = None,
         _RUN.update(started=started, ended=None, total=len(cells), done=0, failed=0,
                     est_regions=est_regions, est_mb=est_regions * MB_PER_REGION,
                     actual_mb=None, phase="generating")
+    _reset_export_status()   # a fresh run resets the export progress + the one-pass guard
     queued = []
     for c in cells:
         ck = c["cell_key"]
@@ -2748,6 +3259,20 @@ def api_status():
     with _CELL_HEALTH_LOCK:
         suspects = {k: v for k, v in _CELL_HEALTH.items() if v.get("suspect")}
         cell_fail = dict(_CELL_FAIL)
+    with _EXPORT_LOCK:
+        export = dict(_EXPORT)
+    with _MCSERVER_LOCK:
+        mcstat = {k: v for k, v in _MCSERVER.items() if k != "plan"}
+        mcstat["console"] = list(mcstat["console"])
+        p = _MCSERVER_PROC.get("proc")
+        mcstat["running"] = bool(p and p.alive())
+    # per-project server profile so the card re-fills after a reload/restart
+    _st = PROJECT.settings()
+    mcstat["profile"] = {k: _st.get(k) for k in
+                         ("server_version", "server_mode", "server_dir", "server_world_src",
+                          "server_extras", "server_voxy", "server_auto_restart",
+                          "server_ram_gb", "server_cpu_pct", "server_backup_first")}
+    mcstat["machine"] = _machine_specs()
     return jsonify({
         "workers": states,
         "queue_size": POOL.queue_size(),
@@ -2758,6 +3283,8 @@ def api_status():
         "prefetch": prefetch,
         "cell_health": suspects,
         "stats": stats,
+        "export": export,
+        "mcserver": mcstat,
         "report_ready": _report_exists(),
         "log": _LOG[-150:],
     })
@@ -2824,6 +3351,26 @@ def _save_drive_dir() -> str:
     return (PROJECT.settings().get("master_world_dir") or "").strip() or str(PROJECT.root)
 
 
+def _existing_dir(path: str) -> "Path | None":
+    """Nearest EXISTING directory at or above `path`. shutil.disk_usage raises on a path that
+    doesn't exist yet (a custom save folder not created, a deep world subpath), so climb to
+    the first real ancestor to keep the disk gauge reporting the right drive. Returns None
+    only if the whole drive is offline/unreachable."""
+    if not path:
+        return None
+    try:
+        p = Path(os.path.abspath(os.path.expanduser(path)))
+    except Exception:  # noqa: BLE001
+        return None
+    while True:
+        if p.exists():
+            return p
+        parent = p.parent
+        if parent == p:        # reached the drive root and it doesn't exist → offline
+            return None
+        p = parent
+
+
 # Overall CPU% from a dedicated background sampler. psutil.cpu_percent(interval=1) blocks 1s for an
 # ACCURATE rolling system average; calling it with interval=None from the request path measured the
 # sub-second gap between two polls under the threaded server, which read ~0%. The sampler stores the
@@ -2865,11 +3412,15 @@ def _sys_stats() -> dict:
     except Exception:
         pass
     try:
-        d = _save_drive_dir()
-        du = shutil.disk_usage(d)                      # decimal GB to match how drives report
-        out["disk_free_gb"] = round(du.free / 1e9, 1)
-        out["disk_total_gb"] = round(du.total / 1e9, 1)
-        out["drive"] = os.path.splitdrive(os.path.abspath(d))[0] or d
+        raw = _save_drive_dir()
+        out["drive"] = os.path.splitdrive(os.path.abspath(os.path.expanduser(raw)))[0] or raw
+        d = _existing_dir(raw)                          # nearest existing ancestor
+        if d is not None:
+            du = shutil.disk_usage(str(d))              # decimal GB to match how drives report
+            out["disk_free_gb"] = round(du.free / 1e9, 1)
+            out["disk_total_gb"] = round(du.total / 1e9, 1)
+        else:
+            out["disk_offline"] = True                  # configured save drive is unreachable
     except Exception:
         pass
     return out
@@ -3072,6 +3623,577 @@ def api_border_export():
         return jsonify({"ok": True, **info, "min_y": min_y, "max_y": max_y})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
+
+
+# ── cave biome zone-map preview ───────────────────────────────────────────────
+
+@app.route("/api/cavemap", methods=["POST"])
+def api_cavemap():
+    """Render the cave BIOME ZONE layout for the drawn selection through the arnis
+    fork's --cave-zone-map mode (the exact zone picker + seed + --cave-biomes values
+    generation will use), and return measured per-theme percentages + overlay bounds.
+    Fast (no worldgen); runs synchronously."""
+    origin = PROJECT.origin()
+    if origin.get("lat") is None:
+        return jsonify({"ok": False, "error": "set the origin first"}), 400
+    exe = resolve_arnis_exe()
+    if not exe:
+        return jsonify({"ok": False, "error": "arnis binary not found"}), 400
+    st = PROJECT.settings()
+    sel = PROJECT.load_selection()
+    if sel:
+        b = sel["bbox"]
+    else:
+        # no drawn selection: cover the PLANNED/merged cells instead
+        grid = PROJECT.load_grid()
+        scale_f = float(st.get("scale", 1.0) or 1.0)
+        b = None
+        for key in grid:
+            parts = key.split(",")
+            if len(parts) != 3:
+                continue
+            cb = cell_bbox(int(parts[0]), int(parts[1]), int(parts[2]),
+                           origin["lat"], origin["lon"], scale_f)
+            if b is None:
+                b = dict(cb)
+            else:
+                b["south"] = min(b["south"], cb["south"])
+                b["west"] = min(b["west"], cb["west"])
+                b["north"] = max(b["north"], cb["north"])
+                b["east"] = max(b["east"], cb["east"])
+        if b is None:
+            return jsonify({"ok": False, "error": "draw a selection (or plan cells) first"}), 400
+    seed = int((PROJECT.load().get("elevation") or {}).get("seed", 1) or 1)
+    out_dir = Path(PROJECT.root) / "cavemap"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    prefix = out_dir / "zones"
+    cmd = [str(exe),
+           "--bbox", f"{b['south']},{b['west']},{b['north']},{b['east']}",
+           "--scale", str(float(st.get("scale", 1.0) or 1.0)),
+           "--master-origin-lat", str(origin["lat"]),
+           "--master-origin-lng", str(origin["lon"]),
+           "--tile-invariant-rendering", str(seed),
+           "--cave-zone-map", str(prefix)]
+    # square size in blocks (one zone sample per square, drawn as a crisp cell);
+    # 0/absent = fine per-block sampling
+    try:
+        step = int((request.get_json(silent=True) or {}).get("step") or 0)
+    except (TypeError, ValueError):
+        step = 0
+    if step > 0:
+        cmd += ["--cave-zone-map-step", str(max(4, min(512, step)))]
+    spec = arnis_cmd.cave_biomes_spec(st)
+    if spec:
+        cmd += ["--cave-biomes", spec]
+    try:
+        pr = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=180)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return jsonify({"ok": False, "error": f"zone-map run failed: {e}"}), 400
+    stats = None
+    for line in (pr.stdout or "").splitlines():
+        if line.startswith("ZONEMAP "):
+            try:
+                stats = json.loads(line[len("ZONEMAP "):])
+            except ValueError:
+                pass
+    if pr.returncode != 0 or stats is None:
+        tail = ((pr.stderr or "") + (pr.stdout or ""))[-300:]
+        return jsonify({"ok": False, "error": f"zone-map failed (rc={pr.returncode}): {tail}"}), 400
+    return jsonify({"ok": True, "stats": stats,
+                    "bounds": [[b["south"], b["west"]], [b["north"], b["east"]]],
+                    "images": {"upper": "/api/cavemap/img/upper",
+                               "deep": "/api/cavemap/img/deep"}})
+
+
+@app.route("/api/cavemap/img/<tag>")
+def api_cavemap_img(tag):
+    if tag not in ("upper", "deep"):
+        return jsonify({"ok": False, "error": "tag must be upper|deep"}), 400
+    p = Path(PROJECT.root) / "cavemap" / f"zones-{tag}.png"
+    if not p.is_file():
+        return jsonify({"ok": False, "error": "no zone map rendered yet"}), 404
+    resp = send_file(str(p), mimetype="image/png")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+# ── one-click Leaf server setup ───────────────────────────────────────────────
+# Turns the finished world into a ready-to-run Leaf server. Every step that
+# downloads or executes anything checks an explicit confirm flag SERVER-SIDE;
+# EULA acceptance is its own deliberate action. See src/mcserver.py.
+
+def _mcs_server_dir() -> Path:
+    eff = _mcs_effective_server()
+    if eff is not None:
+        return eff[0]
+    with _MCSERVER_LOCK:
+        d = _MCSERVER.get("server_dir")
+    if d:
+        return Path(d)
+    return Path(PROJECT.root) / "server" / "leaf"
+
+
+def _mcs_effective_server() -> tuple[Path, str] | None:
+    """(server_dir, target_world) from live state, falling back to the saved per-project
+    profile — so Pre-render / Backup / Start work on an already-staged server right after
+    a Meld restart, without forcing a re-Stage (which would re-copy the world)."""
+    with _MCSERVER_LOCK:
+        sdir, tw = _MCSERVER.get("server_dir"), _MCSERVER.get("target_world")
+    if sdir and tw:
+        return Path(sdir), tw
+    st = PROJECT.settings()
+    custom = (st.get("server_dir") or "").strip()
+    ver = (st.get("server_version") or "").strip()
+    cand = Path(custom) if custom else (
+        Path(PROJECT.root) / "server" / f"leaf-{ver}" if ver else None)
+    if not cand or not cand.is_dir():
+        return None
+    mode = st.get("server_mode") or "main"
+    tw = "world" if mode == "main" else \
+        _safe_world_name(PROJECT.load().get("name", "Meld World")).replace(" ", "_").lower()
+    if not (cand / tw).is_dir():
+        return None
+    _mcs_set(server_dir=str(cand), target_world=tw)
+    return cand, tw
+
+
+@app.route("/api/mcserver/versions")
+def api_mcs_versions():
+    try:
+        return jsonify({"ok": True, **mcs.list_versions()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.route("/api/mcserver/plan", methods=["POST"])
+def api_mcs_plan():
+    """Dry run: resolve jar + plugins + world source for review. Downloads nothing."""
+    d = request.get_json(silent=True) or {}
+    version = str(d.get("version") or "").strip()
+    mode = "subworld" if d.get("mode") == "subworld" else "main"
+    if not version:
+        return jsonify({"ok": False, "error": "pick a version first"}), 400
+    world = master_world_path(create=False)
+    if not (world / "region").is_dir():
+        return jsonify({"ok": False, "error": "no finished world yet — generate first"}), 400
+    st = PROJECT.settings()
+    # world files + Leaf region-format are decided TOGETHER (they must agree):
+    # auto follows the Export settings; mca/linear/blinear are explicit picks.
+    choice = str(d.get("world_src") or "auto")
+    try:
+        src, fmt = mcs.pick_world_source(world, st.get("export_format", "none"),
+                                         st.get("export_destination", "in_place"), choice)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    try:
+        plan = mcs.build_plan(version, mode=mode, with_extras=bool(d.get("extras")),
+                              with_voxy=bool(d.get("voxy")))
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"resolve failed: {e}"}), 400
+    java = mcs.find_java(mcs.required_java(version))
+    _mcs_set(version=version, mode=mode, plan=plan, voxy=bool(plan.get("voxy")),
+             world_choice=choice, message="plan ready")
+    # server profile: remember the choices so re-opening the project re-fills the card
+    PROJECT.update_settings({"server_version": version, "server_mode": mode,
+                             "server_extras": bool(d.get("extras")),
+                             "server_voxy": bool(d.get("voxy")),
+                             "server_world_src": choice})
+    return jsonify({"ok": True, "plan": plan, "world_source": str(src),
+                    "region_format": fmt,
+                    "java": java,
+                    "java_required": mcs.required_java(version),
+                    "java_note": None if java else
+                    "No suitable Java found — install a matching JRE (e.g. via the Modrinth app) "
+                    "and re-plan. Meld never downloads a Java runtime itself."})
+
+
+@app.route("/api/mcserver/stage", methods=["POST"])
+def api_mcs_stage():
+    """Scaffold the server dir + copy the world in (configs, eula stub, start scripts)."""
+    d = request.get_json(silent=True) or {}
+    with _MCSERVER_LOCK:
+        plan, version, mode = _MCSERVER.get("plan"), _MCSERVER.get("version"), _MCSERVER.get("mode")
+        choice = _MCSERVER.get("world_choice") or "auto"
+    if not plan:
+        return jsonify({"ok": False, "error": "run Plan first"}), 400
+    st = PROJECT.settings()
+    world = master_world_path(create=False)
+    try:
+        src, fmt = mcs.pick_world_source(world, st.get("export_format", "none"),
+                                         st.get("export_destination", "in_place"), choice)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    java = mcs.find_java(mcs.required_java(version)) or {"exe": "java"}
+    # user-chosen server folder (Browse… in the UI); blank = inside the project.
+    custom = str(d.get("dir") or "").strip()
+    sdir = Path(custom) if custom else Path(PROJECT.root) / "server" / f"leaf-{version}"
+    name = _safe_world_name(PROJECT.load().get("name", "Meld World")).replace(" ", "_").lower()
+    port = int(d.get("port") or 25565)
+    heap, cpu_n = _mcs_resources()
+    try:
+        info = mcs.stage_server(
+            sdir, src, mode=mode, world_name=name,
+            region_format=fmt,
+            motd=f"Meld — {PROJECT.load().get('name', 'Meld World')} (Leaf {version})",
+            port=port, jar_name=plan["jar"]["jar_name"], java_exe=java["exe"],
+            with_voxy=bool(plan.get("voxy")), heap=heap, cpu_count=cpu_n)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    _mcs_set(server_dir=str(sdir), target_world=info["target_world"], port=port,
+             phase="staged", message=f"staged at {sdir}")
+    PROJECT.update_settings({"server_dir": custom})
+    return jsonify({"ok": True, "server_dir": str(sdir), **info})
+
+
+@app.route("/api/mcserver/install", methods=["POST"])
+def api_mcs_install():
+    """Download the reviewed jar + plugins. Requires confirm:true (checked here, server-side)."""
+    d = request.get_json(silent=True) or {}
+    if d.get("confirm") is not True:
+        return jsonify({"ok": False, "error": "downloads require confirm:true"}), 403
+    with _MCSERVER_LOCK:
+        plan = _MCSERVER.get("plan")
+        sdir = _MCSERVER.get("server_dir")
+    if not plan or not sdir:
+        return jsonify({"ok": False, "error": "run Plan + Stage first"}), 400
+
+    def _work():
+        _mcs_set(phase="downloading", message="downloading jar + plugins…")
+        try:
+            written = mcs.install_plan(Path(sdir), plan, on_progress=lambda m: _mcs_set(message=m))
+            _mcs_set(phase="installed", message=f"downloaded {len(written)} files (hash-verified)")
+        except Exception as e:  # noqa: BLE001
+            _mcs_set(phase="error", message=f"download failed: {e}")
+
+    threading.Thread(target=_work, daemon=True, name="mcserver-install").start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/mcserver/eula", methods=["POST"])
+def api_mcs_eula():
+    """Accept Mojang's EULA — separate, deliberate action; never bundled with anything else."""
+    d = request.get_json(silent=True) or {}
+    if d.get("accept") is not True:
+        return jsonify({"ok": False, "error": "requires accept:true"}), 403
+    try:
+        mcs.accept_eula(_mcs_server_dir(), True)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    _mcs_set(eula=True, message="EULA accepted")
+    return jsonify({"ok": True})
+
+
+def _mcs_launch() -> tuple[bool, str | None]:
+    """Preflight + launch from the current _MCSERVER state. Shared by the Start
+    route and the crash watchdog's auto-restart (which re-runs the same checks)."""
+    with _MCSERVER_LOCK:
+        plan, sdir, mode, tw, port = (_MCSERVER.get("plan"), _MCSERVER.get("server_dir"),
+                                      _MCSERVER.get("mode"), _MCSERVER.get("target_world"),
+                                      _MCSERVER.get("port", 25565))
+        version = _MCSERVER.get("version")
+    p = _MCSERVER_PROC.get("proc")
+    if p and p.alive():
+        return False, "server already running"
+    if not plan:
+        return False, "run Plan + Stage + Download first"
+    if not sdir or not tw:
+        eff = _mcs_effective_server()   # already-staged server surviving a Meld restart
+        if eff is None:
+            return False, "run Plan + Stage + Download first"
+        sdir, tw = str(eff[0]), eff[1]
+    sdir_p = Path(sdir)
+    eula = (sdir_p / "eula.txt").read_text(encoding="utf-8", errors="replace") if (sdir_p / "eula.txt").exists() else ""
+    if "eula=true" not in eula:
+        return False, "EULA not accepted yet"
+    if not (sdir_p / plan["jar"]["jar_name"]).is_file():
+        return False, "server jar missing — run Download first"
+    if not mcs.port_free(port):
+        return False, f"port {port} is already in use"
+    java = mcs.find_java(mcs.required_java(version))
+    if not java:
+        return False, "no suitable Java runtime found"
+
+    border_dir = Path(PROJECT.root) / "border"
+
+    def _on_ready():
+        # first-start automation, all via the server's own console (stdin) — no RCON:
+        # mount the sub-world through Multiverse's supported import path, push the
+        # border exports into the live plugin dirs, reload them.
+        try:
+            pushed = mcs.push_border_files(sdir_p, border_dir, tw or "world")
+            proc = _MCSERVER_PROC.get("proc")
+            if proc and proc.alive():
+                for cmd in mcs.first_start_commands(mode, tw or "world", bool(pushed)):
+                    proc.send(cmd)
+                    time.sleep(1.0)
+            _mcs_set(message="ready" + (f" · pushed: {', '.join(pushed)}" if pushed else ""))
+        except Exception as e:  # noqa: BLE001
+            _mcs_set(message=f"ready, but post-start automation failed: {e}")
+
+    def _on_exit(code, user_stop):
+        # crash watchdog: a user stop is reported by the stop route; anything else
+        # is a crash — auto-restart (if enabled) with a 3-per-10-min brake.
+        _MCSERVER_PROC["proc"] = None
+        if user_stop:
+            return
+        with _MCSERVER_LOCK:
+            auto = _MCSERVER.get("auto_restart", True)
+        now = time.time()
+        _MCSERVER_RESTARTS[:] = [t for t in _MCSERVER_RESTARTS if now - t < 600]
+        if not auto:
+            _mcs_set(phase="crashed", running=False,
+                     message=f"server exited unexpectedly (code {code}) — auto-restart is off")
+            return
+        if len(_MCSERVER_RESTARTS) >= 3:
+            _mcs_set(phase="crashed", running=False,
+                     message=f"server exited unexpectedly (code {code}) — restart brake hit "
+                             "(3 crashes in 10 min); check the console/logs, then Start manually")
+            return
+        _MCSERVER_RESTARTS.append(now)
+        _mcs_set(phase="restarting", running=False, restarts=len(_MCSERVER_RESTARTS),
+                 message=f"server exited unexpectedly (code {code}) — auto-restarting "
+                         f"({len(_MCSERVER_RESTARTS)}/3 in 10 min)…")
+        time.sleep(3.0)
+        ok, err = _mcs_launch()
+        if not ok:
+            _mcs_set(phase="crashed", running=False, message=f"auto-restart failed: {err}")
+
+    heap, cpu_n = _mcs_resources()
+    try:
+        # keep the manual start scripts in sync with the knobs used for this launch
+        mcs.write_start_scripts(sdir_p, plan["jar"]["jar_name"], java["exe"],
+                                xms=heap, xmx=heap, cpu_count=cpu_n)
+    except OSError:
+        pass
+    try:
+        proc = mcs.ServerProc(sdir_p, java["exe"], plan["jar"]["jar_name"],
+                              on_line=_mcs_console, on_ready=_on_ready, on_exit=_on_exit,
+                              xms=heap, xmx=heap, cpu_count=cpu_n)
+    except Exception as e:  # noqa: BLE001
+        return False, f"launch failed: {e}"
+    _MCSERVER_PROC["proc"] = proc
+    _mcs_set(phase="running", running=True,
+             message=f"starting… (localhost:{port}, {heap} heap, {cpu_n} cores)")
+    return True, None
+
+
+@app.route("/api/mcserver/start", methods=["POST"])
+def api_mcs_start():
+    """Launch the staged server (requires confirm:true). Runs downloaded code —
+    only after the user explicitly confirmed both the install and this start.
+    The FIRST start also zips the staged world to backups/ before launching."""
+    d = request.get_json(silent=True) or {}
+    if d.get("confirm") is not True:
+        return jsonify({"ok": False, "error": "starting the server requires confirm:true"}), 403
+    with _MCSERVER_LOCK:
+        sdir, tw = _MCSERVER.get("server_dir"), _MCSERVER.get("target_world")
+    marker = Path(sdir) / ".meld-first-start-done" if sdir else None
+    backup_first = PROJECT.settings().get("server_backup_first", True)
+    if marker is not None and sdir and not marker.exists():
+        # first start happened — record it even when the backup is skipped, so
+        # enabling the toggle later never backs up an already-played world
+        if not backup_first:
+            try:
+                marker.write_text("backup: skipped (server_backup_first off)\n", encoding="utf-8")
+            except OSError:
+                pass
+    if (backup_first and marker is not None and sdir and not marker.exists()
+            and (Path(sdir) / (tw or "world")).is_dir()):
+        def _backup_then_launch():
+            try:
+                _mcs_set(phase="backing-up", message="first start — zipping a world backup…")
+                dest = mcs.backup_world(Path(sdir), tw or "world",
+                                        on_progress=lambda i, n: _mcs_set(
+                                            message=f"first start — backing up world ({i}/{n} files)…"))
+                marker.write_text("backup: " + dest.name + "\n", encoding="utf-8")
+                _mcs_set(message=f"backup done ({dest.name}) — starting…")
+            except Exception as e:  # noqa: BLE001
+                # the master world in the project is the true source; don't block on a failed zip
+                _mcs_set(message=f"backup failed ({e}) — starting anyway (master world is intact)")
+            ok, err = _mcs_launch()
+            if not ok:
+                _mcs_set(phase="error", running=False, message=f"start failed: {err}")
+        threading.Thread(target=_backup_then_launch, daemon=True, name="mcserver-start").start()
+        return jsonify({"ok": True, "backup": True})
+    ok, err = _mcs_launch()
+    if not ok:
+        code = 403 if "EULA" in (err or "") else 400
+        return jsonify({"ok": False, "error": err}), code
+    return jsonify({"ok": True})
+
+
+@app.route("/api/mcserver/stop", methods=["POST"])
+def api_mcs_stop():
+    p = _MCSERVER_PROC.get("proc")
+    if not p or not p.alive():
+        return jsonify({"ok": False, "error": "not running"}), 400
+
+    def _work():
+        _mcs_set(phase="stopping", message="saving world + stopping…")
+        code = p.stop()
+        _mcs_set(phase="stopped", running=False, message=f"stopped (exit {code})")
+
+    threading.Thread(target=_work, daemon=True, name="mcserver-stop").start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/mcserver/cmd", methods=["POST"])
+def api_mcs_cmd():
+    """Console passthrough — type a command into the running server."""
+    d = request.get_json(silent=True) or {}
+    cmd = str(d.get("command") or "").strip()
+    p = _MCSERVER_PROC.get("proc")
+    if not cmd:
+        return jsonify({"ok": False, "error": "empty command"}), 400
+    if not p or not p.alive():
+        return jsonify({"ok": False, "error": "not running"}), 400
+    try:
+        p.send(cmd)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.route("/api/mcserver/open", methods=["POST"])
+def api_mcs_open():
+    """Open the server folder in the OS file browser (climbs to the first existing
+    ancestor, same convention as /api/open-folder)."""
+    target = _mcs_server_dir()
+    while not target.exists() and target.parent != target:
+        target = target.parent
+    if not target.exists():
+        return jsonify({"ok": False, "error": "server folder does not exist yet — Stage first"}), 400
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(target))   # type: ignore[attr-defined]  # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(target)])
+        else:
+            subprocess.Popen(["xdg-open", str(target)])
+        return jsonify({"ok": True, "folder": str(target)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.route("/api/mcserver/backup", methods=["POST"])
+def api_mcs_backup():
+    """Zip the staged server world to backups/ on demand. Refused while the server
+    runs (a live world zips inconsistent) — stop first, or rely on the automatic
+    first-start backup."""
+    eff = _mcs_effective_server()
+    if eff is None:
+        return jsonify({"ok": False, "error": "no staged server"}), 400
+    sdir, tw = (str(eff[0]), eff[1])
+    p = _MCSERVER_PROC.get("proc")
+    if p and p.alive():
+        return jsonify({"ok": False, "error": "stop the server first — a running world zips inconsistent"}), 400
+
+    def _work():
+        try:
+            _mcs_set(message="zipping world backup…")
+            dest = mcs.backup_world(Path(sdir), tw, on_progress=lambda i, n: _mcs_set(
+                message=f"backup: {i}/{n} files…"))
+            _mcs_set(message=f"backup written: backups/{dest.name}")
+        except Exception as e:  # noqa: BLE001
+            _mcs_set(message=f"backup failed: {e}")
+
+    threading.Thread(target=_work, daemon=True, name="mcserver-backup").start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/mcserver/console")
+def api_mcs_console_tail():
+    """Light console feed for the pop-out window (avoids the full /api/status payload)."""
+    with _MCSERVER_LOCK:
+        console = list(_MCSERVER.get("console") or [])
+        phase = _MCSERVER.get("phase")
+    p = _MCSERVER_PROC.get("proc")
+    return jsonify({"ok": True, "console": console, "phase": phase,
+                    "running": bool(p and p.alive())})
+
+
+@app.route("/console")
+def console_page():
+    """Pop-out live server console — same pattern as /logs, plus a command input."""
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'><title>Meld - Server console</title>"
+        "<style>body{background:#13110d;color:#cdc3ad;margin:0;display:flex;"
+        "flex-direction:column;height:100vh;font:12px/1.5 ui-monospace,Consolas,monospace}"
+        "#head{padding:6px 12px;color:#e3a417;border-bottom:1px solid #2e2a20;flex:0 0 auto}"
+        "#wrap{flex:1 1 auto;overflow-y:auto;padding:10px 12px}"
+        "pre{white-space:pre-wrap;word-break:break-word;margin:0}"
+        "#bar{display:flex;gap:6px;padding:8px 12px;border-top:1px solid #2e2a20;flex:0 0 auto}"
+        "input{flex:1;background:#0b0a08;color:#f0e9da;border:1px solid #2e2a20;"
+        "padding:6px 8px;font:inherit;outline:none}"
+        "button{background:#e3a417;color:#241a02;border:0;padding:6px 14px;font:inherit;"
+        "font-weight:700;cursor:pointer}</style></head>"
+        "<body><div id='head'>server console - <span id='st'>...</span></div>"
+        "<div id='wrap'><pre id='c'>loading...</pre></div>"
+        "<div id='bar'><input id='cmd' placeholder='console command (e.g. mv list, save-all)'>"
+        "<button onclick='send()'>Send</button></div><script>"
+        "async function t(){try{const s=await fetch('/api/mcserver/console').then(r=>r.json());"
+        "const w=document.getElementById('wrap');"
+        "const stick=w.scrollTop+w.clientHeight>=w.scrollHeight-40;"
+        "document.getElementById('c').textContent=(s.console||[]).join('\\n')||'(no output yet)';"
+        "document.getElementById('st').textContent=(s.running?'RUNNING':'stopped')+"
+        "' ['+(s.phase||'?')+']';"
+        "if(stick)w.scrollTop=w.scrollHeight;}catch(e){}setTimeout(t,1200);}t();"
+        "async function send(){const i=document.getElementById('cmd');const v=i.value.trim();"
+        "if(!v)return;i.value='';"
+        "await fetch('/api/mcserver/cmd',{method:'POST',"
+        "headers:{'Content-Type':'application/json'},body:JSON.stringify({command:v})});}"
+        "document.getElementById('cmd').addEventListener('keydown',"
+        "e=>{if(e.key==='Enter')send();});"
+        "</script></body></html>"
+    )
+
+
+@app.route("/api/mcserver/opts", methods=["POST"])
+def api_mcs_opts():
+    """Server card knobs (auto_restart, RAM, CPU%). Persisted into the project's server
+    profile; RAM/CPU apply on the next Start (the JVM can't resize a live heap)."""
+    d = request.get_json(silent=True) or {}
+    m = _machine_specs()
+    out = {}
+    if "auto_restart" in d:
+        v = d.get("auto_restart") is True
+        _mcs_set(auto_restart=v)
+        PROJECT.update_settings({"server_auto_restart": v})
+        out["auto_restart"] = v
+    if "backup_first" in d:
+        v = d.get("backup_first") is True
+        PROJECT.update_settings({"server_backup_first": v})
+        out["backup_first"] = v
+    # voxy/extras persist the moment the checkbox flips (not only at Plan), so the
+    # choice survives reloads even when added later
+    if "voxy" in d:
+        v = d.get("voxy") is True
+        PROJECT.update_settings({"server_voxy": v})
+        out["voxy"] = v
+    if "extras" in d:
+        v = d.get("extras") is True
+        PROJECT.update_settings({"server_extras": v})
+        out["extras"] = v
+    if "ram_gb" in d:
+        try:
+            gb = int(d.get("ram_gb") or 0)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "ram_gb must be a number (0 = auto)"}), 400
+        gb = 0 if gb <= 0 else max(1, min(max(1, m["ram_gb"] - 2), gb))
+        PROJECT.update_settings({"server_ram_gb": gb})
+        out["ram_gb"] = gb
+    if "cpu_pct" in d:
+        try:
+            pct = int(d.get("cpu_pct") or 100)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "cpu_pct must be a number"}), 400
+        pct = max(10, min(100, pct))
+        PROJECT.update_settings({"server_cpu_pct": pct})
+        out["cpu_pct"] = pct
+    heap, cpu_n = _mcs_resources()
+    return jsonify({"ok": True, **out, "effective": {"heap": heap, "cpu_count": cpu_n,
+                    "machine": m}})
 
 
 if __name__ == "__main__":

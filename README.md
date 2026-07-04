@@ -6,7 +6,7 @@ Turn an OpenStreetMap selection into one seamless Minecraft world. Meld tiles th
 every tile in parallel, and melds them with no height cliffs and no seams. From a city block to a
 whole continent.
 
-&nbsp;![version](https://img.shields.io/badge/version-1.4.0-blue)
+&nbsp;![version](https://img.shields.io/badge/version-1.5.0-blue)
 &nbsp;![Minecraft](https://img.shields.io/badge/Minecraft%20Java-1.21%2B-brightgreen)
 &nbsp;![Python](https://img.shields.io/badge/Python-3.10%2B-yellow)
 &nbsp;![built on](https://img.shields.io/badge/built%20on-Arnis%20fork-orange)
@@ -45,7 +45,14 @@ into every world. Plus fast-first-build defaults (1:10 scale, buildings off), a 
 groves, five toggleable size tiers, and montane/wetland remaps), **terrain shaping** (vertical
 exaggeration to make mountains taller without widening the map, plus snow modes), and a **Border &
 zones** server tool that turns a country into WorldGuard regions, point files and a ready Skript, then
-trims the world to its border so it feels infinite but is bounded to that country.
+trims the world to its border so it feels infinite but is bounded to that country. **1.5.0 "Meld
+Depths"** goes underground and beyond the build: one **Caves** toggle carves a full vanilla-style cave
+system into every cell at generation time (caverns, tunnels, underground rivers and lakes, ores,
+geodes, eight themed cave biomes — deterministic and seam-safe across tiles), an **Export &
+compression** suite shrinks the finished world (zip / tar.zst ~1.85×, Linear ~4.85×, B_Linear via a
+bundled Rust converter), and a **one-click Leaf server** builder turns the world into a running
+localhost server — hash-verified downloads, the border plugins pre-staged, an optional Voxy streamer
+so players see the whole map on join, and a crash watchdog.
 
 **New here?** Read the [docs](https://meldmc.com/docs) or try the
 [live preview](https://meldmc.com/demo), an interactive, simulated copy of the app.
@@ -83,7 +90,10 @@ has the highlights of each release.
 | **Accurate gauges + snappier UI** (1.3.0) | CPU% from a background sampler and RAM as Task Manager's "in use"; the rail polls on your actions and idles when nothing runs, so buttons respond instantly. |
 | **Region trees** (1.4.0) | A region-aware schematic tree pack - **1,959 hand-made models across 448 species and 10 world regions**, by [paleozoey](https://www.planetminecraft.com/member/paleozoey/) - placed by location with density-driven groves, **five toggleable size tiers**, and conifer-on-mountains / mangrove-on-coast remaps. Toggle in Settings; ships with Meld. See [docs](https://meldmc.com/docs/tree-packs). |
 | **Terrain height + snow** (1.4.0) | **Vertical exaggeration** makes mountains taller without widening the map; **Snow** has four modes (off, real latitude line, top-N% peaks, or a fixed height). See [docs](https://meldmc.com/docs/terrain-and-snow). |
-| **Border & zones** (1.4.0) | Build country borders for a server: preview concentric rings on the map, export **WorldGuard regions + point files + a ready `border.sk` Skript**, and trim the world so it feels infinite but is bounded to the country. See [docs](https://meldmc.com/docs/border-zones). |
+| **Border & zones** (1.4.0) | Build country borders for a server: preview concentric rings on the map, export **WorldGuard regions + point files + a ready `border.sk` Skript** (country titles, kill-zone, fling-back wall, and per-player SkBee particle walls), and trim the world so it feels infinite but is bounded to the country. See [docs](https://meldmc.com/docs/border-zones). |
+| **Caves** (1.5.0) | One toggle carves a full **vanilla-style cave system** into every cell at generation time: caverns, tunnels, underground rivers and lakes, the vanilla ore table, geodes, and **eight themed cave biomes** — deterministic and seam-safe across tiles. Powered by the Arnis fork's `--caves` engine. See [docs](https://meldmc.com/docs/caves). |
+| **Export & compression** (1.5.0) | Ship the finished world smaller: **zip / tar.zst** archives (~1.85×, still vanilla-playable after extracting), **Linear** (~4.85×, Leaf/Folia servers), or **B_Linear** via a bundled Rust converter — with keep-modes that never delete the raw world until the new copy verifies. Plus a standalone `meldconvert.py` CLI. |
+| **Server setup** (1.5.0) | World to **running Leaf server** in five confirmed steps: plan (exact versions + hashes), stage, download (hash-verified), accept the EULA, start — with a live console, the border plugins pre-staged, format-correct world files, an optional **Voxy** streamer (players see the whole map on join), a pre-render sweep, automatic first-start backup, and a crash watchdog. Localhost by design. See [docs](https://meldmc.com/docs/server-setup). |
 | **LOD ready** | Chunk lighting is baked in, so distant chunks render lit in Distant Horizons and Voxy without flying the whole world first. |
 | **Resume and retry** | Re-run only unfinished cells after a stop, click one cell to regenerate it, and keep many worlds in your saves folder. |
 

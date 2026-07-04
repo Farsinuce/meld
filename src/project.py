@@ -39,6 +39,13 @@ def default_settings() -> dict:
         "interior": False,
         "land_cover": True,
         "fill_ground": True,   # solid floor under the surface, no holes
+        "caves": False,        # vanilla-like cave worldgen in arnis (opt-in; auto-enables fill_ground)
+        # Per-biome cave theme amounts, percent of the default share (100 = default,
+        # 0 = off, 200 ≈ double area). Passed to the fork as --cave-biomes only when
+        # something differs from 100, so the default stays byte-identical.
+        "cave_biome_amounts": {"lush": 100, "dripstone": 100, "deepdark": 100,
+                               "mushroom": 100, "ice": 100, "amethyst": 100,
+                               "volcanic": 100, "coral": 100},
         "osm_bake_workers": 4,  # offline .pbf bake parallelism; UI caps at 8, auto from CPU cores
         "disable_height_limit": False,
         # Pre-bake per-chunk lighting so LOD mods (Voxy, Distant Horizons) render
@@ -116,6 +123,71 @@ def default_settings() -> dict:
         "prune_cell_after_merge": True,   # delete per-cell subregion after merge (saves storage)
         "master_world_dir": "",            # where the merged world lives ("" = <project>/Meld World)
         "origin_corner": "nw",             # which selection corner the origin snaps to on Plan
+        # Export / compression (see src/export.py + repo MELD_EXPORT_PLAN.md). DEFAULT = none
+        # so an untouched build yields a working vanilla .mca world. Benchmarked picks:
+        #   none   raw .mca (vanilla SP, largest)
+        #   zip    universal archive, extract → vanilla SP (~1.85×)
+        #   tarzst portable tar.zst, extract → vanilla SP, good for sharing (~1.85×)
+        #   linear per-region .linear, SERVER ONLY (Leaf/Folia), smallest on disk (~4.85× @ L9)
+        "export_format": "none",
+        # Compression level: 0 = the format's sensible default (zip 6, tarzst/linear 9).
+        "export_level": 0,
+        # Compression workers. 0 = auto = logical cores − 1 (reserve one) when cores ≥ 4.
+        # INDEPENDENT of max_workers (generation) by contract — do not couple them.
+        "export_compression_workers": 0,
+        # Keep both the raw .mca world AND the compressed copy. Safe default ON: the worst
+        # tolerable failure is raw-present/compressed-missing (re-runnable).
+        "export_keep_both": True,
+        # Low-disk: delete each region's raw immediately after its compressed copy verifies
+        # (linear only), so peak disk ≈ compressed size. Off by default. Implies keep_both off.
+        "export_stream_and_free": False,
+        # Overlap compression WITH generation instead of one post-pass at the end. linear =
+        # parallel per-region streaming (real peak-disk win with delete-raw). zip/tarzst =
+        # single-writer stream-add to one container (overlaps the build; raws kept till verified).
+        # Off by default (post-pass is simplest + safest). See src/export.py.
+        "export_overlap": False,
+        # Where the compressed output lands (LINEAR only; archives are always a sibling file):
+        #   in_place — write region/*.linear next to the .mca in the SAME world folder (current).
+        #   separate — build a sibling "<name> [Linear]" world; the original stays untouched
+        #              vanilla .mca. Safest mode (never mutates/deletes the source) + the cleanest
+        #              for users: keep an MCA world to play AND a Linear world to serve, side by side.
+        # Separate-folder forces post-pass (no overlap) and keep-both is implicit (source kept).
+        "export_destination": "in_place",
+        # B_Linear (.b_linear) variant when export_format = "blinear" (Rust region-convert):
+        # v3 (default, bucketed, what Leaf B_LINEAR reads) or v2 (older). blinear always builds a
+        # sibling "<name> [BLinear]" world; the source stays untouched.
+        "export_blinear_variant": "v3",
+        # What happens to the master .mca AFTER the [BLinear] world verifies:
+        #   both         keep the .mca world too (play locally + serve)   — safe default, ~1.3× disk
+        #   blinear_only delete the master .mca (server-only)             — ~0.3× disk
+        #   archive_mca  zip the .mca then delete it (vanilla backup)     — ~0.85× disk
+        # The .mca is only ever removed AFTER the [BLinear] world (and the zip, for archive_mca)
+        # verify — never before. A failed/partial run is forced back to "both" (safeguard B).
+        "export_blinear_keep": "both",
+        # One-click Leaf server profile — the Server setup card remembers its choices
+        # per project (see server.py /api/mcserver/*). server_dir "" = the default
+        # <project>/server/leaf-<version>. Reachability is NOT stored here: staging
+        # always writes the localhost/offline profile; going public is a deliberate
+        # per-session switch.
+        "server_version": "",
+        "server_mode": "main",
+        "server_dir": "",
+        # Which world files feed the server: auto (follow Export settings) or an
+        # explicit mca / linear / blinear pick. The Leaf region-format always
+        # matches whichever files are staged.
+        "server_world_src": "auto",
+        "server_extras": False,
+        "server_voxy": False,
+        "server_auto_restart": True,
+        # JVM resources for the Leaf server. server_ram_gb 0 = auto (a quarter of the
+        # machine's RAM, 2..8 GB); the heap is always capped 2 GB below total so the OS
+        # and Meld keep headroom. server_cpu_pct maps to -XX:ActiveProcessorCount.
+        "server_ram_gb": 0,
+        "server_cpu_pct": 100,
+        # Zip the world to backups/ before the FIRST start. Big worlds make big zips
+        # (a 1 GB world ≈ a 1 GB zip — region data barely recompresses), so this is
+        # optional; the project's master world is always the untouched source anyway.
+        "server_backup_first": True,
     }
 
 
