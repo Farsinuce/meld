@@ -28,9 +28,10 @@ border plugins pre-staged, and the Border & zones Skript completing its **real p
   plus stone-variety patches, amethyst geodes, and **8 cave biome themes** (lush, dripstone,
   deep dark, mushroom, ice under mountains, amethyst, volcanic at the world floor, coral pools)
   covering about half the underground. Every pass is a pure function of (seed, position), so
-  adjacent cells carve the same caves at their shared seam. A `cave-pack/` folder of `.schem`
-  formations (ice spikes, dripstone columns, crystal clusters) decorates floors and ceilings
-  when present; caves generate fully without it.
+  adjacent cells carve the same caves at their shared seam. A bundled `cave-pack/` of 143
+  `.schem` formations (ice spikes, dripstone columns, crystal clusters, clay basins) ships
+  with Meld — like the tree packs — and decorates cave floors and ceilings automatically;
+  caves still generate fully without it.
   - **Configurable biome mix + zone preview.** With Caves on, a **Cave biomes** panel gives
     every theme its own slider (drag in 10% steps, click the % to type any exact value,
     double-click a slider to reset it; 0 = off, defaults untouched when you don't touch

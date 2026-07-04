@@ -1,0 +1,321 @@
+{
+ "pack": "cave-assets-v1",
+ "source": "ConsueCaves (PlanetMinecraft) + dripleaf",
+ "families": [
+  {
+   "name": "ice_cover",
+   "orientation": "cover",
+   "biomes": [
+    "ice"
+   ],
+   "weight": 2,
+   "files": [
+    "ice_cover_1.schem",
+    "ice_cover_2.schem",
+    "ice_cover_3.schem",
+    "ice_cover_4.schem",
+    "ice_cover_5.schem",
+    "ice_cover_6.schem"
+   ]
+  },
+  {
+   "name": "powder_snow_trap",
+   "orientation": "embed",
+   "biomes": [
+    "ice"
+   ],
+   "weight": 1,
+   "files": [
+    "powder_snow_trap_1.schem",
+    "powder_snow_trap_2.schem",
+    "powder_snow_trap_3.schem",
+    "powder_snow_trap_4.schem",
+    "powder_snow_trap_5.schem",
+    "powder_snow_trap_6.schem"
+   ]
+  },
+  {
+   "name": "ice_stalactite",
+   "orientation": "down",
+   "biomes": [
+    "ice"
+   ],
+   "weight": 3,
+   "files": [
+    "ice_stalactite_1.schem",
+    "ice_stalactite_2.schem",
+    "ice_stalactite_3.schem",
+    "ice_stalactite_4.schem",
+    "ice_stalactite_5.schem",
+    "ice_stalactite_6.schem",
+    "ice_stalactite_7.schem"
+   ]
+  },
+  {
+   "name": "ice_stalagmite",
+   "orientation": "up",
+   "biomes": [
+    "ice"
+   ],
+   "weight": 3,
+   "files": [
+    "ice_stalagmite_1.schem",
+    "ice_stalagmite_2.schem",
+    "ice_stalagmite_3.schem",
+    "ice_stalagmite_4.schem",
+    "ice_stalagmite_5.schem",
+    "ice_stalagmite_6.schem",
+    "ice_stalagmite_7.schem"
+   ],
+   "sink": 1
+  },
+  {
+   "name": "snow_cover",
+   "orientation": "cover",
+   "biomes": [
+    "ice"
+   ],
+   "weight": 2,
+   "files": [
+    "snow_cover_1.schem",
+    "snow_cover_2.schem",
+    "snow_cover_3.schem",
+    "snow_cover_4.schem",
+    "snow_cover_5.schem",
+    "snow_cover_6.schem"
+   ]
+  },
+  {
+   "name": "snow_stalactite",
+   "orientation": "down",
+   "biomes": [
+    "ice"
+   ],
+   "weight": 2,
+   "files": [
+    "snow_stalactite_1.schem",
+    "snow_stalactite_2.schem",
+    "snow_stalactite_3.schem",
+    "snow_stalactite_4.schem",
+    "snow_stalactite_5.schem",
+    "snow_stalactite_6.schem",
+    "snow_stalactite_7.schem",
+    "snow_stalactite_8.schem",
+    "snow_stalactite_9.schem"
+   ]
+  },
+  {
+   "name": "snow_pile",
+   "orientation": "up",
+   "biomes": [
+    "ice"
+   ],
+   "weight": 2,
+   "files": [
+    "snow_pile_1.schem",
+    "snow_pile_2.schem",
+    "snow_pile_3.schem",
+    "snow_pile_4.schem",
+    "snow_pile_5.schem",
+    "snow_pile_6.schem",
+    "snow_pile_7.schem",
+    "snow_pile_8.schem",
+    "snow_pile_9.schem"
+   ],
+   "sink": 1
+  },
+  {
+   "name": "amethyst_cluster_large",
+   "orientation": "any",
+   "biomes": [
+    "amethyst"
+   ],
+   "weight": 2,
+   "files": [
+    "amethyst_cluster_large_1.schem",
+    "amethyst_cluster_large_2.schem",
+    "amethyst_cluster_large_3.schem",
+    "amethyst_cluster_large_4.schem",
+    "amethyst_cluster_large_5.schem",
+    "amethyst_cluster_large_6.schem",
+    "amethyst_cluster_large_7.schem",
+    "amethyst_cluster_large_8.schem"
+   ],
+   "sink": 2
+  },
+  {
+   "name": "amethyst_cluster_medium",
+   "orientation": "up",
+   "biomes": [
+    "amethyst"
+   ],
+   "weight": 3,
+   "files": [
+    "amethyst_cluster_medium_1.schem",
+    "amethyst_cluster_medium_2.schem",
+    "amethyst_cluster_medium_3.schem",
+    "amethyst_cluster_medium_4.schem",
+    "amethyst_cluster_medium_5.schem",
+    "amethyst_cluster_medium_6.schem",
+    "amethyst_cluster_medium_7.schem",
+    "amethyst_cluster_medium_8.schem",
+    "amethyst_cluster_medium_9.schem"
+   ],
+   "sink": 1
+  },
+  {
+   "name": "amethyst_bud",
+   "orientation": "any",
+   "biomes": [
+    "amethyst"
+   ],
+   "weight": 3,
+   "files": [
+    "amethyst_bud_1.schem",
+    "amethyst_bud_2.schem",
+    "amethyst_bud_3.schem",
+    "amethyst_bud_4.schem"
+   ]
+  },
+  {
+   "name": "dripstone_stalactite_dripping",
+   "orientation": "down",
+   "biomes": [
+    "dripstone"
+   ],
+   "weight": 2,
+   "files": [
+    "dripstone_stalactite_dripping_1.schem",
+    "dripstone_stalactite_dripping_2.schem",
+    "dripstone_stalactite_dripping_3.schem",
+    "dripstone_stalactite_dripping_4.schem",
+    "dripstone_stalactite_dripping_5.schem"
+   ]
+  },
+  {
+   "name": "dripstone_stalactite_large",
+   "orientation": "down",
+   "biomes": [
+    "dripstone"
+   ],
+   "weight": 3,
+   "files": [
+    "dripstone_stalactite_large_1.schem",
+    "dripstone_stalactite_large_2.schem",
+    "dripstone_stalactite_large_3.schem",
+    "dripstone_stalactite_large_4.schem",
+    "dripstone_stalactite_large_5.schem",
+    "dripstone_stalactite_large_6.schem",
+    "dripstone_stalactite_large_7.schem",
+    "dripstone_stalactite_large_8.schem",
+    "dripstone_stalactite_large_9.schem"
+   ]
+  },
+  {
+   "name": "dripstone_stalagmite_large",
+   "orientation": "up",
+   "biomes": [
+    "dripstone"
+   ],
+   "weight": 3,
+   "files": [
+    "dripstone_stalagmite_large_1.schem",
+    "dripstone_stalagmite_large_2.schem",
+    "dripstone_stalagmite_large_3.schem",
+    "dripstone_stalagmite_large_4.schem",
+    "dripstone_stalagmite_large_5.schem",
+    "dripstone_stalagmite_large_6.schem",
+    "dripstone_stalagmite_large_7.schem",
+    "dripstone_stalagmite_large_8.schem",
+    "dripstone_stalagmite_large_9.schem"
+   ],
+   "sink": 1
+  },
+  {
+   "name": "dripstone_stalactite_small",
+   "orientation": "down",
+   "biomes": [
+    "dripstone"
+   ],
+   "weight": 3,
+   "files": [
+    "dripstone_stalactite_small_1.schem",
+    "dripstone_stalactite_small_2.schem",
+    "dripstone_stalactite_small_3.schem",
+    "dripstone_stalactite_small_4.schem",
+    "dripstone_stalactite_small_5.schem"
+   ]
+  },
+  {
+   "name": "dripstone_stalagmite_small",
+   "orientation": "up",
+   "biomes": [
+    "dripstone"
+   ],
+   "weight": 3,
+   "files": [
+    "dripstone_stalagmite_small_1.schem",
+    "dripstone_stalagmite_small_2.schem",
+    "dripstone_stalagmite_small_3.schem",
+    "dripstone_stalagmite_small_4.schem",
+    "dripstone_stalagmite_small_5.schem"
+   ]
+  },
+  {
+   "name": "lichen_patch",
+   "orientation": "cover",
+   "biomes": [
+    "any"
+   ],
+   "weight": 1,
+   "files": [
+    "lichen_patch_1.schem",
+    "lichen_patch_2.schem",
+    "lichen_patch_3.schem",
+    "lichen_patch_4.schem",
+    "lichen_patch_5.schem"
+   ]
+  },
+  {
+   "name": "pool_basin",
+   "orientation": "embed_floor",
+   "biomes": [
+    "lush"
+   ],
+   "weight": 1,
+   "files": [
+    "pool_basin_1.schem",
+    "pool_basin_2.schem",
+    "pool_basin_3.schem",
+    "pool_basin_4.schem",
+    "pool_basin_5.schem",
+    "pool_basin_6.schem",
+    "pool_basin_7.schem"
+   ]
+  },
+  {
+   "name": "dripleaf_large",
+   "orientation": "up",
+   "biomes": [
+    "lush"
+   ],
+   "weight": 2,
+   "files": [
+    "dripleaf_large_1.schem",
+    "dripleaf_large_2.schem",
+    "dripleaf_large_3.schem"
+   ]
+  },
+  {
+   "name": "dripleaf_small",
+   "orientation": "up",
+   "biomes": [
+    "lush"
+   ],
+   "weight": 2,
+   "files": [
+    "dripleaf_small_1.schem"
+   ]
+  }
+ ]
+}

@@ -47,8 +47,5 @@ tools/
 run*.log
 run*_result.json
 
-# Cave asset packs: third-party .schem collections (redistribution license unclear) and the
-# old engine's cave.json format. The fork generates full caves without them; drop your own
-# cave-pack/ next to arnis.exe to enable stamped formations.
-cave-pack/
+# The old cave engine's cave.json format (obsolete; the live pack ships in cave-pack/).
 cave-packs/
