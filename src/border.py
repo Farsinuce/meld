@@ -108,7 +108,7 @@ def _land_clip(margin_deg: float):
     return unary_union(list(_countries().values())).buffer(margin_deg, resolution=8)
 
 
-def _zone_lonlat(country_names: list[str], source: str = "osm", coast_margin_km: float = 1.0):
+def _zone_lonlat(country_names: list[str], source: str = "osm", coast_margin_km: float = 0.5):
     """Union of the named countries as one lon/lat geometry. source='osm' uses exact
     OSM admin boundaries (cached, coast clipped to shoreline + coast_margin_km of sea)
     with Natural Earth as a silent per-country fallback; source='ne' forces the bundled
@@ -239,7 +239,7 @@ def build(spec: dict, origin: dict, scale: float) -> dict:
     p_soft = max(3, min(5000, int(pts.get("soft", p_actual))))
     p_hard = max(3, min(5000, int(pts.get("hard", p_actual))))
     source = (spec.get("source") or "osm").strip().lower()
-    coast_km = float(spec.get("coast_margin_km", 1.0))
+    coast_km = float(spec.get("coast_margin_km", 0.5))
 
     zones, geoms = [], []
     for z in spec.get("zones", []):
@@ -483,28 +483,36 @@ def _split_ring_segments(rings: list, max_seg: float, cap: int) -> list:
     return out
 
 
-def _wall_var_lines(tree: str, rings: list) -> tuple[str, int, str]:
+def _wall_var_lines(tree: str, rings: list, with_sign: bool = False) -> tuple[str, int, str]:
     """Skript `set` lines that embed a ring group as two parallel vector list-vars
     ({tree::cX_Z::i} = segment start, {tree}b = segment end), bucketed by the
-    segment midpoint into _WALL_CELL cells for cheap near-player lookup.
+    segment midpoint into _WALL_CELL cells for cheap near-player lookup. with_sign
+    additionally emits {tree}s = the ring's inside-side sign (see _zone_var_lines),
+    so border.sk can tell which side of the wall a player is on.
     Returns (lines, segment count, one existing probe variable) — the probe lets the
     diagnostics test data presence directly, because Skript's `{list::*}` skips branch
     nodes that hold no value of their own, so `size of {tree::*}` always reads 0."""
-    segs = _split_ring_segments(rings, _WALL_SEG, _WALL_CAP)
+    from shapely.geometry import LinearRing
     counters: dict = {}
     lines = []
     probe = ""
-    for (ax, az), (bx, bz) in segs:
-        cx = math.floor((ax + bx) / 2 / _WALL_CELL)
-        cz = math.floor((az + bz) / 2 / _WALL_CELL)
-        key = f"c{cx}_{cz}"
-        counters[key] = counters.get(key, 0) + 1
-        i = counters[key]
-        if not probe:
-            probe = f"{{{tree}::{key}::1}}"
-        lines.append(f"    set {{{tree}::{key}::{i}}} to vector({ax:.0f}, 0, {az:.0f})")
-        lines.append(f"    set {{{tree}b::{key}::{i}}} to vector({bx:.0f}, 0, {bz:.0f})")
-    return "\n".join(lines), len(segs), probe or f"{{{tree}::none::1}}"
+    total = 0
+    for ring in rings:
+        sign = 1 if LinearRing(ring).is_ccw else -1
+        for (ax, az), (bx, bz) in _split_ring_segments([ring], _WALL_SEG, _WALL_CAP):
+            cx = math.floor((ax + bx) / 2 / _WALL_CELL)
+            cz = math.floor((az + bz) / 2 / _WALL_CELL)
+            key = f"c{cx}_{cz}"
+            counters[key] = counters.get(key, 0) + 1
+            i = counters[key]
+            if not probe:
+                probe = f"{{{tree}::{key}::1}}"
+            lines.append(f"    set {{{tree}::{key}::{i}}} to vector({ax:.0f}, 0, {az:.0f})")
+            lines.append(f"    set {{{tree}b::{key}::{i}}} to vector({bx:.0f}, 0, {bz:.0f})")
+            if with_sign:
+                lines.append(f"    set {{{tree}s::{key}::{i}}} to {sign}")
+            total += 1
+    return "\n".join(lines), total, probe or f"{{{tree}::none::1}}"
 
 
 def _split_open_segments(pts: list, max_seg: float, cap: int) -> list:
@@ -617,7 +625,7 @@ def write_skript(result: dict, opts: dict) -> str:
     ticks = max(1, int(opts.get("update_ticks", 8)))
     zone_ids = [_rid(z["spec"].get("name")) for z in result["zones"]]
     cl = result["clump"]
-    hard_lines, hard_n, hard_probe = _wall_var_lines("bhard", [cl["hard_xz"]])
+    hard_lines, hard_n, hard_probe = _wall_var_lines("bhard", [cl["hard_xz"]], with_sign=True)
     # bzone = FULL country rings, detection only (crossing action bars + fling aim).
     zone_lines, zone_n, zone_probe = _zone_var_lines(
         [((z["spec"].get("name") or "zone"), z["xz"]) for z in result["zones"]])
@@ -677,6 +685,7 @@ options:
 on load:
     delete {{bhard::*}}
     delete {{bhardb::*}}
+    delete {{bhards::*}}
     delete {{bsoft::*}}
     delete {{bsoftb::*}}
     delete {{bzone::*}}
@@ -713,11 +722,14 @@ every {{@ticks}} ticks:
 {draw_hard}
 {draw_zone}
 {draw_share}
-        # ---- fling-back: pressing against the hard wall launches you back inland ----
-        # exact point-to-segment distance vs every hard segment in the 3x3 buckets; if the
-        # player is within ~2.8 blocks of the wall line, fling them toward the nearest
-        # country-ring point at an upward angle (WG's own setback just re-places you, which
-        # feels like being dropped a block; this gives the intended bounce).
+        # ---- fling-back + outlaw layer at the hard wall ----
+        # exact point-to-segment distance vs every hard segment in the 3x3 buckets; the
+        # nearest segment also tells WHICH SIDE of the wall the player is on (cross
+        # product x the ring's inside-sign). Within ~2.8 blocks: fling back inland (WG's
+        # own setback just re-places you, this gives the intended bounce). OUTSIDE the
+        # wall at any distance (blast-through at high fly speed, teleports, op bypass):
+        # heavy repeating damage + a fresh fling every pass until they are back in.
+        set {{_uu}} to "%uuid of loop-player%"
         set {{_best}} to 999999
         loop {{_k::*}}:
             loop {{bhard::%loop-value-2%::*}}:
@@ -737,6 +749,26 @@ every {{@ticks}} ticks:
                     set {{_d2}} to {{_ddx}} * {{_ddx}} + {{_ddz}} * {{_ddz}}
                     if {{_d2}} < {{_best}}:
                         set {{_best}} to {{_d2}}
+                        set {{_ddx2}} to {{_ddx}}
+                        set {{_ddz2}} to {{_ddz}}
+                        set {{_hcross}} to {{_abx}} * ({{_pz}} - (z of {{_a}})) - {{_abz}} * ({{_px}} - (x of {{_a}}))
+                        set {{_hsgn}} to {{bhards::%loop-value-2%::%loop-index-2%}}
+        if {{_best}} <= 16384:
+            if {{_hcross}} * {{_hsgn}} < 0:
+                # OUTSIDE the wall (up to 128 blocks tracked): outlaw treatment
+                set {{_ok}} to true
+                if {{bod::%{{_uu}}%}} is set:
+                    if difference between {{bod::%{{_uu}}%}} and now < 1 second:
+                        set {{_ok}} to false
+                if {{_ok}} is true:
+                    damage loop-player by 4 hearts
+                    set {{bod::%{{_uu}}%}} to now
+                    send action bar "&8[&6★&8] &4Outside the border! Get back!" to loop-player
+                # pull back toward the nearest wall point ({{_ddx}}/{{_ddz}} = wall->player,
+                # so the negation aims inland; works at any tracked distance)
+                set {{_nrm}} to sqrt({{_best}})
+                if {{_nrm}} > 0:
+                    set velocity of loop-player to vector(0 - ({{_ddx2}} / {{_nrm}}) * 1.8, 0.6, 0 - ({{_ddz2}} / {{_nrm}}) * 1.8)
         if {{_best}} <= 7.84:
             set {{_bz2}} to 999999
             loop {{_k::*}}:
