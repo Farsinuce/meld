@@ -235,7 +235,16 @@ def build(spec: dict, origin: dict, scale: float) -> dict:
         raise ValueError("no zones")
 
     clump = unary_union(geoms)
+    # Offsets in BLOCKS take precedence (the compact band design: soft ~32 blocks =
+    # the no-build damage band, hard ~64 = the bounce wall); km inputs remain for
+    # wide-band setups. Stored back as km so previews/labels stay consistent.
     soft_b, hard_b = soft_km * 1000.0 * scale, hard_km * 1000.0 * scale
+    if spec.get("soft_blocks"):
+        soft_b = max(1.0, float(spec["soft_blocks"]))
+        soft_km = soft_b / (1000.0 * scale)
+    if spec.get("hard_blocks"):
+        hard_b = max(soft_b + 1.0, float(spec["hard_blocks"]))
+        hard_km = hard_b / (1000.0 * scale)
     # Round joins (resolution 32) for SMOOTH buffers; no pre-simplify - _ring_xz reduces to the
     # target point count, so the soft/hard rings follow the count instead of getting cornery.
     soft = clump.buffer(soft_b, join_style=1, resolution=32) if soft_b > 0 else clump
@@ -268,6 +277,8 @@ def build(spec: dict, origin: dict, scale: float) -> dict:
             "clump": {"soft_xz": soft_xz, "soft_ll": soft_ll, "hard_xz": hard_xz, "hard_ll": hard_ll,
                       "trim_xz": trim_xz, "trim_ll": trim_ll,
                       "soft_km": soft_km, "hard_km": hard_km, "trim_km": trim_km},
+            "enforce": {"damage_hearts": max(0.0, float(spec.get("damage_hearts", 2))),
+                        "damage_delay_s": max(1, int(spec.get("damage_delay_s", 10)))},
             "shared": shared, "scale": scale, "origin": {"lat": o_lat, "lon": o_lon}}
 
 
@@ -281,11 +292,14 @@ def preview(result: dict) -> dict:
     zones = [{"name": z["spec"].get("name", "zone"), "ll": z["ll"], "count": len(z["xz"]),
               "color": z["spec"].get("color_actual", COLORS["actual"]),
               "label": (z["spec"].get("name", "zone") + " border")} for z in result["zones"]]
+    _scale = result.get("scale", 1.0)
+    _soft_bl = cl["soft_km"] * 1000.0 * _scale
+    _hard_bl = cl["hard_km"] * 1000.0 * _scale
     clump = [
         {"key": "soft", "ll": cl["soft_ll"], "count": len(cl["soft_xz"]), "color": COLORS["soft"],
-         "label": f"soft +{cl['soft_km']:g} km - build OK to here (safe edge)"},
+         "label": f"soft +{_soft_bl:.0f} blocks - damage band (no build, periodic damage)"},
         {"key": "hard", "ll": cl["hard_ll"], "count": len(cl["hard_xz"]), "color": COLORS["hard"],
-         "label": f"hard +{cl['hard_km']:g} km - no-build + kill-zone wall (soft->hard)"},
+         "label": f"hard +{_hard_bl:.0f} blocks - the wall (players bounced back)"},
         {"key": "trim", "ll": cl["trim_ll"], "count": len(cl["trim_xz"]), "color": "#9aa0a6",
          "label": f"trim edge +{cl['trim_km']:g} km past wall - terrain ends here (hidden; flung back at the wall)"},
     ]
@@ -317,34 +331,45 @@ def _region(rid, min_y, max_y, pri, pts, flags, owners, members):
 
 
 def write_regions_yml(result: dict, min_y: int, max_y: int) -> str:
-    """Build is ALLOWED inside the soft ring (the country + a few-km safe margin) and DENIED in the
-    soft->hard band and outside (global deny). `border_soft` carries the allow (priority 8) plus the
-    border enforcement itself: `exit: deny` — WorldGuard bounces players at the soft ring, natively,
-    no Skript addon involved (the rings are nested disks, so an ENTRY flag on the outer band would
-    never fire for players who start inside it; blocking EXIT from the soft disk is the line that
-    actually triggers). `border_hard` keeps the build deny (priority 5), and each zone's ACTUAL
-    region (priority 12) is identity: WG greeting/farewell titles + owners/members."""
+    """Three nested disks, all enforcement native WorldGuard (no Skript addon exists with
+    region events for current servers):
+      - zone regions (priority 12, the countries): build ALLOWED, Entering/Leaving titles,
+        heal-amount 0 (overrides the band's damage inside the country).
+      - border_soft (priority 8, country + ~32 blocks): the DAMAGE BAND — no build, WG's
+        heal flags tick NEGATIVE health every few seconds while a player stands in it.
+        Nested disks mean entry/greeting flags can't mark the band (players inside the
+        country are already inside this disk); the flag-priority override is what scopes
+        the damage to the band only.
+      - border_hard (priority 5, country + ~64 blocks): the WALL — `exit: deny` bounces
+        players trying to cross out, with the deny-message as the on-screen reason."""
     cl = result["clump"]
+    enf = result.get("enforce", {})
+    dmg_hp = enf.get("damage_hearts", 2) * 2.0     # hearts -> HP (half-hearts)
+    dmg_s = enf.get("damage_delay_s", 10)
     # __global__ needs the full field set — WorldGuard's parser NPEs (and drops the
     # region) when priority/owners/members are absent, even though they look optional.
     L = ["__global__:", "    type: global", "    priority: 0",
          "    flags: {block-break: deny, block-place: deny}",
          "    owners: {}", "    members: {}", ""]
     L += _region("border_hard", min_y, max_y, 5, cl["hard_xz"],
-                 {"block-break": "deny", "block-place": "deny"}, [], [])
-    L += _region("border_soft", min_y, max_y, 8, cl["soft_xz"],
-                 {"block-break": "allow", "block-place": "allow", "exit": "deny",
+                 {"block-break": "deny", "block-place": "deny", "exit": "deny",
                   "deny-message": '"&cYou have reached the border of the world - turn back!"'},
                  [], [])
+    soft_flags = {"block-break": "deny", "block-place": "deny"}
+    if dmg_hp > 0:
+        soft_flags.update({"heal-delay": dmg_s, "heal-amount": int(-dmg_hp)})
+    L += _region("border_soft", min_y, max_y, 8, cl["soft_xz"], soft_flags, [], [])
     for z in result["zones"]:
         s = z["spec"]
         nm = (s.get("name") or "zone").strip().title()
-        # title flags for the splash + plain greeting/farewell as a chat fallback (the
-        # chat pair also covers clients/modes where the title render is easy to miss)
+        # title flags for the splash + plain greeting/farewell as a chat fallback; build
+        # allow + heal 0 so the interior overrides the damage band's flags
         zflags = {"greeting-title": f'"&bEntering {nm}"',
                   "farewell-title": f'"&7Leaving {nm}"',
                   "greeting": f'"&bYou are entering {nm}."',
-                  "farewell": f'"&7You are leaving {nm}."'}
+                  "farewell": f'"&cYou left {nm} - the border zone hurts. Turn back!"',
+                  "block-break": "allow", "block-place": "allow",
+                  "heal-delay": 0, "heal-amount": 0}
         zflags.update(s.get("flags_actual", {}))
         L += _region(_rid(s.get("name")), min_y, max_y, 12, z["xz"],
                      zflags, s.get("owners", []) or [], s.get("members", []) or [])

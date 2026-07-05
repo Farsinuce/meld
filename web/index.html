@@ -519,27 +519,22 @@
         </div>
         <div style="font-weight:600;color:#00e5ff;margin-top:8px;border-top:1px solid var(--line);padding-top:6px">Ring &amp; margin settings</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px">
-          <label style="font-weight:normal" title="Buildable safe margin past the country border (build allowed out to here)">soft <input id="bSoft" type="number" min="0" step="1" value="3" style="width:46px">km</label>
-          <label style="font-weight:normal" title="Outer wall / trim line. Build denied + kill-zone in the soft->hard band">hard <input id="bHard" type="number" min="0" step="1" value="8" style="width:46px">km</label>
+          <label style="font-weight:normal" title="The damage band: from the country line out to here — no building, periodic damage. 32 = 2 chunks.">soft band <input id="bSoftB" type="number" min="8" step="8" value="32" style="width:50px">blocks</label>
+          <label style="font-weight:normal" title="The wall: players are bounced back when they try to cross this line.">hard wall <input id="bHardB" type="number" min="16" step="8" value="64" style="width:50px">blocks</label>
+          <label style="font-weight:normal" title="Damage while standing in the soft band (WorldGuard heal flags — no plugins beyond WG).">damage <input id="bDmgH" type="number" min="0" step="1" value="2" style="width:40px">♥ / <input id="bDmgS" type="number" min="1" step="1" value="10" style="width:40px">s</label>
           <label style="font-weight:normal" title="Extra terrain generated PAST the hard wall so the void edge is never visible (the wall flings players back before they reach it). 0 = cut exactly at the wall.">trim margin <input id="bTrimKm" type="number" min="0" step="1" value="5" style="width:42px">km</label>
-          <label style="font-weight:normal" title="Points along ALL rings (actual + soft + hard). More = follows the real coast / Danube delta better and smoother soft/hard. ~700 hugs the border closely (max ~300 m off); 1000 is near-exact. WorldGuard poly2d has no hard cap.">border pts <input id="bPoints" type="number" min="50" max="5000" step="50" value="3000" style="width:58px"></label>
-          <label style="font-weight:normal" title="Points along the internal line between two zones (e.g. the RO/MD Prut). Keep ~20.">internal line pts <input id="bShared" type="number" min="0" max="200" value="20" style="width:46px"></label>
+          <label style="font-weight:normal" title="Points along ALL rings (actual + soft + hard). Borders come from exact OSM admin boundaries (cached; Natural Earth fallback offline) — 3000 keeps them within ~1 real km after resampling; 5000 max.">border pts <input id="bPoints" type="number" min="50" max="5000" step="50" value="3000" style="width:58px"></label>
+          <label style="font-weight:normal" title="Points along the internal line between two zones (e.g. the RO/MD Prut). ~400 follows the river closely.">internal line pts <input id="bShared" type="number" min="0" max="1000" value="400" style="width:52px"></label>
           <label style="font-weight:normal"><input id="bAutoShared" type="checkbox" checked> auto internal line</label>
         </div>
         <div style="font-weight:600;color:#00e5ff;margin-top:8px;border-top:1px solid var(--line);padding-top:6px">Server script (border.sk)</div>
-        <label style="font-weight:normal;margin-top:4px"><input id="skGen" type="checkbox" checked> export <code>border.sk</code> (titles · escalating kill-zone · fling-back wall · packet particles)</label>
+        <label style="font-weight:normal;margin-top:4px"><input id="skGen" type="checkbox" checked> export <code>border.sk</code> (packet-particle walls; enforcement + titles are native WorldGuard flags in regions.yml)</label>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px">
-          <label style="font-weight:normal">kill interval <input id="skInterval" type="number" min="1" value="60" style="width:54px">s</label>
-          <label style="font-weight:normal">base <input id="skBase" type="number" min="1" value="1" style="width:44px">♥</label>
-          <label style="font-weight:normal">curve <select id="skCurve"><option value="double">double</option><option value="linear">linear</option></select></label>
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px">
-          <label style="font-weight:normal">knockback <input id="skKnock" type="number" step="0.1" value="1.8" style="width:50px"></label>
-          <label style="font-weight:normal">render radius <input id="skRadius" type="number" value="120" style="width:50px"></label>
-          <label style="font-weight:normal">wall H <input id="skWallH" type="number" value="4" style="width:44px"></label>
+          <label style="font-weight:normal" title="How far away the walls are visible (blocks). Max 120.">render radius <input id="skRadius" type="number" min="16" max="120" value="120" style="width:50px"></label>
+          <label style="font-weight:normal" title="Dust curtain height above/below your eye level (blocks).">wall H ±<input id="skWallH" type="number" min="2" value="10" style="width:44px"></label>
           <label style="font-weight:normal">update ticks <input id="skTicks" type="number" value="8" style="width:44px"></label>
         </div>
-        <div class="stat">Skript runs on the server (WorldGuard + Skript + a packet-particle provider). Meld only writes it.</div>
+        <div class="stat">border.sk needs only Skript + SkBee. The bounce at the soft ring (<code>exit: deny</code>) and the Entering/Leaving titles are WorldGuard region flags — no Skript addon involved.</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
           <button id="bPreview" class="sec" type="button" style="width:auto;padding:6px 10px">Preview on map</button>
           <button id="bExport" class="sec" type="button" style="width:auto;padding:6px 10px" title="Write regions.yml + per-ring point files + border.sk to <project>/border/. Unrelated to the world Export &amp; compression dropdown in Project &amp; world.">📝 Export border files</button>
@@ -2306,23 +2301,21 @@ function bBuildSpec(){
   const pts = Math.max(50, Math.min(5000, parseInt($('bPoints').value)||3000));
   return {                                  // soft/hard are GLOBAL: one ring each around the whole clump
     zones,
-    soft_km: parseFloat($('bSoft').value)||0,
-    hard_km: parseFloat($('bHard').value)||0,
+    soft_blocks: parseInt($('bSoftB').value)||32,   // damage band width past the country line
+    hard_blocks: parseInt($('bHardB').value)||64,   // the bounce wall
+    damage_hearts: parseFloat($('bDmgH').value)||0,
+    damage_delay_s: parseInt($('bDmgS').value)||10,
     points: { actual: pts, soft: pts, hard: pts },   // all rings use the same count so soft/hard are smooth too
     trim_margin_km: parseFloat($('bTrimKm').value)||0,
-    shared_points: parseInt($('bShared').value)||20,
+    shared_points: parseInt($('bShared').value)||400,
     shared_lines: ($('bAutoShared').checked && zones.length>=2) ? [[0,1]] : [],
   };
 }
 function bSkOpts(){
   return {
     generate: $('skGen') ? $('skGen').checked : true,
-    interval: parseInt($('skInterval').value)||60,
-    base: parseInt($('skBase').value)||1,
-    curve: $('skCurve') ? $('skCurve').value : 'double',
-    knockback: parseFloat($('skKnock').value)||1.8,
     render_radius: parseInt($('skRadius').value)||120,
-    wall_height: parseInt($('skWallH').value)||4,
+    wall_height: parseInt($('skWallH').value)||10,
     update_ticks: parseInt($('skTicks').value)||8,
   };
 }

@@ -3755,9 +3755,15 @@ def _mcs_effective_server() -> tuple[Path, str] | None:
     if not cand or not cand.is_dir():
         return None
     mode = st.get("server_mode") or "main"
-    tw = "world" if mode == "main" else \
-        _safe_world_name(PROJECT.load().get("name", "Meld World")).replace(" ", "_").lower()
-    if not (cand / tw).is_dir():
+    # Stage feeds the display name through mcs.safe_world_name, which also maps "." to
+    # "_" ("Romania Server 1.0" -> romania_server_1_0) — reproduce the exact chain or
+    # the recovered name misses the staged folder.
+    tw = "world" if mode == "main" else mcs.safe_world_name(
+        _safe_world_name(PROJECT.load().get("name", "Meld World")).replace(" ", "_").lower())
+    # Leaf migrates an imported sub-world into world/dimensions/minecraft/<name>/ on
+    # first boot — after that the staged top-level folder no longer exists.
+    if not ((cand / tw).is_dir()
+            or (cand / "world" / "dimensions" / "minecraft" / tw).is_dir()):
         return None
     _mcs_set(server_dir=str(cand), target_world=tw)
     return cand, tw
@@ -3900,18 +3906,29 @@ def _mcs_launch() -> tuple[bool, str | None]:
     p = _MCSERVER_PROC.get("proc")
     if p and p.alive():
         return False, "server already running"
-    if not plan:
-        return False, "run Plan + Stage + Download first"
     if not sdir or not tw:
         eff = _mcs_effective_server()   # already-staged server surviving a Meld restart
         if eff is None:
             return False, "run Plan + Stage + Download first"
         sdir, tw = str(eff[0]), eff[1]
     sdir_p = Path(sdir)
+    # The plan only contributes the jar name at this point. After a Meld restart the
+    # plan is gone but the staged server is fully intact — recover the jar from disk
+    # instead of forcing the user back through Plan/Stage/Download.
+    if plan:
+        jar_name = plan["jar"]["jar_name"]
+    else:
+        jars = sorted(sdir_p.glob("leaf-*.jar")) or sorted(sdir_p.glob("*.jar"))
+        if not jars:
+            return False, "run Plan + Stage + Download first"
+        jar_name = jars[-1].name
+        if not version:
+            m = re.match(r"leaf-([\w.]+?)-\d+\.jar", jar_name)
+            version = m.group(1) if m else (PROJECT.settings().get("server_version") or None)
     eula = (sdir_p / "eula.txt").read_text(encoding="utf-8", errors="replace") if (sdir_p / "eula.txt").exists() else ""
     if "eula=true" not in eula:
         return False, "EULA not accepted yet"
-    if not (sdir_p / plan["jar"]["jar_name"]).is_file():
+    if not (sdir_p / jar_name).is_file():
         return False, "server jar missing — run Download first"
     if not mcs.port_free(port):
         return False, f"port {port} is already in use"
@@ -3967,12 +3984,12 @@ def _mcs_launch() -> tuple[bool, str | None]:
     heap, cpu_n = _mcs_resources()
     try:
         # keep the manual start scripts in sync with the knobs used for this launch
-        mcs.write_start_scripts(sdir_p, plan["jar"]["jar_name"], java["exe"],
+        mcs.write_start_scripts(sdir_p, jar_name, java["exe"],
                                 xms=heap, xmx=heap, cpu_count=cpu_n)
     except OSError:
         pass
     try:
-        proc = mcs.ServerProc(sdir_p, java["exe"], plan["jar"]["jar_name"],
+        proc = mcs.ServerProc(sdir_p, java["exe"], jar_name,
                               on_line=_mcs_console, on_ready=_on_ready, on_exit=_on_exit,
                               xms=heap, xmx=heap, cpu_count=cpu_n)
     except Exception as e:  # noqa: BLE001
