@@ -108,7 +108,12 @@ def _land_clip(margin_deg: float):
     return unary_union(list(_countries().values())).buffer(margin_deg, resolution=8)
 
 
-def _zone_lonlat(country_names: list[str], source: str = "osm", coast_margin_km: float = 0.5):
+# Default sea margin = 1/3 of the 12-nautical-mile territorial waters OSM includes
+# (22.2 km / 3): a generous coastal strip, still far inside the legal maritime line.
+_COAST_MARGIN_KM = 22.224 / 3.0
+
+
+def _zone_lonlat(country_names: list[str], source: str = "osm", coast_margin_km: float = _COAST_MARGIN_KM):
     """Union of the named countries as one lon/lat geometry. source='osm' uses exact
     OSM admin boundaries (cached, coast clipped to shoreline + coast_margin_km of sea)
     with Natural Earth as a silent per-country fallback; source='ne' forces the bundled
@@ -239,7 +244,7 @@ def build(spec: dict, origin: dict, scale: float) -> dict:
     p_soft = max(3, min(5000, int(pts.get("soft", p_actual))))
     p_hard = max(3, min(5000, int(pts.get("hard", p_actual))))
     source = (spec.get("source") or "osm").strip().lower()
-    coast_km = float(spec.get("coast_margin_km", 0.5))
+    coast_km = float(spec.get("coast_margin_km", _COAST_MARGIN_KM))
 
     zones, geoms = [], []
     for z in spec.get("zones", []):

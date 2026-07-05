@@ -2303,6 +2303,7 @@ function bBuildSpec(){
     zones,
     soft_blocks: parseInt($('bSoftB').value)||32,   // damage band width past the country line
     hard_blocks: parseInt($('bHardB').value)||64,   // the bounce wall
+    coast_margin_km: 7.408,                          // sea strip = 1/3 of the 12nm OSM waters
     damage_hearts: parseFloat($('bDmgH').value)||0,
     damage_delay_s: parseInt($('bDmgS').value)||10,
     points: { actual: pts, soft: pts, hard: pts },   // all rings use the same count so soft/hard are smooth too
