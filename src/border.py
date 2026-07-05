@@ -253,21 +253,36 @@ def _region(rid, min_y, max_y, pri, pts, flags, owners, members):
 
 def write_regions_yml(result: dict, min_y: int, max_y: int) -> str:
     """Build is ALLOWED inside the soft ring (the country + a few-km safe margin) and DENIED in the
-    soft->hard band (the no-build kill-zone) and outside (global deny). So `border_soft` carries the
-    allow (priority 8), `border_hard` the deny (priority 5, the outer wall), and each zone's own
-    ACTUAL region (priority 12, no build flag) is identity only (titles + owners/members)."""
+    soft->hard band and outside (global deny). `border_soft` carries the allow (priority 8) plus the
+    border enforcement itself: `exit: deny` — WorldGuard bounces players at the soft ring, natively,
+    no Skript addon involved (the rings are nested disks, so an ENTRY flag on the outer band would
+    never fire for players who start inside it; blocking EXIT from the soft disk is the line that
+    actually triggers). `border_hard` keeps the build deny (priority 5), and each zone's ACTUAL
+    region (priority 12) is identity: WG greeting/farewell titles + owners/members."""
     cl = result["clump"]
-    L = ["__global__:", "    type: global",
-         "    flags: {block-break: deny, block-place: deny}", ""]
+    # __global__ needs the full field set — WorldGuard's parser NPEs (and drops the
+    # region) when priority/owners/members are absent, even though they look optional.
+    L = ["__global__:", "    type: global", "    priority: 0",
+         "    flags: {block-break: deny, block-place: deny}",
+         "    owners: {}", "    members: {}", ""]
     L += _region("border_hard", min_y, max_y, 5, cl["hard_xz"],
                  {"block-break": "deny", "block-place": "deny"}, [], [])
     L += _region("border_soft", min_y, max_y, 8, cl["soft_xz"],
-                 {"block-break": "allow", "block-place": "allow"}, [], [])
+                 {"block-break": "allow", "block-place": "allow", "exit": "deny",
+                  "deny-message": '"&cYou have reached the border of the world - turn back!"'},
+                 [], [])
     for z in result["zones"]:
         s = z["spec"]
+        nm = (s.get("name") or "zone").strip().title()
+        zflags = {"greeting-title": f'"&bEntering {nm}"',
+                  "farewell-title": f'"&7Leaving {nm}"'}
+        zflags.update(s.get("flags_actual", {}))
         L += _region(_rid(s.get("name")), min_y, max_y, 12, z["xz"],
-                     s.get("flags_actual", {}), s.get("owners", []) or [], s.get("members", []) or [])
-    return "\n".join(L) + "\n"
+                     zflags, s.get("owners", []) or [], s.get("members", []) or [])
+    # WorldGuard only reads regions nested under a top-level `regions:` key — a bare
+    # region list parses as valid YAML but loads as zero regions.
+    body = "\n".join(("    " + ln if ln else ln) for ln in L)
+    return "regions:\n" + body + "\n"
 
 
 def _write_points(path, xz, ll):
@@ -354,8 +369,9 @@ def _wall_var_lines(tree: str, rings: list) -> str:
 
 def _wall_draw_block(tree: str, color: str) -> str:
     """The per-ring draw pass: scan the player's 3x3 bucket neighbourhood, interpolate
-    each in-radius segment at ~4-block steps, stack SkBee dust from -wall-h..+wall-h."""
-    base = " " * 12
+    each in-radius segment at ~4-block steps, stack SkBee dust from -wall-h..+wall-h.
+    Emitted directly under `loop all players:` (2 levels deep)."""
+    base = " " * 8
     body = f"""loop {{_k::*}}:
     loop {{{tree}::%loop-value-1%::*}}:
         set {{_a}} to loop-value-2
@@ -378,25 +394,16 @@ def _wall_draw_block(tree: str, color: str) -> str:
                     make 1 of dust using dustOption({color}, 1.5) at location({{_x}}, {{_py}} + loop-value-4, {{_z}}, {{_w}}) to loop-player"""
     return "\n".join(base + ln if ln.strip() else ln for ln in body.split("\n"))
 def write_skript(result: dict, opts: dict) -> str:
-    """Generate a server-side border.sk: country titles, the soft->hard escalating kill-zone, the
-    hard fling-back wall, and packet-particle walls (skript-particle). Parameterised by the UI opts.
-    The Skript references the regions Meld emits (border_hard/border_soft + the zone names) and reads
-    the exported point files for the particle walls."""
-    interval = max(1, int(opts.get("interval", 60)))
-    base = max(1, int(opts.get("base", 1)))
-    curve = (opts.get("curve") or "double").lower()
-    knock = float(opts.get("knockback", 1.8))
+    """Generate a server-side border.sk. The Skript owns ONLY the packet-particle walls (SkBee
+    dust): enforcement (players bounced at the soft ring) and the country titles are native
+    WorldGuard flags in the exported regions.yml (`exit: deny` on border_soft, greeting/farewell
+    titles on the zones) — no WorldGuard Skript addon exists for current server versions with
+    region events, so nothing here may reference regions. Pure geometry + vanilla Skript + SkBee."""
     # radius must stay within one bucket cell so the 3x3 neighbourhood scan covers it
     radius = max(16, min(_WALL_CELL - 8, int(opts.get("render_radius", 56))))
     wallh = int(opts.get("wall_height", 4))
     ticks = max(1, int(opts.get("update_ticks", 8)))
     zone_ids = [_rid(z["spec"].get("name")) for z in result["zones"]]
-    zone_titles = {_rid(z["spec"].get("name")): (z["spec"].get("name") or "zone") for z in result["zones"]}
-    dmg = "{@base} * 2 ^ ({_t} - 1)" if curve == "double" else "{@base} * {_t}"
-    title_lines = "\n".join(
-        f'    else if "{zid}" is in the regions at the player:\n'
-        f'        send title "&bEntering {zone_titles[zid]}" with subtitle "" to the player for 2 seconds'
-        for zid in zone_ids)
     cl = result["clump"]
     hard_lines = _wall_var_lines("bhard", [cl["hard_xz"]])
     soft_lines = _wall_var_lines("bsoft", [cl["soft_xz"]])
@@ -404,85 +411,29 @@ def write_skript(result: dict, opts: dict) -> str:
     draw_hard = _wall_draw_block("bhard", "yellow")
     draw_soft = _wall_draw_block("bsoft", "orange")
     draw_zone = _wall_draw_block("bzone", "aqua")
-    return f"""# border.sk  -  generated by Meld (Border & zones, v2).
-# Server runtime for the country-border system. Meld owns geometry; this owns titles, the kill-zone,
-# the fling-back wall, and the packet-particle walls.
-#
-# REQUIRES (Meld's server setup installs all of these automatically):
-#   WorldGuard, WorldEdit, Skript, skworldguard (region enter/exit events),
-#   SkBee (dust particles for the walls — the wall geometry is EMBEDDED below,
-#   no point files or other addons needed).
+    return f"""# border.sk  -  generated by Meld (Border & zones, v3).
+# Packet-particle border walls ONLY. Border enforcement + country titles are handled natively
+# by WorldGuard through the exported regions.yml:
+#   - border_soft has `exit: deny`  -> WG bounces players back at the soft ring, no Skript involved
+#   - the zone regions ({", ".join(zone_ids) or "<zones>"}) carry greeting/farewell titles
+# This file needs ONLY Skript + SkBee (dust particles). The wall geometry is EMBEDDED below,
+# no point files, no WorldGuard Skript addon, no region syntax anywhere.
 # SETUP:
-#   1. /rg load   (after copying the exported regions.yml into the world's WorldGuard data)
+#   1. /rg reload   (after copying the exported regions.yml into the world's WorldGuard data)
 #   2. /sk reload border
-#
-# Regions used (from regions.yml): border_hard (outer wall, build allowed), border_soft (safe edge),
-#   {", ".join(zone_ids) or "<zones>"} (country identity).
+# Colors: hard wall = yellow, soft (safe edge) = orange, country borders = aqua.
 
 options:
-    interval: {interval}      # seconds per kill-zone damage step
-    base: {base}              # hearts at step 1 ({curve} curve)
-    knockback: {knock}
     radius: {radius}          # particle render radius (blocks)
     wall-h: {wallh}           # wall height above/below the player
     ticks: {ticks}            # particle update interval (ticks)
 
-# ---- country titles + safe-zone notice (region events, never test polygons) ----
-on region entered:
-    set {{_r}} to "%name of event-region%"
-    if {{_r}} is "border_soft":
-        # crossed inward to safe -> nothing
-    else if {{_r}} is "border_hard":
-        # entered the outer ring from outside is impossible (void), ignore
-    else:
-{title_lines if title_lines else '        # (no zones)'}
-
-on region exited:
-    set {{_r}} to "%name of event-region%"
-    if {{_r}} is "border_soft":
-        # left the safe zone into the kill-zone (still inside border_hard)
-        if "border_hard" is in the regions at the player:
-            set {{kz_start::%uuid of player%}} to now
-            set {{kz_tick::%uuid of player%}} to 0
-            send title "&eYou left the safe zone" with subtitle "&cget back or it gets worse" to the player for 2 seconds
-    else if {{_r}} is "border_hard":
-        # crossed the OUTER wall -> fling back
-        push the player in the horizontal facing of the player on z-axis at speed {{@knockback}} * -1
-        damage the player by 4 hearts
-        send title "&cYou went too far" with subtitle "&7turn back" to the player for 2 seconds
-        if {{last_in::%uuid of player%}} is set:
-            teleport the player to {{last_in::%uuid of player%}}
-
-# ---- per-second: kill-zone escalation + last-inside backstop ----
-every 1 second:
-    loop all players:
-        if "border_hard" is in the regions at loop-player:
-            set {{last_in::%uuid of loop-player%}} to location of loop-player
-            if "border_soft" is not in the regions at loop-player:
-                # in the soft->hard band = the kill-zone
-                set {{_t}} to round((difference between {{kz_start::%uuid of loop-player%}} and now) / {{@interval}} seconds, floor) + 1
-                if {{_t}} > {{kz_tick::%uuid of loop-player%}}:
-                    set {{kz_tick::%uuid of loop-player%}} to {{_t}}
-                    set {{_dmg}} to {dmg}
-                    damage loop-player by {{_dmg}} hearts
-                    send action bar "&cOutside the border: &e%{{_dmg}}% hearts &c- get back" to loop-player
-            else:
-                delete {{kz_start::%uuid of loop-player%}}
-                delete {{kz_tick::%uuid of loop-player%}}
-        else:
-            delete {{kz_start::%uuid of loop-player%}}
-            delete {{kz_tick::%uuid of loop-player%}}
-
-on death of player:
-    delete {{kz_start::%uuid of victim%}}
-    delete {{kz_tick::%uuid of victim%}}
-
 # ---- packet-particle walls (SkBee dust, per-player, near segments only) ----
-# Wall geometry is EMBEDDED below: segment endpoints are baked into bucketed list variables on
-# load ({_WALL_CELL}-block cells), so every {{@ticks}} ticks each in-border player only scans the
-# 3x3 cells around them, interpolates the in-radius segments at ~4-block steps and gets a dust
-# curtain from y-{{@wall-h}} to y+{{@wall-h}} sent ONLY to them (packet particles, no world lag).
-# Colors: hard wall = yellow, soft (safe edge) = orange, country borders = aqua.
+# Segment endpoints are baked into bucketed list variables on load ({_WALL_CELL}-block cells), so
+# every {{@ticks}} ticks each player only scans the 3x3 cells around them, interpolates the
+# in-radius segments at ~4-block steps and gets a dust curtain from y-{{@wall-h}} to y+{{@wall-h}}
+# sent ONLY to them (packet particles, no world lag). Players far from every ring hit nothing but
+# nine empty list lookups, so no world/region gate is needed.
 # If your SkBee build rejects the trailing "to loop-player", delete that tail — the wall then
 # renders for everyone near it instead of per-player (same visual, slightly more packets).
 on load:
@@ -498,24 +449,22 @@ on load:
 
 every {{@ticks}} ticks:
     loop all players:
-        # region gate = right world AND inside the playable area, one cheap check
-        if "border_hard" is in the regions at loop-player:
-            set {{_px}} to x-coordinate of loop-player
-            set {{_py}} to y-coordinate of loop-player
-            set {{_pz}} to z-coordinate of loop-player
-            set {{_w}} to world of loop-player
-            set {{_cx}} to floor({{_px}} / {_WALL_CELL})
-            set {{_cz}} to floor({{_pz}} / {_WALL_CELL})
-            delete {{_k::*}}
-            set {{_k::1}} to "c%{{_cx}} - 1%_%{{_cz}} - 1%"
-            set {{_k::2}} to "c%{{_cx}}%_%{{_cz}} - 1%"
-            set {{_k::3}} to "c%{{_cx}} + 1%_%{{_cz}} - 1%"
-            set {{_k::4}} to "c%{{_cx}} - 1%_%{{_cz}}%"
-            set {{_k::5}} to "c%{{_cx}}%_%{{_cz}}%"
-            set {{_k::6}} to "c%{{_cx}} + 1%_%{{_cz}}%"
-            set {{_k::7}} to "c%{{_cx}} - 1%_%{{_cz}} + 1%"
-            set {{_k::8}} to "c%{{_cx}}%_%{{_cz}} + 1%"
-            set {{_k::9}} to "c%{{_cx}} + 1%_%{{_cz}} + 1%"
+        set {{_px}} to x-coordinate of loop-player
+        set {{_py}} to y-coordinate of loop-player
+        set {{_pz}} to z-coordinate of loop-player
+        set {{_w}} to world of loop-player
+        set {{_cx}} to floor({{_px}} / {_WALL_CELL})
+        set {{_cz}} to floor({{_pz}} / {_WALL_CELL})
+        delete {{_k::*}}
+        set {{_k::1}} to "c%{{_cx}} - 1%_%{{_cz}} - 1%"
+        set {{_k::2}} to "c%{{_cx}}%_%{{_cz}} - 1%"
+        set {{_k::3}} to "c%{{_cx}} + 1%_%{{_cz}} - 1%"
+        set {{_k::4}} to "c%{{_cx}} - 1%_%{{_cz}}%"
+        set {{_k::5}} to "c%{{_cx}}%_%{{_cz}}%"
+        set {{_k::6}} to "c%{{_cx}} + 1%_%{{_cz}}%"
+        set {{_k::7}} to "c%{{_cx}} - 1%_%{{_cz}} + 1%"
+        set {{_k::8}} to "c%{{_cx}}%_%{{_cz}} + 1%"
+        set {{_k::9}} to "c%{{_cx}} + 1%_%{{_cz}} + 1%"
 {draw_hard}
 {draw_soft}
 {draw_zone}

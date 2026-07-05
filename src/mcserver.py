@@ -580,6 +580,15 @@ def push_border_files(server_dir: Path, border_dir: Path, target_world: str) -> 
         dest.mkdir(parents=True, exist_ok=True)
         shutil.copy2(sk, dest / "border.sk")
         pushed.append("border.sk -> Skript/scripts/")
+        # border.sk reads the ring point files from scripts/border/ (its own header
+        # documents this) — without them the particle wall silently draws nothing.
+        pts = sorted(border_dir.glob("*.txt"))
+        if pts:
+            pdest = dest / "border"
+            pdest.mkdir(exist_ok=True)
+            for p in pts:
+                shutil.copy2(p, pdest / p.name)
+            pushed.append(f"{len(pts)} ring .txt -> Skript/scripts/border/")
     return pushed
 
 
