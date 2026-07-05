@@ -268,8 +268,11 @@ def build(spec: dict, origin: dict, scale: float) -> dict:
     for pair in spec.get("shared_lines", []):
         i, j = pair
         if 0 <= i < len(zones) and 0 <= j < len(zones):
+            # High default: the shared line is the ONLY visible border between adjacent
+            # countries, so it must follow the OSM geometry closely — a coarse polyline
+            # cuts corners and visibly diverges from the real border.
             xz = _shared_line_xz(zones[i]["geom_block"], zones[j]["geom_block"],
-                                 int(spec.get("shared_points", 20)), eps)
+                                 max(3, min(6000, int(spec.get("shared_points", 2000)))), eps)
             shared.append({"between": [zones[i]["spec"].get("name"), zones[j]["spec"].get("name")],
                            "xz": xz, "ll": [list(_inv(x, zz, o_lat, o_lon, scale)) for x, zz in xz]})
 
@@ -588,22 +591,29 @@ def write_skript(result: dict, opts: dict) -> str:
     zone_lines, zone_n, zone_probe = _zone_var_lines(
         [((z["spec"].get("name") or "zone"), z["xz"]) for z in result["zones"]])
     # Shared internal borders (e.g. the RO/MD Prut line) draw as ONE lime line; the
-    # light-gray country walls are filtered out within 24 blocks of it so adjacent
-    # countries don't show two coincident gray walls on top of the lime one.
+    # light-gray country walls are suppressed along it so adjacent countries don't show
+    # coincident gray walls on top of the lime one.
     shared_pts = [sh["xz"] for sh in result.get("shared", []) if len(sh.get("xz") or []) >= 2]
     share_segs = []
     for pts in shared_pts:
         share_segs += _split_open_segments(pts, _WALL_SEG, _WALL_CAP)
     share_lines, share_n, share_probe = _seg_var_lines("bshare", share_segs)
+    # Suppression criterion: distance from the segment midpoint to the OTHER zones'
+    # AREA — a ring piece on a shared border touches the neighbour (distance ~0, only
+    # independent-resampling jitter). Testing against the simplified lime polyline
+    # instead leaves gray survivors wherever that polyline cuts a corner (the original
+    # double-line bug); the area test is exact regardless of the lime line's fidelity.
+    from shapely.geometry import Point as _Pt
+    zone_geoms = [z["geom_block"] for z in result["zones"]]
     zdraw_segs = []
-    for z in result["zones"]:
-        zdraw_segs += _split_ring_segments([z["xz"]], _WALL_SEG, _WALL_CAP)
-    if shared_pts:
-        from shapely.geometry import LineString as _LS, Point as _Pt
-        _shared_ls = [_LS(pts) for pts in shared_pts]
-        zdraw_segs = [s for s in zdraw_segs
-                      if min(ls.distance(_Pt((s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2))
-                             for ls in _shared_ls) > 24]
+    for zi, z in enumerate(result["zones"]):
+        others = [g for gi, g in enumerate(zone_geoms) if gi != zi]
+        for s in _split_ring_segments([z["xz"]], _WALL_SEG, _WALL_CAP):
+            if others:
+                mid = _Pt((s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2)
+                if min(g.distance(mid) for g in others) <= 32:
+                    continue
+            zdraw_segs.append(s)
     zdraw_lines, zdraw_n, _ = _seg_var_lines("bzoned", zdraw_segs)
     # Walls: outer = vanilla world-border cyan, country line = light gray, shared = lime.
     # The old orange "soft" ring has no wall and no region — the entire country-line ->
