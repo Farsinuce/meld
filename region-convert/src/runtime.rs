@@ -2,7 +2,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 const MIN_MEMORY_JOB_BYTES: u64 = 32 * 1024 * 1024;
-const MEMORY_BYTES_PER_THREAD: u64 = 96 * 1024 * 1024;
+const MEMORY_BYTES_PER_THREAD: u64 = 192 * 1024 * 1024;
 const MIN_MEMORY_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone)]
@@ -31,7 +31,11 @@ pub struct MemoryGuard {
 
 impl RuntimeResources {
     pub fn for_thread_count(thread_count: usize) -> Self {
-        let io_permits = thread_count.clamp(1, 4);
+        // One permit per worker thread: the decode and encode+write sections run under
+        // these permits and are CPU-heavy (parse / zstd), so capping permits below the
+        // thread count idles the pool. Disk safety is unaffected — each job writes its
+        // own temp file and commits with an atomic rename.
+        let io_permits = thread_count.max(1);
         let memory_budget_bytes =
             MIN_MEMORY_BUDGET_BYTES.max(thread_count as u64 * MEMORY_BYTES_PER_THREAD);
 

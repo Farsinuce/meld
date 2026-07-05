@@ -49,3 +49,4 @@ run*_result.json
 
 # The old cave engine's cave.json format (obsolete; the live pack ships in cave-pack/).
 cave-packs/
+server-run.*

@@ -3244,6 +3244,14 @@ $('btnResume').onclick = async () => {
 };
 
 // Live export/compression progress line (post-pass after generation). Fed by /api/status .export.
+function fmtDur(s){
+  if (s == null || s < 0) return '';
+  s = Math.round(s);
+  if (s < 60) return s + 's';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  if (h) return `${h}h ${String(m).padStart(2,'0')}m`;
+  return `${m}m ${String(s % 60).padStart(2,'0')}s`;
+}
 function renderExport(ex){
   const el = $('exportProgress'); if (!el) return;
   if (!ex || ex.phase === 'idle' || ex.format === 'none') { el.style.display = 'none'; return; }
@@ -3253,14 +3261,19 @@ function renderExport(ex){
   if (ph === 'done') {
     el.style.color = '#7CFC9A';
     el.textContent = `✓ Export (${f}): ${ex.done}/${ex.total} · ${(ex.out_mb||0).toFixed(1)}MB`
-      + (ratio ? ` · ${ratio} smaller` : '') + (ex.out_name ? ` → ${ex.out_name}` : '');
+      + (ratio ? ` · ${ratio} smaller` : '') + (ex.elapsed_s ? ` · took ${fmtDur(ex.elapsed_s)}` : '')
+      + (ex.out_name ? ` → ${ex.out_name}` : '');
   } else if (ph === 'error') {
     el.style.color = '#ff7a7a';
     el.textContent = `✗ Export (${f}) failed: ${ex.message || '?'}`;
   } else {
     el.style.color = '#9aa';
     const pct = ex.total ? Math.round((ex.done / ex.total) * 100) : 0;
-    el.textContent = `⏳ Export (${f}) ${ph}… ${ex.done}/${ex.total} (${pct}%)` + (ratio ? ` · ${ratio}` : '');
+    const speed = (ex.rate_per_min > 0) ? ` · ${ex.rate_per_min}/min` : '';
+    const eta = (ex.eta_s >= 0) ? ` · ETA ${fmtDur(ex.eta_s)}` : '';
+    const up = (ex.elapsed_s > 0) ? ` · ${fmtDur(ex.elapsed_s)} in` : '';
+    el.textContent = `⏳ Export (${f}) ${ph}… ${ex.done}/${ex.total} (${pct}%)`
+      + speed + eta + up + (ratio ? ` · ${ratio}` : '');
   }
 }
 

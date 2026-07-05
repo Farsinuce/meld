@@ -171,7 +171,8 @@ MB_PER_REGION = 4   # rough estimate for the size report
 # src/export.py + repo MELD_EXPORT_PLAN.md. Reset at the start of each run.
 _EXPORT_LOCK = threading.Lock()
 _EXPORT = {"format": "none", "phase": "idle", "total": 0, "done": 0, "failed": 0,
-           "raw_mb": 0.0, "out_mb": 0.0, "ratio": 0.0, "message": "", "out_name": None}
+           "raw_mb": 0.0, "out_mb": 0.0, "ratio": 0.0, "message": "", "out_name": None,
+           "rate_per_min": 0.0, "eta_s": -1, "elapsed_s": 0}
 _EXPORT_STARTED = {"run": None}   # guards one export per finished run (by _RUN['started'])
 
 # ── one-click Leaf server setup status (drives the Server setup card) ─────────
@@ -225,7 +226,8 @@ def _mcs_console(line: str) -> None:
 def _reset_export_status() -> None:
     with _EXPORT_LOCK:
         _EXPORT.update(format="none", phase="idle", total=0, done=0, failed=0,
-                       raw_mb=0.0, out_mb=0.0, ratio=0.0, message="", out_name=None)
+                       raw_mb=0.0, out_mb=0.0, ratio=0.0, message="", out_name=None,
+                       rate_per_min=0.0, eta_s=-1, elapsed_s=0)
     _EXPORT_STARTED["run"] = None
     # Drop any lingering streaming session from a prior (e.g. stopped) run. Raws are intact
     # (keep-both is forced for archive streaming), so a later post-pass / Compress-now sweep
@@ -1725,13 +1727,15 @@ def _start_export_job(kind: str, *, force_keep_both: bool = False,
             _EXPORT.update(format=p.format, phase=p.phase, total=p.total, done=p.done,
                            failed=p.failed, raw_mb=round(p.raw_bytes / 1048576, 2),
                            out_mb=round(p.out_bytes / 1048576, 2),
-                           ratio=round(p.ratio, 2), message=p.message)
+                           ratio=round(p.ratio, 2), message=p.message,
+                           rate_per_min=p.rate_per_min, eta_s=p.eta_s, elapsed_s=p.elapsed_s)
 
     if kind == "convert":
         def _worker():
             with _EXPORT_LOCK:
                 _EXPORT.update(format="linear2mca", phase="starting", total=0, done=0,
-                               failed=0, raw_mb=0.0, out_mb=0.0, ratio=0.0, message="", out_name=None)
+                               failed=0, raw_mb=0.0, out_mb=0.0, ratio=0.0, message="", out_name=None,
+                               rate_per_min=0.0, eta_s=-1, elapsed_s=0)
             log(f"[Export] linear→mca: starting (keep_both={keep_both})")
             try:
                 prog = exportmod.convert_linear_world(
@@ -1778,7 +1782,8 @@ def _start_export_job(kind: str, *, force_keep_both: bool = False,
         nworkers = exportmod.resolve_workers(s.get("export_compression_workers", 0))
         with _EXPORT_LOCK:
             _EXPORT.update(format=fmt, phase="starting", total=0, done=0, failed=0,
-                           raw_mb=0.0, out_mb=0.0, ratio=0.0, message="", out_name=None)
+                           raw_mb=0.0, out_mb=0.0, ratio=0.0, message="", out_name=None,
+                           rate_per_min=0.0, eta_s=-1, elapsed_s=0)
         _dest_note = f", -> {dest_world.name}/" if dest_world else ""
         log(f"[Export] {fmt}: post-pass starting (workers={nworkers}, keep_both={keep_both}{_dest_note})")
         try:

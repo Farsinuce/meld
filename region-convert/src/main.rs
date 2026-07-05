@@ -2,6 +2,11 @@ mod console;
 
 use std::process::ExitCode;
 
+// Windows' process heap serializes 20 threads of NBT-decode allocations (throughput
+// decays to ~2 busy workers minutes into a big run); mimalloc's per-thread heaps don't.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use anyhow::Result;
 use clap::Parser;
 

@@ -476,6 +476,11 @@ class ExportProgress:
     raw_bytes: int = 0
     out_bytes: int = 0
     message: str = ""
+    # live-run stats (blinear converter): regions/min over a sliding window, seconds
+    # remaining at that rate (-1 = unknown), and wall seconds since the run started.
+    rate_per_min: float = 0.0
+    eta_s: int = -1
+    elapsed_s: int = 0
 
     @property
     def ratio(self) -> float:
@@ -1005,6 +1010,7 @@ def run_blinear_export(
 
     work = dest.with_name(dest.name + ".rcwork")
     import shutil as _sh
+    import time as _time
     _sh.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True, exist_ok=True)
     to_fmt = f"blinear-{variant}" if variant in ("v2", "v3") else "blinear-v3"
@@ -1012,8 +1018,15 @@ def run_blinear_export(
            "--compression-level", str(max(1, min(22, level)))]
     if workers and workers > 0:
         cmd += ["--threads", str(workers)]
+    # Popen (not run): the converter takes an hour+ on big worlds, so poll the work dir
+    # while it runs — each finished region appears as an atomically-renamed .b_linear —
+    # and feed done / regions-per-min / ETA to the UI. Output goes to log files, not
+    # pipes, so the child can never block on a full pipe with nobody reading it.
+    out_log = work / "rc-stdout.log"
+    err_log = work / "rc-stderr.log"
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        with open(out_log, "wb") as so, open(err_log, "wb") as se:
+            p = subprocess.Popen(cmd, stdout=so, stderr=se)
     except OSError as e:
         _sh.rmtree(work, ignore_errors=True)
         prog.phase = "error"
@@ -1021,10 +1034,41 @@ def run_blinear_export(
         if on_progress:
             on_progress(prog)
         return prog
+
+    t0 = _time.monotonic()
+    samples: list[tuple[float, int]] = [(t0, 0)]   # (t, regions done) for the rate window
+    _RATE_WINDOW_S = 120.0
+    while p.poll() is None:
+        _time.sleep(2.0)
+        now = _time.monotonic()
+        # only region/ output counts toward total (len of region/*.mca); the converter
+        # may also emit entity/poi files which would skew the percentage
+        try:
+            done = sum(1 for _ in work.rglob("region/r.*.b_linear"))
+        except OSError:
+            done = prog.done   # work dir shuffled/removed under us — keep the last count
+        samples.append((now, done))
+        while len(samples) > 2 and now - samples[0][0] > _RATE_WINDOW_S:
+            samples.pop(0)
+        dt = now - samples[0][0]
+        dr = max(0, done - samples[0][1])
+        rate_s = (dr / dt) if dt > 1.0 else 0.0
+        prog.done = done
+        prog.rate_per_min = round(rate_s * 60.0, 1)
+        prog.elapsed_s = int(now - t0)
+        prog.eta_s = int((prog.total - done) / rate_s) if (rate_s > 0 and prog.total > done) else -1
+        if on_progress:
+            on_progress(prog)
+    prog.elapsed_s = int(_time.monotonic() - t0)
+    prog.eta_s = -1
     if p.returncode != 0:
+        try:
+            _err_tail = err_log.read_bytes()[-300:].decode("utf-8", errors="replace")
+        except OSError:
+            _err_tail = ""
         _sh.rmtree(work, ignore_errors=True)
         prog.phase = "error"
-        prog.message = f"region-convert rc={p.returncode}: {(p.stderr or '')[-300:]}"
+        prog.message = f"region-convert rc={p.returncode}: {_err_tail}"
         if on_progress:
             on_progress(prog)
         return prog
