@@ -274,8 +274,12 @@ def write_regions_yml(result: dict, min_y: int, max_y: int) -> str:
     for z in result["zones"]:
         s = z["spec"]
         nm = (s.get("name") or "zone").strip().title()
+        # title flags for the splash + plain greeting/farewell as a chat fallback (the
+        # chat pair also covers clients/modes where the title render is easy to miss)
         zflags = {"greeting-title": f'"&bEntering {nm}"',
-                  "farewell-title": f'"&7Leaving {nm}"'}
+                  "farewell-title": f'"&7Leaving {nm}"',
+                  "greeting": f'"&bYou are entering {nm}."',
+                  "farewell": f'"&7You are leaving {nm}."'}
         zflags.update(s.get("flags_actual", {}))
         L += _region(_rid(s.get("name")), min_y, max_y, 12, z["xz"],
                      zflags, s.get("owners", []) or [], s.get("members", []) or [])
@@ -321,12 +325,17 @@ def write_exports(result, outdir, min_y, max_y, skript_opts=None) -> dict:
 
 _WALL_CELL = 128        # spatial bucket size (blocks); must stay >= the render radius
 _WALL_SEG = 24.0        # target max segment length before draw-time interpolation
-_WALL_CAP = 1200        # max stored segments per ring group (spacing grows past this)
+_WALL_CAP = 3000        # soft cap on stored segments per ring group (spacing grows past this)
+# Segments are bucketed by their MIDPOINT, so any segment longer than a cell can end up
+# invisible to players standing near its ends (their 3x3 cell scan misses the midpoint
+# bucket) — walls develop gaps and appear displaced. Never split coarser than this.
+_WALL_SEG_MAX = 120.0
 
 
 def _split_ring_segments(rings: list, max_seg: float, cap: int) -> list:
     """Closed ring(s) of (x,z) points -> list of ((ax,az),(bx,bz)) segments no longer
-    than max_seg blocks (re-split coarser if the cap would be exceeded)."""
+    than max_seg blocks (re-split coarser if the cap would be exceeded, but never past
+    _WALL_SEG_MAX — bucket correctness beats the cap)."""
     raw = []
     for ring in rings:
         n = len(ring)
@@ -337,7 +346,7 @@ def _split_ring_segments(rings: list, max_seg: float, cap: int) -> list:
     total = sum(math.dist(a, b) for a, b in raw)
     if total <= 0:
         return []
-    seg = max(max_seg, total / max(1, cap))
+    seg = max(max_seg, min(_WALL_SEG_MAX, total / max(1, cap)))
     out = []
     for (ax, az), (bx, bz) in raw:
         d = math.dist((ax, az), (bx, bz))
