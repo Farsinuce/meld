@@ -367,14 +367,10 @@ def write_regions_yml(result: dict, min_y: int, max_y: int) -> str:
     L += _region("border_soft", min_y, max_y, 8, cl["soft_xz"], soft_flags, [], [])
     for z in result["zones"]:
         s = z["spec"]
-        nm = (s.get("name") or "zone").strip().title()
-        # title flags for the splash + plain greeting/farewell as a chat fallback; build
-        # allow + heal 0 so the interior overrides the damage band's flags
-        zflags = {"greeting-title": f'"&bEntering {nm}"',
-                  "farewell-title": f'"&7Leaving {nm}"',
-                  "greeting": f'"{px}&bYou are entering {nm}."',
-                  "farewell": f'"{px}&cYou left {nm}! The border zone hurts. Turn back!"',
-                  "block-break": "allow", "block-place": "allow",
+        # No WG greeting/farewell/titles: Entering/Leaving is shown on the ACTION BAR by
+        # border.sk's geometric crossing detector. Zones keep build allow + heal 0 so the
+        # interior overrides the damage band's flags.
+        zflags = {"block-break": "allow", "block-place": "allow",
                   "heal-delay": 0, "heal-amount": 0}
         zflags.update(s.get("flags_actual", {}))
         L += _region(_rid(s.get("name")), min_y, max_y, 12, z["xz"],
@@ -478,18 +474,54 @@ def _wall_var_lines(tree: str, rings: list) -> tuple[str, int, str]:
     return "\n".join(lines), len(segs), probe or f"{{{tree}::none::1}}"
 
 
+def _zone_var_lines(named_rings: list) -> tuple[str, int, str]:
+    """Like _wall_var_lines for the ZONE group, but each segment also carries the zone's
+    display name ({bzonen}) and the ring's inside-side sign ({bzones}): the sign of the
+    2D cross product (B-A)x(P-A) that means P is INSIDE the ring, decided by the ring's
+    winding. border.sk uses both for the geometric Entering/Leaving action-bar detector."""
+    from shapely.geometry import LinearRing
+    counters: dict = {}
+    lines = []
+    probe = ""
+    total = 0
+    for name, xz in named_rings:
+        ring_sign = 1 if LinearRing(xz).is_ccw else -1
+        disp = (name or "zone").strip().title()
+        for (ax, az), (bx, bz) in _split_ring_segments([xz], _WALL_SEG, _WALL_CAP):
+            cx = math.floor((ax + bx) / 2 / _WALL_CELL)
+            cz = math.floor((az + bz) / 2 / _WALL_CELL)
+            key = f"c{cx}_{cz}"
+            counters[key] = counters.get(key, 0) + 1
+            i = counters[key]
+            if not probe:
+                probe = f"{{bzone::{key}::1}}"
+            lines.append(f"    set {{bzone::{key}::{i}}} to vector({ax:.0f}, 0, {az:.0f})")
+            lines.append(f"    set {{bzoneb::{key}::{i}}} to vector({bx:.0f}, 0, {bz:.0f})")
+            lines.append(f'    set {{bzonen::{key}::{i}}} to "{disp}"')
+            lines.append(f"    set {{bzones::{key}::{i}}} to {ring_sign}")
+            total += 1
+    return "\n".join(lines), total, probe or "{bzone::none::1}"
+
+
 def _wall_draw_block(tree: str, color: str) -> str:
     """The per-ring draw pass: scan the player's 3x3 bucket neighbourhood, interpolate
     each in-radius segment at ~4-block steps, stack SkBee dust from -wall-h..+wall-h.
-    Emitted directly under `loop all players:` (2 levels deep)."""
+    Emitted directly under `loop all players:` (2 levels deep).
+
+    Loop references MUST be numbered by counting every enclosing loop from the outermost,
+    INCLUDING the `loop all players:` these blocks sit under (players=1, buckets=2,
+    segments=3, interpolation=4, vertical=5). The original code was numbered for a
+    standalone trigger, so %loop-value-1% resolved to the PLAYER and the walls never
+    drew; unnumbered refs are no better — Skript rejects them as ambiguous inside
+    nested loops ("multiple loops match loop-index")."""
     base = " " * 8
     body = f"""loop {{_k::*}}:
-    loop {{{tree}::%loop-value-1%::*}}:
-        set {{_a}} to loop-value-2
+    loop {{{tree}::%loop-value-2%::*}}:
+        set {{_a}} to loop-value-3
         set {{_dx}} to (x of {{_a}}) - {{_px}}
         set {{_dz}} to (z of {{_a}}) - {{_pz}}
         if ({{_dx}} * {{_dx}}) + ({{_dz}} * {{_dz}}) <= {{@radius}} * {{@radius}}:
-            set {{_b}} to {{{tree}b::%loop-value-1%::%loop-index-2%}}
+            set {{_b}} to {{{tree}b::%loop-value-2%::%loop-index-2%}}
             set {{_ax}} to x of {{_a}}
             set {{_az}} to z of {{_a}}
             set {{_bx}} to x of {{_b}}
@@ -498,11 +530,11 @@ def _wall_draw_block(tree: str, color: str) -> str:
             if {{_n}} < 1:
                 set {{_n}} to 1
             loop integers from 0 to {{_n}}:
-                set {{_t}} to loop-value-3 / {{_n}}
+                set {{_t}} to loop-value-4 / {{_n}}
                 set {{_x}} to {{_ax}} + ({{_bx}} - {{_ax}}) * {{_t}}
                 set {{_z}} to {{_az}} + ({{_bz}} - {{_az}}) * {{_t}}
                 loop integers from -{{@wall-h}} to {{@wall-h}}:
-                    make 1 of dust using dustOption({color}, 2.2) at location({{_x}}, {{_py}} + loop-value-4, {{_z}}, {{_w}})"""
+                    make 1 of dust using dustOption({color}, 2.2) at location({{_x}}, {{_py}} + loop-value-5, {{_z}}, {{_w}})"""
     return "\n".join(base + ln if ln.strip() else ln for ln in body.split("\n"))
 def write_skript(result: dict, opts: dict) -> str:
     """Generate a server-side border.sk. The Skript owns ONLY the packet-particle walls (SkBee
@@ -518,7 +550,8 @@ def write_skript(result: dict, opts: dict) -> str:
     cl = result["clump"]
     hard_lines, hard_n, hard_probe = _wall_var_lines("bhard", [cl["hard_xz"]])
     soft_lines, soft_n, soft_probe = _wall_var_lines("bsoft", [cl["soft_xz"]])
-    zone_lines, zone_n, zone_probe = _wall_var_lines("bzone", [z["xz"] for z in result["zones"]])
+    zone_lines, zone_n, zone_probe = _zone_var_lines(
+        [((z["spec"].get("name") or "zone"), z["xz"]) for z in result["zones"]])
     draw_hard = _wall_draw_block("bhard", "yellow")
     draw_soft = _wall_draw_block("bsoft", "orange")
     draw_zone = _wall_draw_block("bzone", "aqua")
@@ -552,6 +585,8 @@ on load:
     delete {{bsoftb::*}}
     delete {{bzone::*}}
     delete {{bzoneb::*}}
+    delete {{bzonen::*}}
+    delete {{bzones::*}}
 {hard_lines}
 {soft_lines}
 {zone_lines}
@@ -584,9 +619,9 @@ every {{@ticks}} ticks:
         # feels like being dropped a block; this gives the intended bounce).
         set {{_best}} to 999999
         loop {{_k::*}}:
-            loop {{bhard::%loop-value-1%::*}}:
-                set {{_a}} to loop-value-2
-                set {{_b}} to {{bhardb::%loop-value-1%::%loop-index-2%}}
+            loop {{bhard::%loop-value-2%::*}}:
+                set {{_a}} to loop-value-3
+                set {{_b}} to {{bhardb::%loop-value-2%::%loop-index-2%}}
                 set {{_abx}} to (x of {{_b}}) - (x of {{_a}})
                 set {{_abz}} to (z of {{_b}}) - (z of {{_a}})
                 set {{_len2}} to {{_abx}} * {{_abx}} + {{_abz}} * {{_abz}}
@@ -604,9 +639,10 @@ every {{@ticks}} ticks:
         if {{_best}} <= 7.84:
             set {{_bz2}} to 999999
             loop {{_k::*}}:
-                loop {{bzone::%loop-value-1%::*}}:
-                    set {{_zdx}} to (x of loop-value-2) - {{_px}}
-                    set {{_zdz}} to (z of loop-value-2) - {{_pz}}
+                loop {{bzone::%loop-value-2%::*}}:
+                    set {{_zv}} to loop-value-3
+                    set {{_zdx}} to (x of {{_zv}}) - {{_px}}
+                    set {{_zdz}} to (z of {{_zv}}) - {{_pz}}
                     set {{_zd2}} to {{_zdx}} * {{_zdx}} + {{_zdz}} * {{_zdz}}
                     if {{_zd2}} < {{_bz2}}:
                         set {{_bz2}} to {{_zd2}}
@@ -617,6 +653,45 @@ every {{@ticks}} ticks:
                 if {{_nrm}} > 0:
                     set velocity of loop-player to vector({{_ix}} / {{_nrm}} * 1.4, 0.55, {{_iz}} / {{_nrm}} * 1.4)
                     send action bar "&8[&6★&8] &cTurn back!" to loop-player
+        # ---- Entering/Leaving on the ACTION BAR (geometric, no WG events) ----
+        # nearest country-line segment within 24 blocks decides which SIDE of the line
+        # the player is on (cross product x its ring's inside-sign); when the remembered
+        # side for that zone flips, the player just crossed the line.
+        set {{_zbest}} to 576
+        loop {{_k::*}}:
+            loop {{bzone::%loop-value-2%::*}}:
+                set {{_a}} to loop-value-3
+                set {{_b}} to {{bzoneb::%loop-value-2%::%loop-index-2%}}
+                set {{_abx}} to (x of {{_b}}) - (x of {{_a}})
+                set {{_abz}} to (z of {{_b}}) - (z of {{_a}})
+                set {{_len2}} to {{_abx}} * {{_abx}} + {{_abz}} * {{_abz}}
+                if {{_len2}} > 0:
+                    set {{_t}} to (({{_px}} - (x of {{_a}})) * {{_abx}} + ({{_pz}} - (z of {{_a}})) * {{_abz}}) / {{_len2}}
+                    if {{_t}} < 0:
+                        set {{_t}} to 0
+                    if {{_t}} > 1:
+                        set {{_t}} to 1
+                    set {{_ddx}} to {{_px}} - ((x of {{_a}}) + {{_abx}} * {{_t}})
+                    set {{_ddz}} to {{_pz}} - ((z of {{_a}}) + {{_abz}} * {{_t}})
+                    set {{_d2}} to {{_ddx}} * {{_ddx}} + {{_ddz}} * {{_ddz}}
+                    if {{_d2}} < {{_zbest}}:
+                        set {{_zbest}} to {{_d2}}
+                        set {{_cross}} to {{_abx}} * ({{_pz}} - (z of {{_a}})) - {{_abz}} * ({{_px}} - (x of {{_a}}))
+                        set {{_zn}} to {{bzonen::%loop-value-2%::%loop-index-2%}}
+                        set {{_zs}} to {{bzones::%loop-value-2%::%loop-index-2%}}
+        if {{_zbest}} < 576:
+            if {{_cross}} * {{_zs}} > 0:
+                set {{_side}} to 1
+            else:
+                set {{_side}} to -1
+            set {{_uu}} to "%uuid of loop-player%"
+            if {{bmside::%{{_uu}}%::%{{_zn}}%}} is set:
+                if {{bmside::%{{_uu}}%::%{{_zn}}%}} is not {{_side}}:
+                    if {{_side}} = 1:
+                        send action bar "&8[&6★&8] &bEntering %{{_zn}}%" to loop-player
+                    else:
+                        send action bar "&8[&6★&8] &cLeaving %{{_zn}}%! The border zone hurts. Turn back!" to loop-player
+            set {{bmside::%{{_uu}}%::%{{_zn}}%}} to {{_side}}
 
 # ---- diagnostics ----
 # /borderstats (console or player): proves the wall data loaded by probing one known
