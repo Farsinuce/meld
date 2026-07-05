@@ -97,10 +97,22 @@ def _osm_country_lonlat(name: str):
     return geom
 
 
-def _zone_lonlat(country_names: list[str], source: str = "osm"):
+@lru_cache(maxsize=4)
+def _land_clip(margin_deg: float):
+    """Union of ALL Natural Earth land, buffered by ~margin. Used to clip OSM country
+    shapes back to the coastline: OSM admin_level=2 relations include TERRITORIAL
+    WATERS (12 nautical miles of sea), so a coastal border otherwise runs far offshore.
+    Clipping against the all-land union leaves land borders untouched (the neighbour's
+    land extends the union across them) and only trims the open-sea side to
+    shoreline + margin."""
+    return unary_union(list(_countries().values())).buffer(margin_deg, resolution=8)
+
+
+def _zone_lonlat(country_names: list[str], source: str = "osm", coast_margin_km: float = 1.0):
     """Union of the named countries as one lon/lat geometry. source='osm' uses exact
-    OSM admin boundaries (cached) with Natural Earth as a silent per-country fallback;
-    source='ne' forces the bundled Natural Earth shapes."""
+    OSM admin boundaries (cached, coast clipped to shoreline + coast_margin_km of sea)
+    with Natural Earth as a silent per-country fallback; source='ne' forces the bundled
+    Natural Earth shapes."""
     cs = _countries()
     geoms = []
     for n in country_names:
@@ -111,6 +123,10 @@ def _zone_lonlat(country_names: list[str], source: str = "osm"):
         if source == "osm":
             try:
                 g = _osm_country_lonlat(n)
+                # ~1 deg latitude = 111 km; the margin needs no better precision
+                clipped = g.intersection(_land_clip(round(max(0.0, coast_margin_km) / 111.0, 4)))
+                if not clipped.is_empty:
+                    g = clipped
             except Exception:  # noqa: BLE001 - offline / unknown name -> NE shape
                 g = None
         if g is None:
@@ -223,10 +239,11 @@ def build(spec: dict, origin: dict, scale: float) -> dict:
     p_soft = max(3, min(5000, int(pts.get("soft", p_actual))))
     p_hard = max(3, min(5000, int(pts.get("hard", p_actual))))
     source = (spec.get("source") or "osm").strip().lower()
+    coast_km = float(spec.get("coast_margin_km", 1.0))
 
     zones, geoms = [], []
     for z in spec.get("zones", []):
-        geom = _to_blocks(_zone_lonlat(z.get("countries", []), source), o_lat, o_lon, scale)
+        geom = _to_blocks(_zone_lonlat(z.get("countries", []), source, coast_km), o_lat, o_lon, scale)
         geoms.append(geom)
         xz = _ring_xz(geom, p_actual)
         zones.append({"spec": z, "geom_block": geom, "xz": xz,
@@ -367,6 +384,20 @@ def write_regions_yml(result: dict, min_y: int, max_y: int) -> str:
     if dmg_hp > 0:
         hard_flags.update({"heal-delay": dmg_s, "heal-amount": int(-dmg_hp)})
     L += _region("border_hard", min_y, max_y, 5, cl["hard_xz"], hard_flags, [], [])
+    # Shared-border corridor (priority 10, between the band and the zones): the zone
+    # polygons are resampled independently, so along a shared border (RO/MD) slivers can
+    # belong to NEITHER zone and fall through to the band's no-build + damage. A ~48
+    # block corridor around each shared line keeps the riverbanks buildable and safe.
+    for sh in result.get("shared", []):
+        pts = sh.get("xz") or []
+        if len(pts) < 2:
+            continue
+        corridor = LineString(pts).buffer(48.0, cap_style=2, join_style=1, resolution=8)
+        cor_xz = _ring_xz(corridor, 1500)
+        a, b = sh.get("between") or ["a", "b"]
+        L += _region(_rid(f"border_shared_{a}_{b}"), min_y, max_y, 10, cor_xz,
+                     {"block-break": "allow", "block-place": "allow",
+                      "heal-delay": 0, "heal-amount": 0}, [], [])
     for z in result["zones"]:
         s = z["spec"]
         # No WG greeting/farewell/titles: Entering/Leaving is shown on the ACTION BAR by
@@ -755,12 +786,19 @@ every {{@ticks}} ticks:
             else:
                 set {{_side}} to -1
             set {{_uu}} to "%uuid of loop-player%"
+            # Announce ENTERING only — never "leaving" (a country-to-country crossing
+            # then produces exactly one message: the destination's). A short cooldown
+            # stops the action bar re-firing while a player hovers on the line.
             if {{bmside::%{{_uu}}%::%{{_zn}}%}} is set:
                 if {{bmside::%{{_uu}}%::%{{_zn}}%}} is not {{_side}}:
                     if {{_side}} = 1:
-                        send action bar "&8[&6★&8] &bEntering %{{_zn}}%" to loop-player
-                    else:
-                        send action bar "&8[&6★&8] &cLeaving %{{_zn}}%! The border zone hurts. Turn back!" to loop-player
+                        set {{_ok}} to true
+                        if {{bmt::%{{_uu}}%::%{{_zn}}%}} is set:
+                            if difference between {{bmt::%{{_uu}}%::%{{_zn}}%}} and now < 4 seconds:
+                                set {{_ok}} to false
+                        if {{_ok}} is true:
+                            send action bar "&8[&6★&8] &bEntering %{{_zn}}%" to loop-player
+                            set {{bmt::%{{_uu}}%::%{{_zn}}%}} to now
             set {{bmside::%{{_uu}}%::%{{_zn}}%}} to {{_side}}
 
 # ---- diagnostics ----
