@@ -358,22 +358,28 @@ def _split_ring_segments(rings: list, max_seg: float, cap: int) -> list:
     return out
 
 
-def _wall_var_lines(tree: str, rings: list) -> str:
+def _wall_var_lines(tree: str, rings: list) -> tuple[str, int, str]:
     """Skript `set` lines that embed a ring group as two parallel vector list-vars
     ({tree::cX_Z::i} = segment start, {tree}b = segment end), bucketed by the
-    segment midpoint into _WALL_CELL cells for cheap near-player lookup."""
+    segment midpoint into _WALL_CELL cells for cheap near-player lookup.
+    Returns (lines, segment count, one existing probe variable) — the probe lets the
+    diagnostics test data presence directly, because Skript's `{list::*}` skips branch
+    nodes that hold no value of their own, so `size of {tree::*}` always reads 0."""
     segs = _split_ring_segments(rings, _WALL_SEG, _WALL_CAP)
     counters: dict = {}
     lines = []
+    probe = ""
     for (ax, az), (bx, bz) in segs:
         cx = math.floor((ax + bx) / 2 / _WALL_CELL)
         cz = math.floor((az + bz) / 2 / _WALL_CELL)
         key = f"c{cx}_{cz}"
         counters[key] = counters.get(key, 0) + 1
         i = counters[key]
+        if not probe:
+            probe = f"{{{tree}::{key}::1}}"
         lines.append(f"    set {{{tree}::{key}::{i}}} to vector({ax:.0f}, 0, {az:.0f})")
         lines.append(f"    set {{{tree}b::{key}::{i}}} to vector({bx:.0f}, 0, {bz:.0f})")
-    return "\n".join(lines)
+    return "\n".join(lines), len(segs), probe or f"{{{tree}::none::1}}"
 
 
 def _wall_draw_block(tree: str, color: str) -> str:
@@ -414,9 +420,9 @@ def write_skript(result: dict, opts: dict) -> str:
     ticks = max(1, int(opts.get("update_ticks", 8)))
     zone_ids = [_rid(z["spec"].get("name")) for z in result["zones"]]
     cl = result["clump"]
-    hard_lines = _wall_var_lines("bhard", [cl["hard_xz"]])
-    soft_lines = _wall_var_lines("bsoft", [cl["soft_xz"]])
-    zone_lines = _wall_var_lines("bzone", [z["xz"] for z in result["zones"]])
+    hard_lines, hard_n, hard_probe = _wall_var_lines("bhard", [cl["hard_xz"]])
+    soft_lines, soft_n, soft_probe = _wall_var_lines("bsoft", [cl["soft_xz"]])
+    zone_lines, zone_n, zone_probe = _wall_var_lines("bzone", [z["xz"] for z in result["zones"]])
     draw_hard = _wall_draw_block("bhard", "yellow")
     draw_soft = _wall_draw_block("bsoft", "orange")
     draw_zone = _wall_draw_block("bzone", "aqua")
@@ -477,6 +483,35 @@ every {{@ticks}} ticks:
 {draw_hard}
 {draw_soft}
 {draw_zone}
+
+# ---- diagnostics ----
+# /borderstats (console or player): proves the wall data loaded by probing one known
+# segment variable per ring (list sizes can't be used — Skript's {{list::*}} skips
+# branch nodes that only hold children). /bordertest (player): draws a particle cross
+# at your feet, proving the SkBee dust pipeline works regardless of where you stand.
+command /borderstats:
+    trigger:
+        if {hard_probe} is set:
+            send "hard wall data: OK ({hard_n} segments expected)"
+        else:
+            send "hard wall data: MISSING (expected {hard_n} segments - the on-load section did not run; try /sk reload border)"
+        if {soft_probe} is set:
+            send "soft wall data: OK ({soft_n} segments expected)"
+        else:
+            send "soft wall data: MISSING"
+        if {zone_probe} is set:
+            send "zone wall data: OK ({zone_n} segments expected)"
+        else:
+            send "zone wall data: MISSING"
+        send "render radius {{@radius}} blocks, update every {{@ticks}} ticks, wall height +/-{{@wall-h}}"
+
+command /bordertest:
+    executable by: players
+    trigger:
+        loop integers from -6 to 6:
+            make 1 of dust using dustOption(yellow, 2) at location((x-coordinate of player) + loop-value, (y-coordinate of player) + 1, (z-coordinate of player), world of player)
+            make 1 of dust using dustOption(orange, 2) at location((x-coordinate of player), (y-coordinate of player) + 1, (z-coordinate of player) + loop-value, world of player)
+        send "&eIf a yellow+orange particle cross appeared around you, the wall renderer works."
 
 # end border.sk
 """
