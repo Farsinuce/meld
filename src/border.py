@@ -284,6 +284,8 @@ def build(spec: dict, origin: dict, scale: float) -> dict:
 
 # ------------------------------------------------------------------- exporters
 COLORS = {"actual": "#00e5ff", "soft": "#ff9800", "hard": "#ffeb3b", "shared": "#76ff03"}
+# Branding prefix for every player-facing border message (WG flags + Skript action bars).
+_MSG_PREFIX = "&8[&6★&8] "
 
 
 def preview(result: dict) -> dict:
@@ -346,14 +348,18 @@ def write_regions_yml(result: dict, min_y: int, max_y: int) -> str:
     enf = result.get("enforce", {})
     dmg_hp = enf.get("damage_hearts", 2) * 2.0     # hearts -> HP (half-hearts)
     dmg_s = enf.get("damage_delay_s", 10)
+    px = _MSG_PREFIX
     # __global__ needs the full field set — WorldGuard's parser NPEs (and drops the
     # region) when priority/owners/members are absent, even though they look optional.
     L = ["__global__:", "    type: global", "    priority: 0",
-         "    flags: {block-break: deny, block-place: deny}",
+         f'    flags: {{block-break: deny, block-place: deny, deny-message: "{px}&cThe world ends here! You cannot build beyond the border."}}',
          "    owners: {}", "    members: {}", ""]
+    # exit-deny-message is the flag WG actually shows when `exit: deny` blocks the move;
+    # the generic deny-message covers build denials in the band.
     L += _region("border_hard", min_y, max_y, 5, cl["hard_xz"],
                  {"block-break": "deny", "block-place": "deny", "exit": "deny",
-                  "deny-message": '"&cYou have reached the border of the world - turn back!"'},
+                  "exit-deny-message": f'"{px}&cYou have reached the border of the world! Turn back!"',
+                  "deny-message": f'"{px}&cYou cannot build in the border zone!"'},
                  [], [])
     soft_flags = {"block-break": "deny", "block-place": "deny"}
     if dmg_hp > 0:
@@ -366,8 +372,8 @@ def write_regions_yml(result: dict, min_y: int, max_y: int) -> str:
         # allow + heal 0 so the interior overrides the damage band's flags
         zflags = {"greeting-title": f'"&bEntering {nm}"',
                   "farewell-title": f'"&7Leaving {nm}"',
-                  "greeting": f'"&bYou are entering {nm}."',
-                  "farewell": f'"&cYou left {nm} - the border zone hurts. Turn back!"',
+                  "greeting": f'"{px}&bYou are entering {nm}."',
+                  "farewell": f'"{px}&cYou left {nm}! The border zone hurts. Turn back!"',
                   "block-break": "allow", "block-place": "allow",
                   "heal-delay": 0, "heal-amount": 0}
         zflags.update(s.get("flags_actual", {}))
@@ -496,7 +502,7 @@ def _wall_draw_block(tree: str, color: str) -> str:
                 set {{_x}} to {{_ax}} + ({{_bx}} - {{_ax}}) * {{_t}}
                 set {{_z}} to {{_az}} + ({{_bz}} - {{_az}}) * {{_t}}
                 loop integers from -{{@wall-h}} to {{@wall-h}}:
-                    make 1 of dust using dustOption({color}, 2.2) at location({{_x}}, {{_py}} + loop-value-4, {{_z}}, {{_w}}) to loop-player"""
+                    make 1 of dust using dustOption({color}, 2.2) at location({{_x}}, {{_py}} + loop-value-4, {{_z}}, {{_w}})"""
     return "\n".join(base + ln if ln.strip() else ln for ln in body.split("\n"))
 def write_skript(result: dict, opts: dict) -> str:
     """Generate a server-side border.sk. The Skript owns ONLY the packet-particle walls (SkBee
@@ -533,14 +539,12 @@ options:
     wall-h: {wallh}           # wall height above/below the player
     ticks: {ticks}            # particle update interval (ticks)
 
-# ---- packet-particle walls (SkBee dust, per-player, near segments only) ----
+# ---- packet-particle walls (SkBee dust, near segments only) ----
 # Segment endpoints are baked into bucketed list variables on load ({_WALL_CELL}-block cells), so
 # every {{@ticks}} ticks each player only scans the 3x3 cells around them, interpolates the
 # in-radius segments at ~4-block steps and gets a dust curtain from y-{{@wall-h}} to y+{{@wall-h}}
-# sent ONLY to them (packet particles, no world lag). Players far from every ring hit nothing but
-# nine empty list lookups, so no world/region gate is needed.
-# If your SkBee build rejects the trailing "to loop-player", delete that tail — the wall then
-# renders for everyone near it instead of per-player (same visual, slightly more packets).
+# broadcast to everyone near it (packet particles, no world lag). Players far from every ring hit
+# nothing but nine empty list lookups, so no world/region gate is needed.
 on load:
     delete {{bhard::*}}
     delete {{bhardb::*}}
@@ -573,6 +577,46 @@ every {{@ticks}} ticks:
 {draw_hard}
 {draw_soft}
 {draw_zone}
+        # ---- fling-back: pressing against the hard wall launches you back inland ----
+        # exact point-to-segment distance vs every hard segment in the 3x3 buckets; if the
+        # player is within ~2.8 blocks of the wall line, fling them toward the nearest
+        # country-ring point at an upward angle (WG's own setback just re-places you, which
+        # feels like being dropped a block; this gives the intended bounce).
+        set {{_best}} to 999999
+        loop {{_k::*}}:
+            loop {{bhard::%loop-value-1%::*}}:
+                set {{_a}} to loop-value-2
+                set {{_b}} to {{bhardb::%loop-value-1%::%loop-index-2%}}
+                set {{_abx}} to (x of {{_b}}) - (x of {{_a}})
+                set {{_abz}} to (z of {{_b}}) - (z of {{_a}})
+                set {{_len2}} to {{_abx}} * {{_abx}} + {{_abz}} * {{_abz}}
+                if {{_len2}} > 0:
+                    set {{_t}} to (({{_px}} - (x of {{_a}})) * {{_abx}} + ({{_pz}} - (z of {{_a}})) * {{_abz}}) / {{_len2}}
+                    if {{_t}} < 0:
+                        set {{_t}} to 0
+                    if {{_t}} > 1:
+                        set {{_t}} to 1
+                    set {{_ddx}} to {{_px}} - ((x of {{_a}}) + {{_abx}} * {{_t}})
+                    set {{_ddz}} to {{_pz}} - ((z of {{_a}}) + {{_abz}} * {{_t}})
+                    set {{_d2}} to {{_ddx}} * {{_ddx}} + {{_ddz}} * {{_ddz}}
+                    if {{_d2}} < {{_best}}:
+                        set {{_best}} to {{_d2}}
+        if {{_best}} <= 7.84:
+            set {{_bz2}} to 999999
+            loop {{_k::*}}:
+                loop {{bzone::%loop-value-1%::*}}:
+                    set {{_zdx}} to (x of loop-value-2) - {{_px}}
+                    set {{_zdz}} to (z of loop-value-2) - {{_pz}}
+                    set {{_zd2}} to {{_zdx}} * {{_zdx}} + {{_zdz}} * {{_zdz}}
+                    if {{_zd2}} < {{_bz2}}:
+                        set {{_bz2}} to {{_zd2}}
+                        set {{_ix}} to {{_zdx}}
+                        set {{_iz}} to {{_zdz}}
+            if {{_bz2}} < 999999:
+                set {{_nrm}} to sqrt({{_ix}} * {{_ix}} + {{_iz}} * {{_iz}})
+                if {{_nrm}} > 0:
+                    set velocity of loop-player to vector({{_ix}} / {{_nrm}} * 1.4, 0.55, {{_iz}} / {{_nrm}} * 1.4)
+                    send action bar "&8[&6★&8] &cTurn back!" to loop-player
 
 # ---- diagnostics ----
 # /borderstats (console or player): proves the wall data loaded by probing one known
@@ -599,9 +643,10 @@ command /bordertest:
     executable by: players
     trigger:
         loop integers from -6 to 6:
-            make 1 of dust using dustOption(yellow, 2) at location((x-coordinate of player) + loop-value, (y-coordinate of player) + 1, (z-coordinate of player), world of player)
-            make 1 of dust using dustOption(orange, 2) at location((x-coordinate of player), (y-coordinate of player) + 1, (z-coordinate of player) + loop-value, world of player)
-        send "&eIf a yellow+orange particle cross appeared around you, the wall renderer works."
+            loop integers from 0 to 3:
+                make 1 of dust using dustOption(yellow, 2.2) at location((x-coordinate of player) + loop-value-1, (y-coordinate of player) + loop-value-2, (z-coordinate of player), world of player)
+                make 1 of dust using dustOption(orange, 2.2) at location((x-coordinate of player), (y-coordinate of player) + loop-value-2, (z-coordinate of player) + loop-value-1, world of player)
+        send "&8[&6★&8] &eIf two crossing particle curtains appeared around you, the wall renderer works."
 
 # end border.sk
 """
