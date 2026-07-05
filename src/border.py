@@ -49,10 +49,74 @@ def list_countries() -> list[str]:
     return sorted(f["properties"].get("name", "") for f in data["features"] if f["properties"].get("name"))
 
 
-def _zone_lonlat(country_names: list[str]):
-    """Union of the named countries as one lon/lat geometry."""
+# OSM admin_level=2 boundaries: far more accurate than the bundled Natural Earth shapes
+# (NE is generalized small-scale data — land borders can be off by kilometres). Fetched
+# once per country from Overpass, simplified to ~50 m fidelity, cached on disk forever.
+_OSM_CACHE = Path(__file__).resolve().parent.parent / "cache" / "osm-borders"
+_OVERPASS = ["https://overpass-api.de/api/interpreter",
+             "https://overpass.kumi.systems/api/interpreter"]
+
+def _osm_country_lonlat(name: str):
+    """OSM admin_level=2 boundary of `name` as a shapely (Multi)Polygon (lon/lat)."""
+    from shapely.geometry import mapping
+    from shapely.ops import polygonize
+    key = name.strip().lower().replace(" ", "_")
+    cf = _OSM_CACHE / f"{key}.json"
+    if cf.is_file():
+        return shape(json.loads(cf.read_text(encoding="utf8")))
+    import urllib.parse
+    import urllib.request
+    q = ('[out:json][timeout:180];'
+         f'relation["boundary"="administrative"]["admin_level"="2"]["name:en"="{name.strip()}"];'
+         'out geom;')
+    data = None
+    for url in _OVERPASS:
+        try:
+            req = urllib.request.Request(url, data=urllib.parse.urlencode({"data": q}).encode(),
+                                         headers={"User-Agent": "Meld/1.5 (border zones)"})
+            with urllib.request.urlopen(req, timeout=240) as r:
+                data = json.load(r)
+            if data.get("elements"):
+                break
+        except Exception:  # noqa: BLE001 - try the next mirror; caller falls back to NE
+            data = None
+    if not data or not data.get("elements"):
+        raise RuntimeError(f"overpass returned no admin_level=2 boundary for {name!r}")
+    lines = []
+    for el in data["elements"]:
+        for m in el.get("members", []):
+            if m.get("type") == "way" and m.get("role") in ("outer", "") and m.get("geometry"):
+                lines.append(LineString([(p["lon"], p["lat"]) for p in m["geometry"]]))
+    polys = [p for p in polygonize(lines) if p.is_valid]
+    if not polys:
+        raise RuntimeError(f"could not assemble OSM boundary rings for {name!r}")
+    # ~0.0005 deg = ~50 m real fidelity; keeps the cache and downstream geometry light
+    geom = unary_union(polys).simplify(0.0005, preserve_topology=True)
+    _OSM_CACHE.mkdir(parents=True, exist_ok=True)
+    cf.write_text(json.dumps(mapping(geom)), encoding="utf8")
+    return geom
+
+
+def _zone_lonlat(country_names: list[str], source: str = "osm"):
+    """Union of the named countries as one lon/lat geometry. source='osm' uses exact
+    OSM admin boundaries (cached) with Natural Earth as a silent per-country fallback;
+    source='ne' forces the bundled Natural Earth shapes."""
     cs = _countries()
-    geoms = [cs[n.strip().lower()] for n in country_names if n.strip().lower() in cs]
+    geoms = []
+    for n in country_names:
+        n = n.strip()
+        if not n:
+            continue
+        g = None
+        if source == "osm":
+            try:
+                g = _osm_country_lonlat(n)
+            except Exception:  # noqa: BLE001 - offline / unknown name -> NE shape
+                g = None
+        if g is None:
+            g = cs.get(n.lower())
+        if g is not None:
+            geoms.append(g)
     if not geoms:
         raise ValueError(f"no known countries in {country_names!r}")
     return unary_union(geoms)
@@ -155,13 +219,14 @@ def build(spec: dict, origin: dict, scale: float) -> dict:
     soft_km = float(spec.get("soft_km", 5))
     hard_km = float(spec.get("hard_km", 10))
     pts = spec.get("points", {}) or {}
-    p_actual = max(3, min(1000, int(pts.get("actual", 700))))
-    p_soft = max(3, min(1000, int(pts.get("soft", p_actual))))
-    p_hard = max(3, min(1000, int(pts.get("hard", p_actual))))
+    p_actual = max(3, min(5000, int(pts.get("actual", 700))))
+    p_soft = max(3, min(5000, int(pts.get("soft", p_actual))))
+    p_hard = max(3, min(5000, int(pts.get("hard", p_actual))))
+    source = (spec.get("source") or "osm").strip().lower()
 
     zones, geoms = [], []
     for z in spec.get("zones", []):
-        geom = _to_blocks(_zone_lonlat(z.get("countries", [])), o_lat, o_lon, scale)
+        geom = _to_blocks(_zone_lonlat(z.get("countries", []), source), o_lat, o_lon, scale)
         geoms.append(geom)
         xz = _ring_xz(geom, p_actual)
         zones.append({"spec": z, "geom_block": geom, "xz": xz,
@@ -406,7 +471,7 @@ def _wall_draw_block(tree: str, color: str) -> str:
                 set {{_x}} to {{_ax}} + ({{_bx}} - {{_ax}}) * {{_t}}
                 set {{_z}} to {{_az}} + ({{_bz}} - {{_az}}) * {{_t}}
                 loop integers from -{{@wall-h}} to {{@wall-h}}:
-                    make 1 of dust using dustOption({color}, 1.5) at location({{_x}}, {{_py}} + loop-value-4, {{_z}}, {{_w}}) to loop-player"""
+                    make 1 of dust using dustOption({color}, 2.2) at location({{_x}}, {{_py}} + loop-value-4, {{_z}}, {{_w}}) to loop-player"""
     return "\n".join(base + ln if ln.strip() else ln for ln in body.split("\n"))
 def write_skript(result: dict, opts: dict) -> str:
     """Generate a server-side border.sk. The Skript owns ONLY the packet-particle walls (SkBee
@@ -415,8 +480,8 @@ def write_skript(result: dict, opts: dict) -> str:
     titles on the zones) — no WorldGuard Skript addon exists for current server versions with
     region events, so nothing here may reference regions. Pure geometry + vanilla Skript + SkBee."""
     # radius must stay within one bucket cell so the 3x3 neighbourhood scan covers it
-    radius = max(16, min(_WALL_CELL - 8, int(opts.get("render_radius", 56))))
-    wallh = int(opts.get("wall_height", 4))
+    radius = max(16, min(_WALL_CELL - 8, int(opts.get("render_radius", 120))))
+    wallh = int(opts.get("wall_height", 10))
     ticks = max(1, int(opts.get("update_ticks", 8)))
     zone_ids = [_rid(z["spec"].get("name")) for z in result["zones"]]
     cl = result["clump"]
