@@ -333,17 +333,15 @@ def _region(rid, min_y, max_y, pri, pts, flags, owners, members):
 
 
 def write_regions_yml(result: dict, min_y: int, max_y: int) -> str:
-    """Three nested disks, all enforcement native WorldGuard (no Skript addon exists with
+    """Two nested disks, all enforcement native WorldGuard (no Skript addon exists with
     region events for current servers):
-      - zone regions (priority 12, the countries): build ALLOWED, Entering/Leaving titles,
-        heal-amount 0 (overrides the band's damage inside the country).
-      - border_soft (priority 8, country + ~32 blocks): the DAMAGE BAND — no build, WG's
-        heal flags tick NEGATIVE health every few seconds while a player stands in it.
-        Nested disks mean entry/greeting flags can't mark the band (players inside the
-        country are already inside this disk); the flag-priority override is what scopes
-        the damage to the band only.
-      - border_hard (priority 5, country + ~64 blocks): the WALL — `exit: deny` bounces
-        players trying to cross out, with the deny-message as the on-screen reason."""
+      - zone regions (priority 12, the countries): build ALLOWED, heal 0 — these override
+        the band flags everywhere inside the country.
+      - border_hard (priority 5, country + band): the whole strip between the country
+        line and the wall is no-build + periodic damage (negative WG heal flags), and
+        `exit: deny` bounces players trying to cross the outer edge. Nested disks mean
+        entry/greeting flags can't mark the band (players inside the country are already
+        inside this disk); the zone-priority override is what scopes the flags to it."""
     cl = result["clump"]
     enf = result.get("enforce", {})
     dmg_hp = enf.get("damage_hearts", 2) * 2.0     # hearts -> HP (half-hearts)
@@ -354,17 +352,18 @@ def write_regions_yml(result: dict, min_y: int, max_y: int) -> str:
     L = ["__global__:", "    type: global", "    priority: 0",
          f'    flags: {{block-break: deny, block-place: deny, deny-message: "{px}&cThe world ends here! You cannot build beyond the border."}}',
          "    owners: {}", "    members: {}", ""]
-    # exit-deny-message is the flag WG actually shows when `exit: deny` blocks the move;
-    # the generic deny-message covers build denials in the band.
-    L += _region("border_hard", min_y, max_y, 5, cl["hard_xz"],
-                 {"block-break": "deny", "block-place": "deny", "exit": "deny",
+    # ONE enforcement region: the hard disk (country + band). Everything between the
+    # country line and the wall is no-build + periodic damage (WG heal flags negative);
+    # the zone regions override both inside the country. exit-deny-message is the flag
+    # WG actually shows when `exit: deny` blocks the move; the generic deny-message
+    # covers build denials in the band. No border_soft region — the band starts at the
+    # country line itself.
+    hard_flags = {"block-break": "deny", "block-place": "deny", "exit": "deny",
                   "exit-deny-message": f'"{px}&cYou have reached the border of the world! Turn back!"',
-                  "deny-message": f'"{px}&cYou cannot build in the border zone!"'},
-                 [], [])
-    soft_flags = {"block-break": "deny", "block-place": "deny"}
+                  "deny-message": f'"{px}&cYou cannot build in the border zone!"'}
     if dmg_hp > 0:
-        soft_flags.update({"heal-delay": dmg_s, "heal-amount": int(-dmg_hp)})
-    L += _region("border_soft", min_y, max_y, 8, cl["soft_xz"], soft_flags, [], [])
+        hard_flags.update({"heal-delay": dmg_s, "heal-amount": int(-dmg_hp)})
+    L += _region("border_hard", min_y, max_y, 5, cl["hard_xz"], hard_flags, [], [])
     for z in result["zones"]:
         s = z["spec"]
         # No WG greeting/farewell/titles: Entering/Leaving is shown on the ACTION BAR by
@@ -474,6 +473,42 @@ def _wall_var_lines(tree: str, rings: list) -> tuple[str, int, str]:
     return "\n".join(lines), len(segs), probe or f"{{{tree}::none::1}}"
 
 
+def _split_open_segments(pts: list, max_seg: float, cap: int) -> list:
+    """Open polyline -> segments (like _split_ring_segments but WITHOUT the closing
+    wrap segment, which would draw a bogus straight line end-to-end)."""
+    raw = [(a, b) for a, b in zip(pts, pts[1:]) if a != b]
+    total = sum(math.dist(a, b) for a, b in raw)
+    if total <= 0:
+        return []
+    seg = max(max_seg, min(_WALL_SEG_MAX, total / max(1, cap)))
+    out = []
+    for (ax, az), (bx, bz) in raw:
+        steps = max(1, int(math.ceil(math.dist((ax, az), (bx, bz)) / seg)))
+        for i in range(steps):
+            t0, t1 = i / steps, (i + 1) / steps
+            out.append(((ax + (bx - ax) * t0, az + (bz - az) * t0),
+                        (ax + (bx - ax) * t1, az + (bz - az) * t1)))
+    return out
+
+
+def _seg_var_lines(tree: str, segs: list) -> tuple[str, int, str]:
+    """Bucketed start/end var lines for a prebuilt segment list (any wall group)."""
+    counters: dict = {}
+    lines = []
+    probe = ""
+    for (ax, az), (bx, bz) in segs:
+        cx = math.floor((ax + bx) / 2 / _WALL_CELL)
+        cz = math.floor((az + bz) / 2 / _WALL_CELL)
+        key = f"c{cx}_{cz}"
+        counters[key] = counters.get(key, 0) + 1
+        i = counters[key]
+        if not probe:
+            probe = f"{{{tree}::{key}::1}}"
+        lines.append(f"    set {{{tree}::{key}::{i}}} to vector({ax:.0f}, 0, {az:.0f})")
+        lines.append(f"    set {{{tree}b::{key}::{i}}} to vector({bx:.0f}, 0, {bz:.0f})")
+    return "\n".join(lines), len(segs), probe or f"{{{tree}::none::1}}"
+
+
 def _zone_var_lines(named_rings: list) -> tuple[str, int, str]:
     """Like _wall_var_lines for the ZONE group, but each segment also carries the zone's
     display name ({bzonen}) and the ring's inside-side sign ({bzones}): the sign of the
@@ -538,10 +573,10 @@ def _wall_draw_block(tree: str, color: str) -> str:
     return "\n".join(base + ln if ln.strip() else ln for ln in body.split("\n"))
 def write_skript(result: dict, opts: dict) -> str:
     """Generate a server-side border.sk. The Skript owns ONLY the packet-particle walls (SkBee
-    dust): enforcement (players bounced at the soft ring) and the country titles are native
-    WorldGuard flags in the exported regions.yml (`exit: deny` on border_soft, greeting/farewell
-    titles on the zones) — no WorldGuard Skript addon exists for current server versions with
-    region events, so nothing here may reference regions. Pure geometry + vanilla Skript + SkBee."""
+    dust) plus the geometric fling-back and Entering/Leaving action bars: enforcement (no-build,
+    damage band, exit bounce) is native WorldGuard flags in the exported regions.yml — no
+    WorldGuard Skript addon exists for current server versions with region events, so nothing
+    here may reference regions. Pure geometry + vanilla Skript + SkBee."""
     # radius must stay within one bucket cell so the 3x3 neighbourhood scan covers it
     radius = max(16, min(_WALL_CELL - 8, int(opts.get("render_radius", 120))))
     wallh = int(opts.get("wall_height", 10))
@@ -549,23 +584,43 @@ def write_skript(result: dict, opts: dict) -> str:
     zone_ids = [_rid(z["spec"].get("name")) for z in result["zones"]]
     cl = result["clump"]
     hard_lines, hard_n, hard_probe = _wall_var_lines("bhard", [cl["hard_xz"]])
-    soft_lines, soft_n, soft_probe = _wall_var_lines("bsoft", [cl["soft_xz"]])
+    # bzone = FULL country rings, detection only (crossing action bars + fling aim).
     zone_lines, zone_n, zone_probe = _zone_var_lines(
         [((z["spec"].get("name") or "zone"), z["xz"]) for z in result["zones"]])
-    draw_hard = _wall_draw_block("bhard", "yellow")
-    draw_soft = _wall_draw_block("bsoft", "orange")
-    draw_zone = _wall_draw_block("bzone", "aqua")
+    # Shared internal borders (e.g. the RO/MD Prut line) draw as ONE lime line; the
+    # light-gray country walls are filtered out within 24 blocks of it so adjacent
+    # countries don't show two coincident gray walls on top of the lime one.
+    shared_pts = [sh["xz"] for sh in result.get("shared", []) if len(sh.get("xz") or []) >= 2]
+    share_segs = []
+    for pts in shared_pts:
+        share_segs += _split_open_segments(pts, _WALL_SEG, _WALL_CAP)
+    share_lines, share_n, share_probe = _seg_var_lines("bshare", share_segs)
+    zdraw_segs = []
+    for z in result["zones"]:
+        zdraw_segs += _split_ring_segments([z["xz"]], _WALL_SEG, _WALL_CAP)
+    if shared_pts:
+        from shapely.geometry import LineString as _LS, Point as _Pt
+        _shared_ls = [_LS(pts) for pts in shared_pts]
+        zdraw_segs = [s for s in zdraw_segs
+                      if min(ls.distance(_Pt((s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2))
+                             for ls in _shared_ls) > 24]
+    zdraw_lines, zdraw_n, _ = _seg_var_lines("bzoned", zdraw_segs)
+    # Walls: outer = vanilla world-border cyan, country line = light gray, shared = lime.
+    # The old orange "soft" ring has no wall and no region — the entire country-line ->
+    # wall strip is the damage band now.
+    draw_hard = _wall_draw_block("bhard", "aqua")
+    draw_zone = _wall_draw_block("bzoned", "light grey")
+    draw_share = _wall_draw_block("bshare", "lime")
     return f"""# border.sk  -  generated by Meld (Border & zones, v3).
-# Packet-particle border walls ONLY. Border enforcement + country titles are handled natively
-# by WorldGuard through the exported regions.yml:
-#   - border_soft has `exit: deny`  -> WG bounces players back at the soft ring, no Skript involved
-#   - the zone regions ({", ".join(zone_ids) or "<zones>"}) carry greeting/farewell titles
+# Packet-particle border walls ONLY. Border enforcement (no-build + damage band between the
+# country line and the wall, exit bounce at the wall) is handled natively by WorldGuard
+# through the exported regions.yml. Zones: {", ".join(zone_ids) or "<zones>"}.
 # This file needs ONLY Skript + SkBee (dust particles). The wall geometry is EMBEDDED below,
 # no point files, no WorldGuard Skript addon, no region syntax anywhere.
 # SETUP:
 #   1. /rg reload   (after copying the exported regions.yml into the world's WorldGuard data)
 #   2. /sk reload border
-# Colors: hard wall = yellow, soft (safe edge) = orange, country borders = aqua.
+# Colors: outer wall = cyan (vanilla world-border look), country line = light gray.
 
 options:
     radius: {radius}          # particle render radius (blocks)
@@ -587,9 +642,14 @@ on load:
     delete {{bzoneb::*}}
     delete {{bzonen::*}}
     delete {{bzones::*}}
+    delete {{bzoned::*}}
+    delete {{bzonedb::*}}
+    delete {{bshare::*}}
+    delete {{bshareb::*}}
 {hard_lines}
-{soft_lines}
 {zone_lines}
+{zdraw_lines}
+{share_lines}
 
 every {{@ticks}} ticks:
     loop all players:
@@ -610,8 +670,8 @@ every {{@ticks}} ticks:
         set {{_k::8}} to "c%{{_cx}}%_%{{_cz}} + 1%"
         set {{_k::9}} to "c%{{_cx}} + 1%_%{{_cz}} + 1%"
 {draw_hard}
-{draw_soft}
 {draw_zone}
+{draw_share}
         # ---- fling-back: pressing against the hard wall launches you back inland ----
         # exact point-to-segment distance vs every hard segment in the 3x3 buckets; if the
         # player is within ~2.8 blocks of the wall line, fling them toward the nearest
@@ -704,10 +764,10 @@ command /borderstats:
             send "hard wall data: OK ({hard_n} segments expected)"
         else:
             send "hard wall data: MISSING (expected {hard_n} segments - the on-load section did not run; try /sk reload border)"
-        if {soft_probe} is set:
-            send "soft wall data: OK ({soft_n} segments expected)"
+        if {share_probe} is set:
+            send "shared border line data: OK ({share_n} segments expected)"
         else:
-            send "soft wall data: MISSING"
+            send "shared border line data: MISSING (fine if zones share no border)"
         if {zone_probe} is set:
             send "zone wall data: OK ({zone_n} segments expected)"
         else:
