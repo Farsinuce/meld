@@ -760,7 +760,10 @@ every {{@ticks}} ticks:
                         set {{_hsgn}} to {{bhards::%loop-value-2%::%loop-index-2%}}
         if {{_best}} <= 16384:
             if {{_hcross}} * {{_hsgn}} < 0:
-                # OUTSIDE the wall (up to 128 blocks tracked): outlaw treatment
+                # OUTSIDE the wall (up to ~128 blocks tracked): outlaw treatment.
+                # TELEPORT snap-back 8 blocks inside the nearest wall point (works on
+                # creative and spectator too, unlike damage/velocity) + a 5x wall push.
+                set {{bout::%{{_uu}}%}} to true
                 set {{_ok}} to true
                 if {{bod::%{{_uu}}%}} is set:
                     if difference between {{bod::%{{_uu}}%}} and now < 1 second:
@@ -769,11 +772,29 @@ every {{@ticks}} ticks:
                     damage loop-player by 4 hearts
                     set {{bod::%{{_uu}}%}} to now
                     send action bar "&8[&6★&8] &4Outside the border! Get back!" to loop-player
-                # pull back toward the nearest wall point ({{_ddx}}/{{_ddz}} = wall->player,
-                # so the negation aims inland; works at any tracked distance)
                 set {{_nrm}} to sqrt({{_best}})
                 if {{_nrm}} > 0:
-                    set velocity of loop-player to vector(0 - ({{_ddx2}} / {{_nrm}}) * 1.8, 0.6, 0 - ({{_ddz2}} / {{_nrm}}) * 1.8)
+                    set {{_tx}} to {{_px}} - {{_ddx2}} - ({{_ddx2}} / {{_nrm}}) * 8
+                    set {{_tz}} to {{_pz}} - {{_ddz2}} - ({{_ddz2}} / {{_nrm}}) * 8
+                    set {{_tl}} to location({{_tx}}, {{_py}}, {{_tz}}, {{_w}})
+                    set {{_hy}} to y-coordinate of highest block at {{_tl}}
+                    if {{_py}} < {{_hy}} + 1:
+                        set {{_tl}} to location({{_tx}}, {{_hy}} + 1, {{_tz}}, {{_w}})
+                    teleport loop-player to {{_tl}}
+                    set velocity of loop-player to vector(0 - ({{_ddx2}} / {{_nrm}}) * 7, 0.6, 0 - ({{_ddz2}} / {{_nrm}}) * 7)
+            else:
+                # inside and near the wall: remember this spot as the safe anchor for
+                # the unlimited-range backstop, and clear any outlaw state
+                set {{blast::%{{_uu}}%}} to location of loop-player
+                delete {{bout::%{{_uu}}%}}
+        else:
+            # no wall segment in tracking range at all. If the outlaw flag is still set,
+            # the player blinked PAST the tracked strip (extreme speed / teleport) —
+            # yank them back to their last known inside-the-border position.
+            if {{bout::%{{_uu}}%}} is set:
+                if {{blast::%{{_uu}}%}} is set:
+                    teleport loop-player to {{blast::%{{_uu}}%}}
+                    send action bar "&8[&6★&8] &4Outside the border! Get back!" to loop-player
         if {{_best}} <= 7.84:
             set {{_bz2}} to 999999
             loop {{_k::*}}:
@@ -837,6 +858,14 @@ every {{@ticks}} ticks:
                             send action bar "&8[&6★&8] &bEntering %{{_zn}}%" to loop-player
                             set {{bmt::%{{_uu}}%::%{{_zn}}%}} to now
             set {{bmside::%{{_uu}}%::%{{_zn}}%}} to {{_side}}
+
+# the outlaw flag must not survive death/rejoin — a respawned player would be yanked
+# back to the border from spawn by the out-of-range backstop
+on death of player:
+    delete {{bout::%uuid of victim%}}
+
+on quit:
+    delete {{bout::%uuid of player%}}
 
 # ---- diagnostics ----
 # /borderstats (console or player): proves the wall data loaded by probing one known
