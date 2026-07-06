@@ -776,10 +776,14 @@ every {{@ticks}} ticks:
                 if {{_nrm}} > 0:
                     set {{_tx}} to {{_px}} - {{_ddx2}} - ({{_ddx2}} / {{_nrm}}) * 8
                     set {{_tz}} to {{_pz}} - {{_ddz2}} - ({{_ddz2}} / {{_nrm}}) * 8
-                    set {{_tl}} to location({{_tx}}, {{_py}}, {{_tz}}, {{_w}})
+                    # keep the player's own view angles — location() without them
+                    # defaults yaw/pitch to 0 and the teleport spins the camera
+                    set {{_yaw}} to yaw of loop-player
+                    set {{_pit}} to pitch of loop-player
+                    set {{_tl}} to location({{_tx}}, {{_py}}, {{_tz}}, {{_w}}, {{_yaw}}, {{_pit}})
                     set {{_hy}} to y-coordinate of highest block at {{_tl}}
                     if {{_py}} < {{_hy}} + 1:
-                        set {{_tl}} to location({{_tx}}, {{_hy}} + 1, {{_tz}}, {{_w}})
+                        set {{_tl}} to location({{_tx}}, {{_hy}} + 1, {{_tz}}, {{_w}}, {{_yaw}}, {{_pit}})
                     teleport loop-player to {{_tl}}
                     set velocity of loop-player to vector(0 - ({{_ddx2}} / {{_nrm}}) * 7, 0.6, 0 - ({{_ddz2}} / {{_nrm}}) * 7)
             else:
