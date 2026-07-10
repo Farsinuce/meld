@@ -193,6 +193,12 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     # On for big parallel runs trades ~30m AWS for far fewer retries.
     if settings.get("terrain", True) and settings.get("aws_only_elevation"):
         cmd.append("--aws-only-elevation")
+    # Regional-only elevation: the inverse — NEVER touch AWS terrarium data (it has
+    # broken no-data tiles in some regions, e.g. z14/z15 gaps that carve terrain).
+    # The fork errors instead of silently falling back, and the terrain warm-up
+    # pre-fills the regional provider's tile cache so parallel cells read disk.
+    elif settings.get("terrain", True) and settings.get("regional_elevation_only"):
+        cmd.append("--regional-elevation-only")
 
     # Road detail — auto: compact below scale 0.7, clean at/above. max => omit.
     rd = (settings.get("road_detail_level") or "auto").strip().lower()

@@ -28,6 +28,7 @@ def default_settings() -> dict:
         # Skip regional hi-res elevation (USGS/IGN/GSI) -> AWS-only. Fewer per-tile retries on
         # big parallel runs (the regional providers rate-limit under Meld's burst), at ~30m res.
         "aws_only_elevation": False,
+        "regional_elevation_only": False,
         # Terrarium zoom used for elevation (pack download + Arnis generation). "auto" matches the
         # zoom's pixel to the block size for this scale (the right detail with no waste): 1:1->z15,
         # 1:10->z13, etc. Lower zoom = far fewer tiles + dodges the z14/z15 no-data holes. 11..15.

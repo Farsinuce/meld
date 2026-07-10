@@ -342,7 +342,9 @@ def purge_small_tiles(min_bytes: int = 67, log=None) -> int:
 
 
 def run_terrain_prefetch(bboxes, exe, log, on_progress=None, timeout_s: int = 1200,
-                         elev_zoom: int | None = None) -> dict:
+                         elev_zoom: int | None = None, scale: float = 1.0,
+                         aws_only: bool = False, regional_only: bool = False,
+                         should_stop=None) -> dict:
     """Warm the AWS terrain tiles for each bbox SEQUENTIALLY via `arnis --download-terrain-only`
     (one process at a time, 8 concurrent inside). This pre-fills the shared tile cache without
     the ~64-concurrent S3 burst that the parallel cells would otherwise cause (which truncates
@@ -355,6 +357,9 @@ def run_terrain_prefetch(bboxes, exe, log, on_progress=None, timeout_s: int = 12
     total = len(bboxes)
     ok_tiles = 0
     failed_tiles = 0
+    reg_ok = 0          # sweeps whose regional provider warmed successfully
+    reg_fail = 0        # sweeps whose regional warm errored
+    reg_provider = None
     # Pin the child's elevation zoom to match generation; without this the warm fills the wrong
     # zoom and the cache-hit it exists to create never happens. None → inherit (legacy behaviour).
     env = None
@@ -362,11 +367,21 @@ def run_terrain_prefetch(bboxes, exe, log, on_progress=None, timeout_s: int = 12
         env = {**os.environ, "ARNIS_ELEV_ZOOM": str(int(elev_zoom))}
         log(f"  [Terrain] warming at z{int(elev_zoom)} (matched to generation)")
     for i, bbox in enumerate(bboxes):
+        if should_stop is not None and should_stop():
+            log(f"  [Terrain] stopped after {i}/{total} sweep(s) on request")
+            break
         cmd = [
             str(exe),
             "--bbox", f"{bbox['south']},{bbox['west']},{bbox['north']},{bbox['east']}",
             "--download-terrain-only",
+            # --scale drives the fixed-tile LEVEL the regional warm caches; it must match
+            # generation or the warm fills the wrong level and cells still fetch live.
+            "--scale", str(scale),
         ]
+        if aws_only:
+            cmd.append("--aws-only-elevation")       # skip the regional warm entirely
+        elif regional_only:
+            cmd.append("--regional-elevation-only")  # skip the AWS warm entirely
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, env=env,
                                   timeout=timeout_s, encoding="utf-8", errors="replace")
@@ -375,6 +390,16 @@ def run_terrain_prefetch(bboxes, exe, log, on_progress=None, timeout_s: int = 12
             if m:
                 ok_tiles += int(m.group(1))
                 failed_tiles += int(m.group(2))
+            rm = re.search(r"Regional elevation warm: '([\w-]+)' cached", out)
+            if rm:
+                reg_ok += 1
+                reg_provider = rm.group(1)
+                log(f"  [Terrain] regional provider '{rm.group(1)}' warmed for sweep {i + 1}/{total}")
+            elif "Regional elevation warm failed" in out:
+                reg_fail += 1
+                log(f"  [Terrain] regional warm failed on sweep {i + 1}/{total}"
+                    + (" — cells will ERROR (regional-only mode)" if regional_only
+                       else " — cells fall back to AWS"))
         except subprocess.TimeoutExpired:
             log(f"  [Terrain] sweep {i + 1}/{total} timed out (cells will fetch live)")
         except Exception as ex:  # noqa: BLE001
@@ -382,7 +407,8 @@ def run_terrain_prefetch(bboxes, exe, log, on_progress=None, timeout_s: int = 12
         if on_progress:
             on_progress(i + 1, total, ok_tiles, failed_tiles)
     log(f"  [Terrain] warmed {ok_tiles} tile(s), {failed_tiles} failed across {total} sweep(s)")
-    return {"sweeps": total, "ok": ok_tiles, "failed": failed_tiles}
+    return {"sweeps": total, "ok": ok_tiles, "failed": failed_tiles,
+            "regional_ok": reg_ok, "regional_failed": reg_fail, "regional_provider": reg_provider}
 
 
 def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk) -> dict:

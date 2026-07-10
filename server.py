@@ -933,6 +933,85 @@ def api_datapack_repair():
     return jsonify({"ok": True, "tiles": len(tiles)})
 
 
+def _bbox_grid(bbox: dict, step_deg: float = 0.06) -> list:
+    """Split a bbox into a grid of <=step_deg sub-bboxes, so the regional warm runs as many
+    bounded child processes (visible per-sweep progress + a stop point between each) instead
+    of one giant process. A ~0.06° cell is a few km — one polite regional fetch each."""
+    s, n = float(bbox["south"]), float(bbox["north"])
+    w, e = float(bbox["west"]), float(bbox["east"])
+    out = []
+    y = s
+    while y < n - 1e-9:
+        y2 = min(n, y + step_deg)
+        x = w
+        while x < e - 1e-9:
+            x2 = min(e, x + step_deg)
+            out.append({"south": y, "north": y2, "west": x, "east": x2})
+            x = x2
+        y = y2
+    return out or [bbox]
+
+
+@app.route("/api/datapack/prefetch-regional", methods=["POST"])
+def api_datapack_prefetch_regional():
+    """Pre-warm the regional high-res elevation cache (IGN / USGS / GSI) for the selection,
+    the regional-provider counterpart to 'Download elevation' (which fills the AWS terrarium
+    cache). Runs the fork's terrain warm in regional-only mode over a grid of the selection so
+    the later parallel cells read tiles from disk instead of rate-limiting the provider."""
+    if _run_active():
+        return jsonify({"ok": False, "error": "stop the generation first"}), 409
+    with _DATAPACK_LOCK:
+        if _DATAPACK["active"]:
+            return jsonify({"ok": False, "error": "a data-pack job is already running"}), 409
+    bbox, rings, name = _datapack_selection()
+    if not bbox:
+        return jsonify({"ok": False, "error": "bbox or polygon required"}), 400
+    exe = resolve_arnis_exe()
+    if exe is None:
+        return jsonify({"ok": False, "error": "arnis binary not found"}), 400
+    settings = PROJECT.settings()
+    scale = float(settings.get("scale", 1.0) or 1.0)
+    lat = (float(bbox["south"]) + float(bbox["north"])) / 2.0
+    ez = effective_elev_zoom(settings, lat)
+    tiles = _bbox_grid(bbox)
+    _DATAPACK_STOP["flag"] = False
+    with _DATAPACK_LOCK:
+        _DATAPACK.update(active=True, done=False, total=len(tiles), done_n=0, ok=0, absent=0, fail=0,
+                         region=name or "regional-prefetch",
+                         note=f"warming regional elevation over {len(tiles)} area(s)…")
+
+    def _prog(done_n, total, ok, failed):
+        with _DATAPACK_LOCK:
+            _DATAPACK.update(done_n=done_n, total=total, ok=ok, fail=failed)
+
+    def _worker():
+        _t0 = time.time()
+        try:
+            log(f"[Regional] warming IGN/USGS/GSI elevation over {len(tiles)} area(s) at scale {scale}…")
+            res = run_terrain_prefetch(tiles, str(exe), log, _prog, elev_zoom=ez, scale=scale,
+                                       regional_only=True,
+                                       should_stop=lambda: _DATAPACK_STOP["flag"])
+            _el = time.time() - _t0
+            prov = res.get("regional_provider") or "regional provider"
+            rok, rfail = res.get("regional_ok", 0), res.get("regional_failed", 0)
+            if rok == 0 and rfail == 0:
+                msg = ("no regional provider covers this area (US/France/Spain/Japan only) — "
+                       "nothing warmed")
+            else:
+                msg = f"done in {_el:.0f}s: {prov} warmed for {rok}/{len(tiles)} area(s)" \
+                      + (f", {rfail} failed" if rfail else "")
+            with _DATAPACK_LOCK:
+                _DATAPACK.update(active=False, done=True, elapsed=round(_el, 1), note=msg)
+            log(f"[Regional] {msg}")
+        except Exception as ex:  # noqa: BLE001
+            with _DATAPACK_LOCK:
+                _DATAPACK.update(active=False, done=True, note=f"error: {ex}")
+            log(f"[Regional] error: {ex}")
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"ok": True, "areas": len(tiles), "zoom": ez})
+
+
 @app.route("/api/datapack/status")
 def api_datapack_status():
     with _DATAPACK_LOCK:
@@ -1664,7 +1743,11 @@ def _runner(job: dict, state: dict) -> bool:
 # (network blips, rate limits, transient OOM). Deterministic failures (drift / collision / disk
 # full / panic / merge error) are NOT retried — a retry would just fail the same way.
 _RETRYABLE_FAIL = ("timeout", "rate limit", "network", "fetch failed",
-                   "out of memory", "generation failed", "no world produced", "overpass")
+                   "out of memory", "generation failed", "no world produced", "overpass",
+                   # strict regional elevation: a rate-limited IGN/USGS fetch errors the
+                   # cell instead of silently using AWS; retrying usually succeeds off
+                   # the (by then) warm tile cache
+                   "elevation fetch failed")
 _MAX_CELL_RETRIES = 2
 
 
@@ -2332,6 +2415,13 @@ def api_settings():
     if patch.get("export_blinear_keep") is not None:
         bk = str(patch["export_blinear_keep"]).strip().lower()
         patch["export_blinear_keep"] = bk if bk in ("both", "blinear_only", "archive_mca") else "both"
+    # AWS-only and regional-only elevation are mutually exclusive (the fork rejects both).
+    # Enforce it on whichever one this patch turns ON, so the stored state can never hold
+    # both regardless of how the UI fired — belt for the client-side exclusivity handler.
+    if patch.get("aws_only_elevation") is True:
+        patch["regional_elevation_only"] = False
+    elif patch.get("regional_elevation_only") is True:
+        patch["aws_only_elevation"] = False
     s = PROJECT.update_settings(patch)
     POOL.set_max_workers(int(s.get("max_workers") or 4))
     # Stagger off => 0s (all workers start at once).
@@ -2744,19 +2834,25 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
             # are already cached — re-validating a complete data pack on every run is pure waste and
             # was a big slice of the per-run wait. The per-cell live fallback still covers any gap.
             _skip_warm = False
-            try:
-                _bs0 = [c["bbox"] for c in cells if c.get("bbox")]
-                if _bs0:
-                    _ubb0 = {"south": min(b["south"] for b in _bs0), "west": min(b["west"] for b in _bs0),
-                             "north": max(b["north"] for b in _bs0), "east": max(b["east"] for b in _bs0)}
-                    _ez0 = effective_elev_zoom(settings, float(origin.get("lat") or 45.0))
-                    _ec0 = dp.coverage_elevation(_ubb0, zoom=_ez0)
-                    if _ec0.get("pct", 0) >= 99.0:
-                        _skip_warm = True
-                        log(f"[Terrain] elevation {_ec0.get('pct', 0)}% cached at z{_ez0} — skipping "
-                            f"the terrain warm (no re-validation needed)")
-            except Exception:  # noqa: BLE001
-                _skip_warm = False
+            # coverage_elevation() only measures the AWS terrarium cache. In regional-only
+            # mode the cells never read those tiles — they read the IGN/USGS regional cache,
+            # which this gate can't see — so a "99% AWS cached" reading must NOT skip the warm
+            # (that warm is the only thing filling the regional cache; skipping it sends every
+            # parallel cell live to the provider = the rate-limit burst we're avoiding).
+            if not settings.get("regional_elevation_only"):
+                try:
+                    _bs0 = [c["bbox"] for c in cells if c.get("bbox")]
+                    if _bs0:
+                        _ubb0 = {"south": min(b["south"] for b in _bs0), "west": min(b["west"] for b in _bs0),
+                                 "north": max(b["north"] for b in _bs0), "east": max(b["east"] for b in _bs0)}
+                        _ez0 = effective_elev_zoom(settings, float(origin.get("lat") or 45.0))
+                        _ec0 = dp.coverage_elevation(_ubb0, zoom=_ez0)
+                        if _ec0.get("pct", 0) >= 99.0:
+                            _skip_warm = True
+                            log(f"[Terrain] elevation {_ec0.get('pct', 0)}% cached at z{_ez0} — skipping "
+                                f"the terrain warm (no re-validation needed)")
+                except Exception:  # noqa: BLE001
+                    _skip_warm = False
             with _PREFETCH_LOCK:
                 tiles = [] if _skip_warm else [c["bbox"] for c in _PREFETCH["chunks"]
                          if c.get("bbox") and c.get("state") in ("done", "cached")]
@@ -2783,7 +2879,10 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
                     # wrong zoom and every cell re-downloads live (the 64-way S3 burst).
                     _lat = float(origin.get("lat") or 45.0)
                     ez = effective_elev_zoom(settings, _lat)
-                    run_terrain_prefetch(tiles, str(exe), log, _tp, elev_zoom=ez)
+                    run_terrain_prefetch(tiles, str(exe), log, _tp, elev_zoom=ez,
+                                         scale=float(settings.get("scale", 1.0) or 1.0),
+                                         aws_only=bool(settings.get("aws_only_elevation")),
+                                         regional_only=bool(settings.get("regional_elevation_only")))
                 except Exception as ex:  # noqa: BLE001
                     log(f"[Terrain] prefetch error (cells will fetch live): {ex}")
 
@@ -2795,7 +2894,15 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
         try:
             uw = min(WorkerPool.MAX_WORKERS_HARD_CAP, int(settings.get("max_workers") or 4))
             sc = float(settings.get("scale", 1.0) or 1.0)
-            if sc < 0.5 and uw > 2:
+            if settings.get("regional_elevation_only"):
+                # This clamp reads the AWS terrarium cache, which regional-only cells never
+                # touch — measuring it would clamp to 2 on a coverage number that is irrelevant.
+                # The regional warm already filled the provider cache; and if a cell still
+                # rate-limits on a live fetch, strict mode errors + retries it (off the now-warm
+                # cache) instead of bursting into bad data. So keep the user's worker count.
+                log(f"[Workers] full {uw} workers — regional-only elevation (warm fills the "
+                    f"provider cache; live fetches retry on error, no AWS burst)")
+            elif sc < 0.5 and uw > 2:
                 bs = [c["bbox"] for c in cells if c.get("bbox")]
                 if bs:
                     ubb = {"south": min(b["south"] for b in bs), "west": min(b["west"] for b in bs),
