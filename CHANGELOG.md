@@ -4,6 +4,47 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.6.0] - 2026-07-12 — "Above & Beyond"
+
+An above-ground release to match the underground one. The bundled Arnis fork reaches **3.0.0
+feature parity with upstream louis-e/arnis**, and Meld surfaces the new world-shaping options:
+bundled 3D props at real map features, a visual chest-loot editor, per-world game-mode and
+time-of-day settings, an in-game world map item, and — under the hood — a global **Mapterhorn**
+elevation source that replaces the legacy AWS tiles' broken-no-data cliffs with pyramid
+hole-proofed terrain. Everything stays seam-safe: the master-origin elevation grid and
+tile-invariant rendering are unchanged, so multi-cell worlds still merge seamlessly.
+
+> Engine note: the bundled Arnis fork moves Teddy563/arnis 2.9.3 -> 3.0.0 (upstream parity).
+> Every upstream 3.0.0 feature was ported faithfully and audited for cross-tile seam-safety.
+> Existing worlds are untouched — new behaviour applies to newly generated cells only.
+
+### Added
+
+- **3D props at map features.** A Props menu (Settings) toggles families of bundled props stamped
+  where they belong: boats on water, parked cars in car parks, cranes/excavators on construction
+  sites, tractors on farmland, wind turbines at wind generators, lighthouses, fountains,
+  playgrounds, and cemetery tombstones. Off by family = no extra time or RAM.
+- **Visual chest-loot editor.** Edit interior-chest loot per theme with item sprites, a searchable
+  picker, 56 vanilla-structure presets (trial chambers, stronghold, buried treasure …), and a
+  raw-JSON escape hatch. Registry-validated so typos can't reach generation.
+- **World settings.** Game mode (survival / creative / spectator) and time of day written into
+  `level.dat`, plus a **World map item** toggle that drops a locked filled-map of the whole world
+  into the player's inventory — added in one post-merge pass so a multi-cell region gets a single
+  correct map.
+- **Sport pitch markings**, **furnished bedrooms** (real beds), **electrified rail catenary**,
+  **street lamps**, **highway tunnels**, **modular bridges**, **more surface materials**, and
+  **climate-driven biomes** — all from the 3.0.0 engine, driven automatically per cell.
+
+### Changed
+
+- **Elevation now defaults to Mapterhorn** (global terrarium tiles with pyramid hole-proofing).
+  Regional high-res providers still win where they cover the area; the old AWS source is now a
+  legacy escape. The elevation toggle was relabelled **"Legacy AWS elevation"**, and
+  "Regional elevation only" now falls through to Mapterhorn instead of AWS. `--offline` is
+  honoured (cache hit served, cache miss degrades to flat rather than hitting the network).
+- **S3DB multi-part buildings** render coherently: over-claimed flat outlines are suppressed only
+  when their parts actually cover them, and all parts of one building share a colour/style seed.
+
 ## [1.5.0] - 2026-07-04 — "Meld Depths"
 
 The long-awaited underground release. Worlds are no longer solid rock below the surface: one
