@@ -241,6 +241,16 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     elif len(enabled) != len(PROP_FAMILIES):
         cmd += ["--props", ",".join(enabled)]
 
+    # World settings (game mode + initial time of day) written into level.dat.
+    gm = str(settings.get("gamemode", "creative")).lower()
+    if gm in ("survival", "creative", "spectator"):
+        cmd += ["--gamemode", gm]
+    try:
+        wt = int(settings.get("world_time", 6000))
+        cmd += ["--world-time", str(max(0, min(23999, wt)))]
+    except (TypeError, ValueError):
+        pass
+
     # Schematic trees (default on): stamp a bundled region pack so the fork places detailed
     # schematic trees instead of procedural ones. The realm is picked from the selection centre
     # (Auto) or forced via the "tree_realm" setting; the fork loads <realm>/region.json and the

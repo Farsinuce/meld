@@ -411,6 +411,21 @@
       <label>Props
         <span class="i" title="Bundled 3D props placed at real OSM features: parked cars in car parks, boats on open water, cranes and excavators on construction sites, tractors on farmland, wind turbines at wind generators, fountains, playgrounds, cemetery tombstones, and lighthouses. Untick a family to skip it (no extra time or RAM).">i</span></label>
       <div id="propsMenu" style="display:flex;flex-wrap:wrap;gap:4px 10px;margin:2px 0 6px;font-size:12px"></div>
+      <label>Game mode
+        <span class="i" title="Player game mode written into the generated world's level.dat (Java). Use Survival for a playable survival server.">i</span>
+        <select id="gamemode" class="sec" style="padding:2px 6px;font-size:12px">
+          <option value="creative">Creative</option>
+          <option value="survival">Survival</option>
+          <option value="spectator">Spectator</option>
+        </select></label>
+      <label>Time of day
+        <span class="i" title="Initial world time written into level.dat.">i</span>
+        <select id="worldtime" class="sec" style="padding:2px 6px;font-size:12px">
+          <option value="0">Dawn</option>
+          <option value="6000">Noon</option>
+          <option value="12000">Dusk</option>
+          <option value="18000">Midnight</option>
+        </select></label>
       <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:6px"></div>
       <label>Terrain
         <span class="i" title="Generate real elevation/terrain (uses the elevation lock). Off = flat ground.">i</span>
@@ -1708,6 +1723,8 @@ async function refreshState() {
   $('ground').value = st.ground_level; $('road').value = st.road_detail_level;
   if ($('treeRealm')) $('treeRealm').value = st.tree_realm || 'auto';
   { const pv = st.props || {}; PROP_FAMILIES.forEach(([k]) => { const el = $('prop_' + k); if (el) el.checked = pv[k] !== false; }); }
+  if ($('gamemode')) $('gamemode').value = st.gamemode || 'creative';
+  if ($('worldtime')) $('worldtime').value = String(st.world_time != null ? st.world_time : 6000);
   { const ts = st.tree_sizes || {small:true,medium:true,big:true,tall:true,giant:false};
     const map = {szSmall:'small',szMedium:'medium',szBig:'big',szTall:'tall',szGiant:'giant'};
     for (const id in map) if ($(id)) $(id).checked = !!ts[map[id]]; }
@@ -2191,6 +2208,8 @@ const PROP_FAMILIES = [['boat','Boats'],['car','Cars'],['crane','Cranes'],['exca
   const collect = () => { const o = {}; PROP_FAMILIES.forEach(([k]) => { const el = $('prop_'+k); if (el) o[k] = el.checked; }); return o; };
   PROP_FAMILIES.forEach(([k]) => { const el = $('prop_'+k); if (el) el.addEventListener('change', () => api('/api/settings', { props: collect() })); });
 })();
+if ($('gamemode')) $('gamemode').addEventListener('change', () => api('/api/settings', { gamemode: $('gamemode').value }));
+if ($('worldtime')) $('worldtime').addEventListener('change', () => api('/api/settings', { world_time: parseInt($('worldtime').value, 10) }));
 
 // ---- Chest loot editor: visual, sprite-backed, with vanilla presets ----
 let lootState = null;

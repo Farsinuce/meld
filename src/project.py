@@ -79,6 +79,9 @@ def default_settings() -> dict:
             "playground": True, "starship": True, "tombstone": True,
             "tractor": True, "windturbine": True,
         },
+        # World settings written into the generated world's level.dat (Java).
+        "gamemode": "creative",     # survival | creative | spectator
+        "world_time": 6000,         # ticks: 0 dawn, 6000 noon, 18000 midnight
         "overpass_url": "",
         "timeout": 600,
         # Generation is mostly CPU bound now. The rule that matters: keep workers x threads at or
