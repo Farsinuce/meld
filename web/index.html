@@ -426,6 +426,9 @@
           <option value="12000">Dusk</option>
           <option value="18000">Midnight</option>
         </select></label>
+      <label>World map item
+        <span class="i" title="Put a locked filled-map of the whole generated world into the player's inventory (Java only). Added in one pass after all cells are merged, so a multi-cell region gets a single correct map. Writes no blocks.">i</span>
+        <input id="mapitem" type="checkbox"></label>
       <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:6px"></div>
       <label>Terrain
         <span class="i" title="Generate real elevation/terrain (uses the elevation lock). Off = flat ground.">i</span>
@@ -1725,6 +1728,7 @@ async function refreshState() {
   { const pv = st.props || {}; PROP_FAMILIES.forEach(([k]) => { const el = $('prop_' + k); if (el) el.checked = pv[k] !== false; }); }
   if ($('gamemode')) $('gamemode').value = st.gamemode || 'creative';
   if ($('worldtime')) $('worldtime').value = String(st.world_time != null ? st.world_time : 6000);
+  if ($('mapitem')) $('mapitem').checked = !!st.map_item;
   { const ts = st.tree_sizes || {small:true,medium:true,big:true,tall:true,giant:false};
     const map = {szSmall:'small',szMedium:'medium',szBig:'big',szTall:'tall',szGiant:'giant'};
     for (const id in map) if ($(id)) $(id).checked = !!ts[map[id]]; }
@@ -2210,6 +2214,7 @@ const PROP_FAMILIES = [['boat','Boats'],['car','Cars'],['crane','Cranes'],['exca
 })();
 if ($('gamemode')) $('gamemode').addEventListener('change', () => api('/api/settings', { gamemode: $('gamemode').value }));
 if ($('worldtime')) $('worldtime').addEventListener('change', () => api('/api/settings', { world_time: parseInt($('worldtime').value, 10) }));
+if ($('mapitem')) $('mapitem').addEventListener('change', () => api('/api/settings', { map_item: $('mapitem').checked }));
 
 // ---- Chest loot editor: visual, sprite-backed, with vanilla presets ----
 let lootState = null;

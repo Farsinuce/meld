@@ -1921,6 +1921,38 @@ def _start_export_job(kind: str, *, force_keep_both: bool = False,
             "dest": (dest_world.name if dest_world else None)}
 
 
+def _maybe_write_map_item() -> None:
+    """Once per finished run: if the 'map_item' setting is on, add a locked filled-map of the
+    whole world to the player's inventory. Runs a single post-merge `--map-item-only` arnis pass
+    over the assembled master world (Meld builds it from many per-cell worlds, so a per-cell map
+    would be wrong). Must run BEFORE any export converts the .mca regions to .linear. Best-effort:
+    never raises into the run-completion path, and a missing/failed pass just skips the map."""
+    try:
+        s = PROJECT.settings()
+        if not s.get("map_item"):
+            return
+        exe = resolve_arnis_exe()
+        if exe is None:
+            log("[MapItem] skipped: arnis binary not found")
+            return
+        world = master_world_path(create=False)
+        if not (world / "region").is_dir():
+            log("[MapItem] skipped: master world has no region data")
+            return
+        # --bbox is required by the CLI but ignored in map-item-only mode (the footprint is
+        # read from the saved regions), so a tiny placeholder is fine.
+        cmd = [str(exe), "--bbox", "0.0,0.0,0.001,0.001",
+               "--output-dir", str(world), "--map-item-only"]
+        log("[MapItem] writing world map item into the player inventory…")
+        r = subprocess.run(cmd, cwd=str(BASE_DIR), capture_output=True, text=True, timeout=1800)
+        if r.returncode == 0:
+            log("[MapItem] done — locked filled-map added to the world")
+        else:
+            log(f"[MapItem] failed (exit {r.returncode}): {(r.stderr or '').strip()[:300]}")
+    except Exception as e:  # noqa: BLE001
+        log(f"[MapItem] warning: {e}")
+
+
 def _maybe_run_export() -> None:
     """Once per finished run: if a streaming-overlap session is live, finalize it (then a
     cheap idempotent linear sweep catches any straggler); otherwise run the post-pass. A run
@@ -1999,6 +2031,7 @@ def _on_complete(job, ok, err):
             run_done = True
     if run_done:
         _write_run_report()   # benchmark JSON + HTML into the world folder (best-effort)
+        _maybe_write_map_item()  # add the world map item (before export may convert regions)
         _maybe_run_export()   # compress/export the finished world if a format is selected
 
 
@@ -2393,6 +2426,8 @@ def api_settings():
         patch["cpu_stagger_enabled"] = bool(patch["cpu_stagger_enabled"])
     if patch.get("cpu_stagger_adaptive") is not None:
         patch["cpu_stagger_adaptive"] = bool(patch["cpu_stagger_adaptive"])
+    if patch.get("map_item") is not None:
+        patch["map_item"] = bool(patch["map_item"])
     # Export / compression. Format is validated against the known set; level 0-22 (0=auto);
     # compression workers 0-256 (0=auto=cores-1, INDEPENDENT of max_workers by contract).
     if patch.get("export_format") is not None:

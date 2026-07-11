@@ -82,6 +82,7 @@ def default_settings() -> dict:
         # World settings written into the generated world's level.dat (Java).
         "gamemode": "creative",     # survival | creative | spectator
         "world_time": 6000,         # ticks: 0 dawn, 6000 noon, 18000 midnight
+        "map_item": False,          # post-merge: add a locked world map to the player inventory
         "overpass_url": "",
         "timeout": 600,
         # Generation is mostly CPU bound now. The rule that matters: keep workers x threads at or
