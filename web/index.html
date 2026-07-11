@@ -409,7 +409,7 @@
         <span class="i" title="Fetch + place real 3D structure models for landmarks (3DMR + Wikimedia). Off = faster & smaller, plain block buildings. Needs internet.">i</span>
         <input id="m3d" type="checkbox"></label>
       <label>Props
-        <span class="i" title="Bundled 3D props placed at real OSM features: boats on open water, cranes and excavators on construction sites, tractors on farmland, wind turbines at wind generators, and lighthouses. Untick a family to skip it (no extra time or RAM). More families (cars, fountains, playgrounds, tombstones) are coming.">i</span></label>
+        <span class="i" title="Bundled 3D props placed at real OSM features: parked cars in car parks, boats on open water, cranes and excavators on construction sites, tractors on farmland, wind turbines at wind generators, fountains, playgrounds, cemetery tombstones, and lighthouses. Untick a family to skip it (no extra time or RAM).">i</span></label>
       <div id="propsMenu" style="display:flex;flex-wrap:wrap;gap:4px 10px;margin:2px 0 6px;font-size:12px"></div>
       <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:6px"></div>
       <label>Terrain
@@ -2184,7 +2184,7 @@ function cbSyncVisibility(){
 if ($('caves')) $('caves').addEventListener('change', cbSyncVisibility);
 
 // ---- Schematic props (per-family toggle; only wired families shown) ----
-const PROP_FAMILIES = [['boat','Boats'],['crane','Cranes'],['excavator','Excavators'],['tractor','Tractors'],['windturbine','Wind turbines'],['lighthouse','Lighthouses']];
+const PROP_FAMILIES = [['boat','Boats'],['car','Cars'],['crane','Cranes'],['excavator','Excavators'],['fountain','Fountains'],['lighthouse','Lighthouses'],['playground','Playgrounds'],['tombstone','Tombstones'],['tractor','Tractors'],['windturbine','Wind turbines']];
 (function(){
   const m = $('propsMenu'); if (!m) return;
   m.innerHTML = PROP_FAMILIES.map(([k,l]) => `<label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input id="prop_${k}" type="checkbox" checked><span>${l}</span></label>`).join('');
