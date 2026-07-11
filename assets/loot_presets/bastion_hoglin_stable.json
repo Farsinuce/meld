@@ -1,0 +1,177 @@
+{
+  "empty_weight": 20,
+  "rolls_min": 6,
+  "rolls_max": 7,
+  "themes": [
+    {
+      "weight": 100,
+      "items": [
+        {
+          "id": "minecraft:diamond_shovel",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:diamond_pickaxe",
+          "min": 1,
+          "max": 1,
+          "weight": 12
+        },
+        {
+          "id": "minecraft:netherite_scrap",
+          "min": 1,
+          "max": 1,
+          "weight": 8
+        },
+        {
+          "id": "minecraft:ancient_debris",
+          "min": 1,
+          "max": 1,
+          "weight": 12
+        },
+        {
+          "id": "minecraft:ancient_debris",
+          "min": 2,
+          "max": 2,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:saddle",
+          "min": 1,
+          "max": 1,
+          "weight": 12
+        },
+        {
+          "id": "minecraft:gold_block",
+          "min": 2,
+          "max": 4,
+          "weight": 16
+        },
+        {
+          "id": "minecraft:golden_carrot",
+          "min": 8,
+          "max": 17,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:golden_apple",
+          "min": 1,
+          "max": 1,
+          "weight": 10
+        }
+      ]
+    },
+    {
+      "weight": 14,
+      "items": [
+        {
+          "id": "minecraft:golden_axe",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:crying_obsidian",
+          "min": 1,
+          "max": 5,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:glowstone",
+          "min": 3,
+          "max": 6,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:gilded_blackstone",
+          "min": 2,
+          "max": 5,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:soul_sand",
+          "min": 2,
+          "max": 7,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:crimson_nylium",
+          "min": 2,
+          "max": 7,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:gold_nugget",
+          "min": 2,
+          "max": 8,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:leather",
+          "min": 1,
+          "max": 3,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:arrow",
+          "min": 5,
+          "max": 17,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:string",
+          "min": 3,
+          "max": 8,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:porkchop",
+          "min": 2,
+          "max": 5,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:cooked_porkchop",
+          "min": 2,
+          "max": 5,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:crimson_fungus",
+          "min": 2,
+          "max": 7,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:crimson_roots",
+          "min": 2,
+          "max": 7,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 12,
+      "items": [
+        {
+          "id": "minecraft:snout_armor_trim_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 10,
+      "items": [
+        {
+          "id": "minecraft:netherite_upgrade_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

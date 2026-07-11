@@ -1,0 +1,60 @@
+{
+  "empty_weight": 0,
+  "rolls_min": 1,
+  "rolls_max": 3,
+  "themes": [
+    {
+      "weight": 86,
+      "items": [
+        {
+          "id": "minecraft:diamond_block",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:emerald_block",
+          "min": 1,
+          "max": 3,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:diamond_axe",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:diamond_pickaxe",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:diamond",
+          "min": 1,
+          "max": 2,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:cake",
+          "min": 1,
+          "max": 4,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:amethyst_shard",
+          "min": 8,
+          "max": 20,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:iron_block",
+          "min": 1,
+          "max": 2,
+          "weight": 20
+        }
+      ]
+    }
+  ]
+}

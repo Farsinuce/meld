@@ -454,6 +454,26 @@
       <label>Interiors
         <span class="i" title="Generate building interiors (slower, bigger).">i</span>
         <input id="interior" type="checkbox"></label>
+      <div id="lootWrap" style="display:none;margin:2px 0 6px;padding:6px 8px;border:1px solid var(--line);border-radius:2px">
+        <div style="font-weight:600;color:#00e5ff;font-size:12px">Chest loot
+          <span class="i" title="What generated buildings' chests contain. Chests spawn only when Buildings AND Interiors are BOTH on. Pick a vanilla preset (trial chamber, stronghold, buried treasure, ...) or build your own: each theme is a weighted group, each item has a min-max stack count and a rarity weight. Loot is deterministic per chest, so re-rendering a tile always yields the same chest.">i</span></div>
+        <div id="lootStatus" class="stat" style="margin-top:2px">built-in default</div>
+        <select id="lootPreset" class="sec" style="width:100%;margin-top:4px;padding:4px 6px;font-size:11px" title="Load a vanilla-structure loot table as a starting point, then edit + Save.">
+          <option value="">Load a vanilla preset...</option>
+        </select>
+        <div id="lootThemes" style="margin-top:6px"></div>
+        <div style="display:flex;gap:6px;margin-top:4px;align-items:center">
+          <button class="sec" id="lootAddTheme" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Add another weighted item group.">+ Theme</button>
+          <label style="flex:0 0 auto;display:flex;align-items:center;gap:4px;font-size:11px" title="Edit the underlying JSON directly (advanced)."><input type="checkbox" id="lootRawToggle">raw JSON</label>
+        </div>
+        <textarea id="lootJson" spellcheck="false" style="display:none;width:100%;min-height:180px;margin-top:4px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;line-height:1.35;background:#060504;color:#cfe;border:1px solid var(--line);border-radius:2px;padding:6px;box-sizing:border-box"></textarea>
+        <div style="display:flex;gap:6px;flex-wrap:nowrap;margin-top:6px">
+          <button class="sec" id="lootReload" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Re-load the saved (or default) loot table, discarding unsaved edits.">Reload</button>
+          <button class="sec" id="lootSave" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Validate and save this loot table for the project.">Save</button>
+          <button class="sec" id="lootReset" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Delete the custom table and go back to the built-in default.">Reset</button>
+        </div>
+        <datalist id="lootItemList"></datalist>
+      </div>
       <label>Land cover
         <span class="i" title="ESA WorldCover surface blocks (forests, fields, water, built-up). Needs Terrain.">i</span>
         <input id="landcover" type="checkbox"></label>
@@ -1755,6 +1775,7 @@ async function refreshState() {
     cbPaint();
     cbSyncVisibility();
   }
+  lootSyncVisibility();
   // elevation
   if (s.elevation && s.elevation.locked) {
     $('elevState').textContent = 'locked'; $('elevState').className = 'chip lk';
@@ -2157,6 +2178,127 @@ function cbSyncVisibility(){
   if ($('caveBiomesWrap')) $('caveBiomesWrap').style.display = $('caves').checked ? '' : 'none';
 }
 if ($('caves')) $('caves').addEventListener('change', cbSyncVisibility);
+
+// ---- Chest loot editor: visual, sprite-backed, with vanilla presets ----
+let lootState = null;
+const lootShort = id => (id||'').replace(/^minecraft:/,'');
+const lootName = id => lootShort(id).replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+const lootImg = id => `<img src="/assets/items/${lootShort(id)}.png" alt="" style="width:18px;height:18px;image-rendering:pixelated;vertical-align:middle;flex:0 0 auto" onerror="this.style.visibility='hidden'">`;
+function lootRenderRaw(){ if($('lootJson')) $('lootJson').value = JSON.stringify(lootState, null, 2); }
+function renderLoot(){
+  if(!lootState || !$('lootThemes')) return;
+  const st = lootState;
+  let h = `<div class="stat" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">per chest: rolls
+    <input type="number" min="1" max="27" value="${st.rolls_min}" data-field="rolls_min" style="width:42px">-
+    <input type="number" min="1" max="27" value="${st.rolls_max}" data-field="rolls_max" style="width:42px">
+    &nbsp;empty wt <input type="number" min="0" value="${st.empty_weight}" data-field="empty_weight" style="width:42px"></div>`;
+  (st.themes||[]).forEach((t,ti)=>{
+    h += `<div style="border:1px solid var(--line);border-radius:2px;padding:4px 6px;margin-bottom:5px">
+      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#00e5ff">Theme ${ti+1}
+        <span style="color:var(--fg)">weight</span>
+        <input type="number" min="0" value="${t.weight}" data-ti="${ti}" data-field="tweight" style="width:46px">
+        <span style="flex:1"></span>
+        <button class="sec xbtn" type="button" data-act="rmtheme" data-ti="${ti}" style="padding:1px 6px;font-size:11px">✕</button></div>`;
+    (t.items||[]).forEach((it,ii)=>{
+      h += `<div style="display:flex;align-items:center;gap:4px;margin-top:3px;font-size:11px">
+        ${lootImg(it.id)}
+        <span title="${it.id}" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${lootName(it.id)}</span>
+        <input type="number" min="0" max="64" value="${it.min}" data-ti="${ti}" data-ii="${ii}" data-field="min" title="min count" style="width:38px">
+        <input type="number" min="0" max="64" value="${it.max}" data-ti="${ti}" data-ii="${ii}" data-field="max" title="max count" style="width:38px">
+        <input type="number" min="1" value="${it.weight}" data-ti="${ti}" data-ii="${ii}" data-field="weight" title="rarity weight" style="width:42px">
+        <button class="sec xbtn" type="button" data-act="rmitem" data-ti="${ti}" data-ii="${ii}" style="padding:1px 6px;font-size:11px">✕</button></div>`;
+    });
+    h += `<input list="lootItemList" placeholder="+ add item (type to search)..." data-additem="${ti}" style="width:100%;margin-top:4px;font-size:11px;padding:2px 4px;box-sizing:border-box">`;
+  });
+  $('lootThemes').innerHTML = h;
+  lootRenderRaw();
+}
+if($('lootThemes')) $('lootThemes').addEventListener('input', e=>{
+  const el=e.target, f=el.dataset.field; if(!lootState||!f) return;
+  const v=parseInt(el.value,10);
+  if(f==='rolls_min') lootState.rolls_min=isNaN(v)?1:Math.max(1,v);
+  else if(f==='rolls_max') lootState.rolls_max=isNaN(v)?1:Math.max(1,v);
+  else if(f==='empty_weight') lootState.empty_weight=isNaN(v)?0:Math.max(0,v);
+  else if(f==='tweight') lootState.themes[+el.dataset.ti].weight=isNaN(v)?0:Math.max(0,v);
+  else { const it=lootState.themes[+el.dataset.ti].items[+el.dataset.ii];
+    if(f==='min') it.min=isNaN(v)?0:Math.max(0,Math.min(64,v));
+    else if(f==='max') it.max=isNaN(v)?0:Math.max(0,Math.min(64,v));
+    else if(f==='weight') it.weight=isNaN(v)?1:Math.max(1,v); }
+  lootRenderRaw();
+});
+if($('lootThemes')) $('lootThemes').addEventListener('change', e=>{
+  const el=e.target, ti=el.dataset.additem; if(ti===undefined||!lootState) return;
+  let id=(el.value||'').trim(); if(!id) return;
+  if(!id.includes(':')) id='minecraft:'+id;
+  lootState.themes[+ti].items.push({id,min:1,max:1,weight:1});
+  el.value=''; renderLoot();
+});
+if($('lootThemes')) $('lootThemes').addEventListener('click', e=>{
+  const b=e.target.closest('button'); if(!b||!lootState) return;
+  if(b.dataset.act==='rmtheme'){ lootState.themes.splice(+b.dataset.ti,1); renderLoot(); }
+  else if(b.dataset.act==='rmitem'){ lootState.themes[+b.dataset.ti].items.splice(+b.dataset.ii,1); renderLoot(); }
+});
+if($('lootAddTheme')) $('lootAddTheme').onclick=()=>{ if(!lootState) return; lootState.themes.push({weight:10,items:[]}); renderLoot(); };
+if($('lootRawToggle')) $('lootRawToggle').onchange=()=>{
+  const raw=$('lootRawToggle').checked;
+  $('lootJson').style.display=raw?'':'none';
+  $('lootThemes').style.display=raw?'none':'';
+  $('lootAddTheme').style.display=raw?'none':'';
+  if(raw){ lootRenderRaw(); }
+  else { try{ lootState=JSON.parse($('lootJson').value); }
+    catch(e){ $('lootStatus').textContent='invalid JSON: '+e.message; $('lootRawToggle').checked=true; $('lootJson').style.display=''; $('lootThemes').style.display='none'; return; }
+    renderLoot(); }
+};
+async function lootLoadItems(){
+  if(window._lootItemsLoaded || !$('lootItemList')) return;
+  try{ const items=await (await fetch('/api/loot-items')).json();
+    $('lootItemList').innerHTML = items.map(i=>`<option value="${i}">`).join(''); window._lootItemsLoaded=true; }catch(e){}
+}
+async function lootLoadPresets(){
+  if(window._lootPresetsLoaded || !$('lootPreset')) return;
+  try{ const list=await (await fetch('/api/loot-presets')).json();
+    list.forEach(p=>{ const o=document.createElement('option'); o.value=p.file; o.textContent=p.label+` (${p.items} items)`; $('lootPreset').appendChild(o); });
+    window._lootPresetsLoaded=true; }catch(e){}
+}
+if($('lootPreset')) $('lootPreset').onchange = async ()=>{
+  const f=$('lootPreset').value; if(!f) return;
+  try{ const r=await (await fetch('/api/loot-preset/'+encodeURIComponent(f))).json();
+    if(r && r.ok){ lootState=r.config; renderLoot(); $('lootStatus').textContent='loaded preset (not yet saved)'; }
+    else $('lootStatus').textContent='preset load failed';
+  }catch(e){ $('lootStatus').textContent='preset load failed'; }
+  $('lootPreset').value='';
+};
+async function loadLoot(){
+  await lootLoadItems(); await lootLoadPresets();
+  try {
+    const r = await (await fetch('/api/loot-table')).json();
+    if (!r || !r.ok) { $('lootStatus').textContent = 'error: ' + ((r && r.error) || 'could not load'); return; }
+    lootState = r.config; renderLoot();
+    $('lootStatus').textContent = r.is_default ? 'built-in default (not yet saved)' : 'project loot_table.json';
+    window._lootLoaded = true;
+  } catch (e) { $('lootStatus').textContent = 'error: ' + e; }
+}
+function lootSyncVisibility(){
+  if (!$('lootWrap')) return;
+  const on = !!($('interior') && $('interior').checked);
+  $('lootWrap').style.display = on ? '' : 'none';
+  if (on && !window._lootLoaded) loadLoot();
+}
+if ($('interior')) $('interior').addEventListener('change', lootSyncVisibility);
+if ($('lootReload')) $('lootReload').onclick = () => { window._lootLoaded=false; loadLoot(); };
+if ($('lootReset')) $('lootReset').onclick = async () => {
+  const r = await api('/api/loot-table/reset', {});
+  if (r && r.config) { lootState=r.config; renderLoot(); $('lootStatus').textContent='reset to built-in default'; }
+};
+if ($('lootSave')) $('lootSave').onclick = async () => {
+  if ($('lootRawToggle') && $('lootRawToggle').checked) {
+    try { lootState = JSON.parse($('lootJson').value); }
+    catch (e) { $('lootStatus').textContent = 'invalid JSON: ' + e.message; return; }
+  }
+  const r = await api('/api/loot-table', { config: lootState });
+  $('lootStatus').textContent = (r && r.ok) ? 'saved to project loot_table.json'
+    : ('error: ' + ((r && r.error) || 'save failed'));
+};
 
 // Inline zone preview: two stacked canvases (upper + deep caves), each a ZOOMED-IN centre
 // window of the area so the noise blotches read big and clear. Plain cave = GRAY, biome

@@ -1,0 +1,106 @@
+{
+  "empty_weight": 148,
+  "rolls_min": 4,
+  "rolls_max": 10,
+  "themes": [
+    {
+      "weight": 30,
+      "items": [
+        {
+          "id": "minecraft:coal",
+          "min": 1,
+          "max": 4,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:stone_axe",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:stone_spear",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:rotten_flesh",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:emerald",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:wheat",
+          "min": 2,
+          "max": 3,
+          "weight": 10
+        }
+      ]
+    },
+    {
+      "weight": 12,
+      "items": [
+        {
+          "id": "minecraft:leather_chestplate",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_helmet",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:fishing_rod",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:map",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        }
+      ]
+    },
+    {
+      "weight": 185,
+      "items": [
+        {
+          "id": "minecraft:copper_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:iron_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:golden_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:diamond_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        }
+      ]
+    }
+  ]
+}

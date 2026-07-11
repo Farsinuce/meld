@@ -1,0 +1,338 @@
+[
+  {
+    "file": "abandoned_camp_common_chest.json",
+    "label": "Abandoned Camp Common Chest",
+    "themes": 2,
+    "items": 26
+  },
+  {
+    "file": "abandoned_camp_secret_chest.json",
+    "label": "Abandoned Camp Secret Chest",
+    "themes": 3,
+    "items": 13
+  },
+  {
+    "file": "abandoned_mineshaft.json",
+    "label": "Abandoned Mineshaft",
+    "themes": 3,
+    "items": 22
+  },
+  {
+    "file": "ancient_city.json",
+    "label": "Ancient City",
+    "themes": 2,
+    "items": 29
+  },
+  {
+    "file": "ancient_city_ice_box.json",
+    "label": "Ancient City Ice Box",
+    "themes": 1,
+    "items": 5
+  },
+  {
+    "file": "bastion_bridge.json",
+    "label": "Bastion Bridge",
+    "themes": 5,
+    "items": 21
+  },
+  {
+    "file": "bastion_hoglin_stable.json",
+    "label": "Bastion Hoglin Stable",
+    "themes": 4,
+    "items": 25
+  },
+  {
+    "file": "bastion_other.json",
+    "label": "Bastion Other",
+    "themes": 5,
+    "items": 37
+  },
+  {
+    "file": "bastion_treasure.json",
+    "label": "Bastion Treasure",
+    "themes": 4,
+    "items": 29
+  },
+  {
+    "file": "buried_treasure.json",
+    "label": "Buried Treasure",
+    "themes": 7,
+    "items": 17
+  },
+  {
+    "file": "desert_pyramid.json",
+    "label": "Desert Pyramid",
+    "themes": 3,
+    "items": 21
+  },
+  {
+    "file": "end_city_treasure.json",
+    "label": "End City Treasure",
+    "themes": 2,
+    "items": 26
+  },
+  {
+    "file": "igloo_chest.json",
+    "label": "Igloo Chest",
+    "themes": 2,
+    "items": 8
+  },
+  {
+    "file": "jungle_temple.json",
+    "label": "Jungle Temple",
+    "themes": 2,
+    "items": 14
+  },
+  {
+    "file": "jungle_temple_dispenser.json",
+    "label": "Jungle Temple Dispenser",
+    "themes": 1,
+    "items": 1
+  },
+  {
+    "file": "nether_bridge.json",
+    "label": "Nether Bridge",
+    "themes": 2,
+    "items": 14
+  },
+  {
+    "file": "pillager_outpost.json",
+    "label": "Pillager Outpost",
+    "themes": 6,
+    "items": 13
+  },
+  {
+    "file": "ruined_portal.json",
+    "label": "Ruined Portal",
+    "themes": 2,
+    "items": 26
+  },
+  {
+    "file": "shipwreck_map.json",
+    "label": "Shipwreck Map",
+    "themes": 4,
+    "items": 12
+  },
+  {
+    "file": "shipwreck_supply.json",
+    "label": "Shipwreck Supply",
+    "themes": 3,
+    "items": 22
+  },
+  {
+    "file": "shipwreck_treasure.json",
+    "label": "Shipwreck Treasure",
+    "themes": 4,
+    "items": 13
+  },
+  {
+    "file": "simple_dungeon.json",
+    "label": "Simple Dungeon",
+    "themes": 3,
+    "items": 26
+  },
+  {
+    "file": "spawn_bonus_chest.json",
+    "label": "Spawn Bonus Chest",
+    "themes": 4,
+    "items": 16
+  },
+  {
+    "file": "stronghold_corridor.json",
+    "label": "Stronghold Corridor",
+    "themes": 2,
+    "items": 22
+  },
+  {
+    "file": "stronghold_crossing.json",
+    "label": "Stronghold Crossing",
+    "themes": 1,
+    "items": 8
+  },
+  {
+    "file": "stronghold_library.json",
+    "label": "Stronghold Library",
+    "themes": 2,
+    "items": 6
+  },
+  {
+    "file": "trial_chambers__corridor.json",
+    "label": "Trial Chambers / Corridor",
+    "themes": 1,
+    "items": 10
+  },
+  {
+    "file": "trial_chambers__entrance.json",
+    "label": "Trial Chambers / Entrance",
+    "themes": 1,
+    "items": 5
+  },
+  {
+    "file": "trial_chambers__intersection.json",
+    "label": "Trial Chambers / Intersection",
+    "themes": 1,
+    "items": 8
+  },
+  {
+    "file": "trial_chambers__intersection_barrel.json",
+    "label": "Trial Chambers / Intersection Barrel",
+    "themes": 1,
+    "items": 9
+  },
+  {
+    "file": "trial_chambers__reward_common.json",
+    "label": "Trial Chambers / Reward Common",
+    "themes": 1,
+    "items": 9
+  },
+  {
+    "file": "trial_chambers__reward_ominous_common.json",
+    "label": "Trial Chambers / Reward Ominous Common",
+    "themes": 1,
+    "items": 5
+  },
+  {
+    "file": "trial_chambers__reward_ominous_rare.json",
+    "label": "Trial Chambers / Reward Ominous Rare",
+    "themes": 1,
+    "items": 10
+  },
+  {
+    "file": "trial_chambers__reward_ominous_unique.json",
+    "label": "Trial Chambers / Reward Ominous Unique",
+    "themes": 1,
+    "items": 5
+  },
+  {
+    "file": "trial_chambers__reward_rare.json",
+    "label": "Trial Chambers / Reward Rare",
+    "themes": 1,
+    "items": 11
+  },
+  {
+    "file": "trial_chambers__reward_unique.json",
+    "label": "Trial Chambers / Reward Unique",
+    "themes": 1,
+    "items": 5
+  },
+  {
+    "file": "trial_chambers__supply.json",
+    "label": "Trial Chambers / Supply",
+    "themes": 1,
+    "items": 14
+  },
+  {
+    "file": "underwater_ruin_big.json",
+    "label": "Underwater Ruin Big",
+    "themes": 3,
+    "items": 15
+  },
+  {
+    "file": "underwater_ruin_small.json",
+    "label": "Underwater Ruin Small",
+    "themes": 3,
+    "items": 14
+  },
+  {
+    "file": "village__village_armorer.json",
+    "label": "Village / Village Armorer",
+    "themes": 1,
+    "items": 4
+  },
+  {
+    "file": "village__village_butcher.json",
+    "label": "Village / Village Butcher",
+    "themes": 1,
+    "items": 6
+  },
+  {
+    "file": "village__village_cartographer.json",
+    "label": "Village / Village Cartographer",
+    "themes": 2,
+    "items": 6
+  },
+  {
+    "file": "village__village_desert_house.json",
+    "label": "Village / Village Desert House",
+    "themes": 2,
+    "items": 9
+  },
+  {
+    "file": "village__village_fisher.json",
+    "label": "Village / Village Fisher",
+    "themes": 1,
+    "items": 7
+  },
+  {
+    "file": "village__village_fletcher.json",
+    "label": "Village / Village Fletcher",
+    "themes": 1,
+    "items": 6
+  },
+  {
+    "file": "village__village_mason.json",
+    "label": "Village / Village Mason",
+    "themes": 1,
+    "items": 8
+  },
+  {
+    "file": "village__village_plains_house.json",
+    "label": "Village / Village Plains House",
+    "themes": 2,
+    "items": 11
+  },
+  {
+    "file": "village__village_savanna_house.json",
+    "label": "Village / Village Savanna House",
+    "themes": 2,
+    "items": 11
+  },
+  {
+    "file": "village__village_shepherd.json",
+    "label": "Village / Village Shepherd",
+    "themes": 1,
+    "items": 8
+  },
+  {
+    "file": "village__village_snowy_house.json",
+    "label": "Village / Village Snowy House",
+    "themes": 2,
+    "items": 11
+  },
+  {
+    "file": "village__village_taiga_house.json",
+    "label": "Village / Village Taiga House",
+    "themes": 2,
+    "items": 13
+  },
+  {
+    "file": "village__village_tannery.json",
+    "label": "Village / Village Tannery",
+    "themes": 2,
+    "items": 9
+  },
+  {
+    "file": "village__village_temple.json",
+    "label": "Village / Village Temple",
+    "themes": 1,
+    "items": 6
+  },
+  {
+    "file": "village__village_toolsmith.json",
+    "label": "Village / Village Toolsmith",
+    "themes": 1,
+    "items": 8
+  },
+  {
+    "file": "village__village_weaponsmith.json",
+    "label": "Village / Village Weaponsmith",
+    "themes": 2,
+    "items": 21
+  },
+  {
+    "file": "woodland_mansion.json",
+    "label": "Woodland Mansion",
+    "themes": 4,
+    "items": 25
+  }
+]

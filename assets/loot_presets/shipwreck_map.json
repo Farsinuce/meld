@@ -1,0 +1,99 @@
+{
+  "empty_weight": 153,
+  "rolls_min": 6,
+  "rolls_max": 6,
+  "themes": [
+    {
+      "weight": 1,
+      "items": [
+        {
+          "id": "minecraft:map",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 38,
+      "items": [
+        {
+          "id": "minecraft:compass",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:map",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:clock",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:paper",
+          "min": 1,
+          "max": 10,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:feather",
+          "min": 1,
+          "max": 5,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 5,
+          "weight": 5
+        }
+      ]
+    },
+    {
+      "weight": 6,
+      "items": [
+        {
+          "id": "minecraft:coast_armor_trim_smithing_template",
+          "min": 2,
+          "max": 2,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 185,
+      "items": [
+        {
+          "id": "minecraft:copper_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:iron_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:golden_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:diamond_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        }
+      ]
+    }
+  ]
+}

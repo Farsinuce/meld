@@ -1,0 +1,83 @@
+{
+  "empty_weight": 2,
+  "rolls_min": 4,
+  "rolls_max": 9,
+  "themes": [
+    {
+      "weight": 46,
+      "items": [
+        {
+          "id": "minecraft:gold_nugget",
+          "min": 1,
+          "max": 3,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:short_grass",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:tall_grass",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:bread",
+          "min": 1,
+          "max": 4,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:wheat_seeds",
+          "min": 1,
+          "max": 5,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:emerald",
+          "min": 1,
+          "max": 4,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:acacia_sapling",
+          "min": 1,
+          "max": 2,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:saddle",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:torch",
+          "min": 1,
+          "max": 2,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:bucket",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 3,
+      "items": [
+        {
+          "id": "minecraft:bundle",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

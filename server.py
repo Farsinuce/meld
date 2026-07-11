@@ -1566,8 +1566,10 @@ def _runner(job: dict, state: dict) -> bool:
         base_bbox = cell_bbox(rx, rz, size, origin["lat"], origin["lon"], scale_f)
     arnis_bbox = expand_bbox_for_seam(base_bbox, seam, origin, scale_f)
 
+    _lt = PROJECT.root / "loot_table.json"
     cmd = build_arnis_cmd(str(exe), arnis_bbox, out, settings, origin, elevation, seed,
-                          osm_file=job.get("osm_file"))
+                          osm_file=job.get("osm_file"),
+                          loot_table=str(_lt) if _lt.exists() else None)
     if job.get("osm_file"):
         log(f"  [{cell_key}] using pre-fetched OSM (no Overpass call)")
     log("RUN " + " ".join(cmd))
@@ -3682,6 +3684,151 @@ def api_recommend():
 # ── Border & zones (Advanced) ────────────────────────────────────────────────
 # Build concentric country/zone rings (in world block coords), preview them on the map, and export
 # WorldGuard regions.yml + per-ring point files. "Trim to ring" reuses /api/grid with the hard ring.
+_LOOT_DEFAULT_CACHE = None
+_VALID_ITEMS_CACHE = None
+_LOOT_PRESET_DIR = BASE_DIR / "assets" / "loot_presets"
+
+
+def _valid_items() -> set:
+    """Set of valid Minecraft item ids (bundled from the 1.21 registry). Empty
+    set if the bundle is missing, in which case id validation is skipped."""
+    global _VALID_ITEMS_CACHE
+    if _VALID_ITEMS_CACHE is None:
+        try:
+            data = json.loads((BASE_DIR / "assets" / "valid_items.json").read_text(encoding="utf-8"))
+            _VALID_ITEMS_CACHE = set(data)
+        except Exception:
+            _VALID_ITEMS_CACHE = set()
+    return _VALID_ITEMS_CACHE
+
+
+def _loot_default() -> dict:
+    """The built-in default loot table, exactly as the arnis binary defines it.
+    Generated once via `arnis --dump-loot-table` into a bundled asset and cached,
+    so the UI's default + "reset to default" always match the shipped binary."""
+    global _LOOT_DEFAULT_CACHE
+    if _LOOT_DEFAULT_CACHE is not None:
+        return _LOOT_DEFAULT_CACHE
+    cache_path = BASE_DIR / "assets" / "loot_table_default.json"
+    if not cache_path.exists():
+        exe = resolve_arnis_exe()
+        if exe:
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                # --bbox is a required arg; a dummy satisfies clap, then arnis
+                # dumps the table and exits before any generation happens.
+                subprocess.run([str(exe), "--dump-loot-table", str(cache_path),
+                                "--bbox", "0,0,0.001,0.001"],
+                               timeout=30, capture_output=True)
+            except Exception as ex:
+                log(f"loot: could not generate default table: {ex}")
+    try:
+        _LOOT_DEFAULT_CACHE = json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception:
+        _LOOT_DEFAULT_CACHE = {}
+    return _LOOT_DEFAULT_CACHE
+
+
+def _validate_loot(cfg) -> str | None:
+    """Structural check mirroring the Rust validator; returns an error string or None."""
+    if not isinstance(cfg, dict):
+        return "loot table must be a JSON object"
+    for k in ("empty_weight", "rolls_min", "rolls_max"):
+        if not isinstance(cfg.get(k), int) or isinstance(cfg.get(k), bool) or cfg[k] < 0:
+            return f"'{k}' must be a non-negative integer"
+    if cfg["rolls_max"] < cfg["rolls_min"]:
+        return "rolls_max must be >= rolls_min"
+    themes = cfg.get("themes")
+    if not isinstance(themes, list) or not themes:
+        return "'themes' must be a non-empty list"
+    for ti, t in enumerate(themes):
+        if not isinstance(t, dict) or not isinstance(t.get("weight"), int) or t["weight"] < 0:
+            return f"theme {ti}: 'weight' must be a non-negative integer"
+        items = t.get("items")
+        if not isinstance(items, list) or not items:
+            return f"theme {ti}: 'items' must be a non-empty list"
+        for ii, it in enumerate(items):
+            if not isinstance(it, dict):
+                return f"theme {ti} item {ii}: must be an object"
+            iid = it.get("id")
+            if not isinstance(iid, str) or ":" not in iid:
+                return f"theme {ti} item {ii}: 'id' must look like 'minecraft:apple'"
+            reg = _valid_items()
+            if reg and iid not in reg:
+                return f"theme {ti} item {ii}: unknown item id '{iid}'"
+            for k in ("min", "max", "weight"):
+                if not isinstance(it.get(k), int) or isinstance(it.get(k), bool):
+                    return f"theme {ti} item {ii}: '{k}' must be an integer"
+            if it["min"] < 0 or it["min"] > it["max"] or it["max"] > 64:
+                return f"theme {ti} item {ii}: bad count range (need 0 <= min <= max <= 64)"
+    return None
+
+
+@app.route("/api/loot-table", methods=["GET", "POST"])
+def api_loot_table():
+    """GET returns the project's loot table (or the built-in default if none saved);
+    POST validates + saves a custom table to <project>/loot_table.json."""
+    lt = PROJECT.root / "loot_table.json"
+    if request.method == "GET":
+        if lt.exists():
+            try:
+                return jsonify({"ok": True, "is_default": False,
+                                "config": json.loads(lt.read_text(encoding="utf-8"))})
+            except Exception as ex:
+                return jsonify({"ok": False,
+                                "error": f"stored loot_table.json is unreadable: {ex}"}), 400
+        return jsonify({"ok": True, "is_default": True, "config": _loot_default()})
+    cfg = (request.json or {}).get("config")
+    err = _validate_loot(cfg)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    lt.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/loot-table/reset", methods=["POST"])
+def api_loot_table_reset():
+    """Delete the project's custom loot table so generation falls back to the default."""
+    lt = PROJECT.root / "loot_table.json"
+    try:
+        lt.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return jsonify({"ok": True, "config": _loot_default()})
+
+
+@app.route("/api/loot-items")
+def api_loot_items():
+    """The valid Minecraft item ids (for the loot editor's searchable picker).
+    Sprites for each are served from /assets/items/<id_without_namespace>.png."""
+    return jsonify(sorted(_valid_items()))
+
+
+@app.route("/api/loot-presets")
+def api_loot_presets():
+    """List the bundled vanilla-structure loot presets (trial chambers, strongholds, etc.)."""
+    idx = _LOOT_PRESET_DIR / "_index.json"
+    if not idx.exists():
+        return jsonify([])
+    try:
+        return jsonify(json.loads(idx.read_text(encoding="utf-8")))
+    except Exception:
+        return jsonify([])
+
+
+@app.route("/api/loot-preset/<path:fname>")
+def api_loot_preset(fname):
+    """Return one preset's loot config so the editor can load it. Path-safe."""
+    safe = Path(fname).name  # strip any directory components
+    p = _LOOT_PRESET_DIR / safe
+    if not safe.endswith(".json") or not p.exists() or p.parent != _LOOT_PRESET_DIR:
+        return jsonify({"ok": False, "error": "unknown preset"}), 404
+    try:
+        return jsonify({"ok": True, "config": json.loads(p.read_text(encoding="utf-8"))})
+    except Exception as ex:
+        return jsonify({"ok": False, "error": str(ex)}), 400
+
+
 @app.route("/api/border/countries")
 def api_border_countries():
     try:

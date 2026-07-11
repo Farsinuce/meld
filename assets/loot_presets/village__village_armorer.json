@@ -1,0 +1,36 @@
+{
+  "empty_weight": 0,
+  "rolls_min": 1,
+  "rolls_max": 5,
+  "themes": [
+    {
+      "weight": 8,
+      "items": [
+        {
+          "id": "minecraft:iron_ingot",
+          "min": 1,
+          "max": 3,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:bread",
+          "min": 1,
+          "max": 4,
+          "weight": 4
+        },
+        {
+          "id": "minecraft:iron_helmet",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:emerald",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "empty_weight": 2,
+  "rolls_min": 4,
+  "rolls_max": 9,
+  "themes": [
+    {
+      "weight": 36,
+      "items": [
+        {
+          "id": "minecraft:clay_ball",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:green_dye",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:cactus",
+          "min": 1,
+          "max": 4,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:wheat",
+          "min": 1,
+          "max": 7,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:bread",
+          "min": 1,
+          "max": 4,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:dead_bush",
+          "min": 1,
+          "max": 3,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:emerald",
+          "min": 1,
+          "max": 3,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 3,
+      "items": [
+        {
+          "id": "minecraft:bundle",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

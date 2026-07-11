@@ -1,0 +1,42 @@
+{
+  "empty_weight": 0,
+  "rolls_min": 1,
+  "rolls_max": 1,
+  "themes": [
+    {
+      "weight": 10,
+      "items": [
+        {
+          "id": "minecraft:enchanted_golden_apple",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:flow_armor_trim_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:flow_banner_pattern",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:music_disc_creator",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:heavy_core",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

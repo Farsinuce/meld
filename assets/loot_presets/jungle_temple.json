@@ -1,0 +1,101 @@
+{
+  "empty_weight": 2,
+  "rolls_min": 3,
+  "rolls_max": 7,
+  "themes": [
+    {
+      "weight": 89,
+      "items": [
+        {
+          "id": "minecraft:diamond",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:iron_ingot",
+          "min": 1,
+          "max": 5,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:gold_ingot",
+          "min": 2,
+          "max": 7,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:bamboo",
+          "min": 1,
+          "max": 3,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:emerald",
+          "min": 1,
+          "max": 3,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:bone",
+          "min": 4,
+          "max": 6,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:rotten_flesh",
+          "min": 3,
+          "max": 7,
+          "weight": 16
+        },
+        {
+          "id": "minecraft:leather",
+          "min": 1,
+          "max": 5,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:copper_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:iron_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:diamond_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 3,
+      "items": [
+        {
+          "id": "minecraft:wild_armor_trim_smithing_template",
+          "min": 2,
+          "max": 2,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

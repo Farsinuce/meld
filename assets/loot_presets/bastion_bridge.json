@@ -1,0 +1,158 @@
+{
+  "empty_weight": 20,
+  "rolls_min": 6,
+  "rolls_max": 9,
+  "themes": [
+    {
+      "weight": 1,
+      "items": [
+        {
+          "id": "minecraft:lodestone",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 13,
+      "items": [
+        {
+          "id": "minecraft:crossbow",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:spectral_arrow",
+          "min": 10,
+          "max": 28,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:gilded_blackstone",
+          "min": 8,
+          "max": 12,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:crying_obsidian",
+          "min": 3,
+          "max": 8,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:gold_block",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:gold_ingot",
+          "min": 4,
+          "max": 9,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:iron_ingot",
+          "min": 4,
+          "max": 9,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_sword",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_chestplate",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_helmet",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_leggings",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_boots",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_axe",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 5,
+      "items": [
+        {
+          "id": "minecraft:string",
+          "min": 1,
+          "max": 6,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:leather",
+          "min": 1,
+          "max": 3,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:arrow",
+          "min": 5,
+          "max": 17,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:iron_nugget",
+          "min": 2,
+          "max": 6,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:gold_nugget",
+          "min": 2,
+          "max": 6,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 12,
+      "items": [
+        {
+          "id": "minecraft:snout_armor_trim_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 10,
+      "items": [
+        {
+          "id": "minecraft:netherite_upgrade_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

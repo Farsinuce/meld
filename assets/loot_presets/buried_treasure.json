@@ -1,0 +1,144 @@
+{
+  "empty_weight": 148,
+  "rolls_min": 10,
+  "rolls_max": 18,
+  "themes": [
+    {
+      "weight": 1,
+      "items": [
+        {
+          "id": "minecraft:heart_of_the_sea",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 35,
+      "items": [
+        {
+          "id": "minecraft:iron_ingot",
+          "min": 1,
+          "max": 4,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:gold_ingot",
+          "min": 1,
+          "max": 4,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:tnt",
+          "min": 1,
+          "max": 2,
+          "weight": 5
+        }
+      ]
+    },
+    {
+      "weight": 15,
+      "items": [
+        {
+          "id": "minecraft:emerald",
+          "min": 4,
+          "max": 8,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:diamond",
+          "min": 1,
+          "max": 2,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:prismarine_crystals",
+          "min": 1,
+          "max": 5,
+          "weight": 5
+        }
+      ]
+    },
+    {
+      "weight": 3,
+      "items": [
+        {
+          "id": "minecraft:leather_chestplate",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:iron_sword",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:iron_spear",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 2,
+      "items": [
+        {
+          "id": "minecraft:cooked_cod",
+          "min": 2,
+          "max": 4,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:cooked_salmon",
+          "min": 2,
+          "max": 4,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 1,
+      "items": [
+        {
+          "id": "minecraft:potion",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 185,
+      "items": [
+        {
+          "id": "minecraft:copper_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:iron_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:golden_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:diamond_nautilus_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        }
+      ]
+    }
+  ]
+}

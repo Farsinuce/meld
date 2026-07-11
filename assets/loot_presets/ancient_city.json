@@ -1,0 +1,191 @@
+{
+  "empty_weight": 75,
+  "rolls_min": 6,
+  "rolls_max": 11,
+  "themes": [
+    {
+      "weight": 84,
+      "items": [
+        {
+          "id": "minecraft:enchanted_golden_apple",
+          "min": 1,
+          "max": 2,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:music_disc_otherside",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:compass",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:sculk_catalyst",
+          "min": 1,
+          "max": 2,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:diamond_hoe",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:lead",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:diamond_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:leather",
+          "min": 1,
+          "max": 5,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:music_disc_13",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:music_disc_cat",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:diamond_leggings",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:sculk",
+          "min": 4,
+          "max": 10,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:sculk_sensor",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:candle",
+          "min": 1,
+          "max": 4,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:amethyst_shard",
+          "min": 1,
+          "max": 15,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:experience_bottle",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:glow_berries",
+          "min": 1,
+          "max": 15,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:iron_leggings",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:echo_shard",
+          "min": 1,
+          "max": 3,
+          "weight": 4
+        },
+        {
+          "id": "minecraft:disc_fragment_5",
+          "min": 1,
+          "max": 3,
+          "weight": 4
+        },
+        {
+          "id": "minecraft:potion",
+          "min": 1,
+          "max": 3,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:book",
+          "min": 3,
+          "max": 10,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:bone",
+          "min": 1,
+          "max": 15,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:soul_torch",
+          "min": 1,
+          "max": 15,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:coal",
+          "min": 6,
+          "max": 15,
+          "weight": 7
+        }
+      ]
+    },
+    {
+      "weight": 80,
+      "items": [
+        {
+          "id": "minecraft:ward_armor_trim_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 4
+        },
+        {
+          "id": "minecraft:silence_armor_trim_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

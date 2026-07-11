@@ -1,0 +1,149 @@
+{
+  "empty_weight": 9,
+  "rolls_min": 3,
+  "rolls_max": 4,
+  "themes": [
+    {
+      "weight": 101,
+      "items": [
+        {
+          "id": "minecraft:ender_pearl",
+          "min": 1,
+          "max": 1,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:diamond",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:iron_ingot",
+          "min": 1,
+          "max": 5,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:gold_ingot",
+          "min": 1,
+          "max": 3,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:redstone",
+          "min": 4,
+          "max": 9,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:bread",
+          "min": 1,
+          "max": 3,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:apple",
+          "min": 1,
+          "max": 3,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:iron_pickaxe",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:iron_sword",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:iron_chestplate",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:iron_helmet",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:iron_leggings",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:iron_boots",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:golden_apple",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:leather",
+          "min": 1,
+          "max": 5,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:copper_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:iron_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:diamond_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:music_disc_otherside",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 10,
+      "items": [
+        {
+          "id": "minecraft:eye_armor_trim_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

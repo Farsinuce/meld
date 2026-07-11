@@ -1,0 +1,60 @@
+{
+  "empty_weight": 0,
+  "rolls_min": 1,
+  "rolls_max": 4,
+  "themes": [
+    {
+      "weight": 62,
+      "items": [
+        {
+          "id": "minecraft:iron_ingot",
+          "min": 1,
+          "max": 5,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:gold_ingot",
+          "min": 1,
+          "max": 3,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:redstone",
+          "min": 4,
+          "max": 9,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:coal",
+          "min": 3,
+          "max": 8,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:bread",
+          "min": 1,
+          "max": 3,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:apple",
+          "min": 1,
+          "max": 3,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:iron_pickaxe",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

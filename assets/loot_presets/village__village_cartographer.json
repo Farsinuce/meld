@@ -1,0 +1,53 @@
+{
+  "empty_weight": 2,
+  "rolls_min": 2,
+  "rolls_max": 6,
+  "themes": [
+    {
+      "weight": 50,
+      "items": [
+        {
+          "id": "minecraft:map",
+          "min": 1,
+          "max": 3,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:paper",
+          "min": 1,
+          "max": 5,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:compass",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:bread",
+          "min": 1,
+          "max": 4,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:stick",
+          "min": 1,
+          "max": 2,
+          "weight": 5
+        }
+      ]
+    },
+    {
+      "weight": 3,
+      "items": [
+        {
+          "id": "minecraft:bundle",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

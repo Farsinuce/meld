@@ -1,0 +1,96 @@
+{
+  "empty_weight": 0,
+  "rolls_min": 3,
+  "rolls_max": 5,
+  "themes": [
+    {
+      "weight": 18,
+      "items": [
+        {
+          "id": "minecraft:arrow",
+          "min": 4,
+          "max": 14,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:tipped_arrow",
+          "min": 4,
+          "max": 8,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:tipped_arrow",
+          "min": 4,
+          "max": 8,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:baked_potato",
+          "min": 2,
+          "max": 4,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:glow_berries",
+          "min": 2,
+          "max": 10,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:acacia_planks",
+          "min": 3,
+          "max": 6,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:moss_block",
+          "min": 2,
+          "max": 5,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:bone_meal",
+          "min": 2,
+          "max": 5,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:tuff",
+          "min": 5,
+          "max": 10,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:torch",
+          "min": 3,
+          "max": 6,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:potion",
+          "min": 2,
+          "max": 2,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:potion",
+          "min": 2,
+          "max": 2,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:stone_pickaxe",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:milk_bucket",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

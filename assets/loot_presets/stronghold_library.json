@@ -1,0 +1,53 @@
+{
+  "empty_weight": 0,
+  "rolls_min": 3,
+  "rolls_max": 11,
+  "themes": [
+    {
+      "weight": 52,
+      "items": [
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 3,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:paper",
+          "min": 2,
+          "max": 7,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:map",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:compass",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 1,
+          "weight": 10
+        }
+      ]
+    },
+    {
+      "weight": 1,
+      "items": [
+        {
+          "id": "minecraft:eye_armor_trim_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

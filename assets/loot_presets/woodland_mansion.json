@@ -1,0 +1,177 @@
+{
+  "empty_weight": 1,
+  "rolls_min": 6,
+  "rolls_max": 11,
+  "themes": [
+    {
+      "weight": 107,
+      "items": [
+        {
+          "id": "minecraft:lead",
+          "min": 1,
+          "max": 1,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:golden_apple",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:enchanted_golden_apple",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:music_disc_13",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:music_disc_cat",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:chainmail_chestplate",
+          "min": 1,
+          "max": 1,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:diamond_hoe",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:diamond_chestplate",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 1,
+          "weight": 10
+        }
+      ]
+    },
+    {
+      "weight": 175,
+      "items": [
+        {
+          "id": "minecraft:iron_ingot",
+          "min": 1,
+          "max": 4,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:gold_ingot",
+          "min": 1,
+          "max": 4,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:bread",
+          "min": 1,
+          "max": 1,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:wheat",
+          "min": 1,
+          "max": 4,
+          "weight": 20
+        },
+        {
+          "id": "minecraft:bucket",
+          "min": 1,
+          "max": 1,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:redstone",
+          "min": 1,
+          "max": 4,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:coal",
+          "min": 1,
+          "max": 4,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:melon_seeds",
+          "min": 2,
+          "max": 4,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:pumpkin_seeds",
+          "min": 2,
+          "max": 4,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:beetroot_seeds",
+          "min": 2,
+          "max": 4,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:resin_clump",
+          "min": 2,
+          "max": 4,
+          "weight": 50
+        }
+      ]
+    },
+    {
+      "weight": 40,
+      "items": [
+        {
+          "id": "minecraft:bone",
+          "min": 1,
+          "max": 8,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:gunpowder",
+          "min": 1,
+          "max": 8,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:rotten_flesh",
+          "min": 1,
+          "max": 8,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:string",
+          "min": 1,
+          "max": 8,
+          "weight": 10
+        }
+      ]
+    },
+    {
+      "weight": 2,
+      "items": [
+        {
+          "id": "minecraft:vex_armor_trim_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

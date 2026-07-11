@@ -1,0 +1,18 @@
+{
+  "empty_weight": 0,
+  "rolls_min": 1,
+  "rolls_max": 2,
+  "themes": [
+    {
+      "weight": 30,
+      "items": [
+        {
+          "id": "minecraft:arrow",
+          "min": 2,
+          "max": 7,
+          "weight": 30
+        }
+      ]
+    }
+  ]
+}

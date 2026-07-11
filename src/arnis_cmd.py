@@ -94,7 +94,8 @@ def effective_elev_zoom(settings: dict, origin_lat: float = 45.0) -> int:
 
 def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
                     settings: dict, origin: dict, elevation: dict | None,
-                    seed: int, osm_file: str | None = None) -> list[str]:
+                    seed: int, osm_file: str | None = None,
+                    loot_table: str | None = None) -> list[str]:
     s, w, n, e = bbox["south"], bbox["west"], bbox["north"], bbox["east"]
     scale = float(settings.get("scale", 1.0) or 1.0)
     cmd = [
@@ -151,6 +152,10 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     cmd += ["--roof", "true" if settings.get("roof", True) else "false"]
     cmd += ["--interior", "true" if settings.get("interior", False) else "false"]
     cmd += ["--land-cover", "true" if settings.get("land_cover", True) else "false"]
+    # Custom chest loot table (project loot_table.json). Absent = built-in default.
+    # Chests only spawn where Buildings AND Interior are both on.
+    if loot_table:
+        cmd += ["--loot-table", str(loot_table)]
     # Skip OSM buildings (keeps roads, bridges, railways, land cover, water, terrain).
     if not settings.get("buildings", True):
         cmd.append("--no-buildings")

@@ -1,0 +1,42 @@
+{
+  "empty_weight": 0,
+  "rolls_min": 2,
+  "rolls_max": 3,
+  "themes": [
+    {
+      "weight": 36,
+      "items": [
+        {
+          "id": "minecraft:trial_key",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:stick",
+          "min": 2,
+          "max": 5,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:wooden_axe",
+          "min": 1,
+          "max": 1,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:honeycomb",
+          "min": 2,
+          "max": 8,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:arrow",
+          "min": 5,
+          "max": 10,
+          "weight": 10
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "empty_weight": 1,
+  "rolls_min": 5,
+  "rolls_max": 9,
+  "themes": [
+    {
+      "weight": 398,
+      "items": [
+        {
+          "id": "minecraft:obsidian",
+          "min": 1,
+          "max": 2,
+          "weight": 40
+        },
+        {
+          "id": "minecraft:flint",
+          "min": 1,
+          "max": 4,
+          "weight": 40
+        },
+        {
+          "id": "minecraft:iron_nugget",
+          "min": 9,
+          "max": 18,
+          "weight": 40
+        },
+        {
+          "id": "minecraft:flint_and_steel",
+          "min": 1,
+          "max": 1,
+          "weight": 40
+        },
+        {
+          "id": "minecraft:fire_charge",
+          "min": 1,
+          "max": 1,
+          "weight": 40
+        },
+        {
+          "id": "minecraft:golden_apple",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:gold_nugget",
+          "min": 4,
+          "max": 24,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:golden_sword",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:golden_axe",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:golden_hoe",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:golden_shovel",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:golden_pickaxe",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:golden_boots",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:golden_chestplate",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:golden_helmet",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:golden_leggings",
+          "min": 1,
+          "max": 1,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:glistering_melon_slice",
+          "min": 4,
+          "max": 12,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:golden_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:light_weighted_pressure_plate",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:golden_carrot",
+          "min": 4,
+          "max": 12,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:clock",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:gold_ingot",
+          "min": 2,
+          "max": 8,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:bell",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:enchanted_golden_apple",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:gold_block",
+          "min": 1,
+          "max": 2,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 3,
+      "items": [
+        {
+          "id": "minecraft:lodestone",
+          "min": 1,
+          "max": 2,
+          "weight": 2
+        }
+      ]
+    }
+  ]
+}

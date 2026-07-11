@@ -41,7 +41,9 @@ experimental/_work/
 # Pack-BUILD tooling - local-only, never shipped. The baked tree-packs/ ship; the scripts that build
 # them do not (they hardcode local scratch paths and need the raw art, so they cannot run for a cloner).
 # Kept on disk for local re-bakes; just untracked from the public repo.
-tools/
+tools/*
+# ...except the flag-contract smoke test, which is a portable guardrail worth tracking.
+!tools/flag_smoke.py
 
 # Local run scratch (benchmark/debug output, never committed)
 run*.log

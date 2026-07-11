@@ -1,0 +1,254 @@
+{
+  "empty_weight": 20,
+  "rolls_min": 8,
+  "rolls_max": 9,
+  "themes": [
+    {
+      "weight": 89,
+      "items": [
+        {
+          "id": "minecraft:diamond_pickaxe",
+          "min": 1,
+          "max": 1,
+          "weight": 6
+        },
+        {
+          "id": "minecraft:diamond_shovel",
+          "min": 1,
+          "max": 1,
+          "weight": 6
+        },
+        {
+          "id": "minecraft:crossbow",
+          "min": 1,
+          "max": 1,
+          "weight": 6
+        },
+        {
+          "id": "minecraft:ancient_debris",
+          "min": 1,
+          "max": 1,
+          "weight": 12
+        },
+        {
+          "id": "minecraft:netherite_scrap",
+          "min": 1,
+          "max": 1,
+          "weight": 4
+        },
+        {
+          "id": "minecraft:spectral_arrow",
+          "min": 10,
+          "max": 22,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:piglin_banner_pattern",
+          "min": 1,
+          "max": 1,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:music_disc_pigstep",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:golden_carrot",
+          "min": 6,
+          "max": 17,
+          "weight": 12
+        },
+        {
+          "id": "minecraft:golden_apple",
+          "min": 1,
+          "max": 1,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 1,
+          "weight": 10
+        }
+      ]
+    },
+    {
+      "weight": 20,
+      "items": [
+        {
+          "id": "minecraft:iron_sword",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:iron_block",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:golden_boots",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_axe",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:gold_block",
+          "min": 1,
+          "max": 1,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:crossbow",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:gold_ingot",
+          "min": 1,
+          "max": 6,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:iron_ingot",
+          "min": 1,
+          "max": 6,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:golden_sword",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_chestplate",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_helmet",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_leggings",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_boots",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:crying_obsidian",
+          "min": 1,
+          "max": 5,
+          "weight": 2
+        }
+      ]
+    },
+    {
+      "weight": 13,
+      "items": [
+        {
+          "id": "minecraft:gilded_blackstone",
+          "min": 1,
+          "max": 5,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:iron_chain",
+          "min": 2,
+          "max": 10,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:magma_cream",
+          "min": 2,
+          "max": 6,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:bone_block",
+          "min": 3,
+          "max": 6,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:iron_nugget",
+          "min": 2,
+          "max": 8,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:obsidian",
+          "min": 4,
+          "max": 6,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:gold_nugget",
+          "min": 2,
+          "max": 8,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:string",
+          "min": 4,
+          "max": 6,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:arrow",
+          "min": 5,
+          "max": 17,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:cooked_porkchop",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 12,
+      "items": [
+        {
+          "id": "minecraft:snout_armor_trim_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 10,
+      "items": [
+        {
+          "id": "minecraft:netherite_upgrade_smithing_template",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

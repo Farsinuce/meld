@@ -1,0 +1,123 @@
+{
+  "empty_weight": 0,
+  "rolls_min": 9,
+  "rolls_max": 9,
+  "themes": [
+    {
+      "weight": 4,
+      "items": [
+        {
+          "id": "minecraft:stone_axe",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:wooden_axe",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        }
+      ]
+    },
+    {
+      "weight": 4,
+      "items": [
+        {
+          "id": "minecraft:stone_pickaxe",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:wooden_pickaxe",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        }
+      ]
+    },
+    {
+      "weight": 11,
+      "items": [
+        {
+          "id": "minecraft:apple",
+          "min": 1,
+          "max": 2,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:bread",
+          "min": 1,
+          "max": 2,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:salmon",
+          "min": 1,
+          "max": 2,
+          "weight": 3
+        }
+      ]
+    },
+    {
+      "weight": 41,
+      "items": [
+        {
+          "id": "minecraft:stick",
+          "min": 1,
+          "max": 12,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:oak_planks",
+          "min": 1,
+          "max": 12,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:oak_log",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:spruce_log",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:birch_log",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:jungle_log",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:acacia_log",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:dark_oak_log",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:mangrove_log",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        }
+      ]
+    }
+  ]
+}

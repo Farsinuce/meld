@@ -1,0 +1,42 @@
+{
+  "empty_weight": 0,
+  "rolls_min": 4,
+  "rolls_max": 10,
+  "themes": [
+    {
+      "weight": 9,
+      "items": [
+        {
+          "id": "minecraft:suspicious_stew",
+          "min": 2,
+          "max": 6,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_carrot",
+          "min": 1,
+          "max": 10,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:baked_potato",
+          "min": 1,
+          "max": 10,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:packed_ice",
+          "min": 2,
+          "max": 6,
+          "weight": 2
+        },
+        {
+          "id": "minecraft:snowball",
+          "min": 2,
+          "max": 6,
+          "weight": 4
+        }
+      ]
+    }
+  ]
+}

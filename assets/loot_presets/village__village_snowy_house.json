@@ -1,0 +1,83 @@
+{
+  "empty_weight": 2,
+  "rolls_min": 4,
+  "rolls_max": 9,
+  "themes": [
+    {
+      "weight": 53,
+      "items": [
+        {
+          "id": "minecraft:blue_ice",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:snow_block",
+          "min": 1,
+          "max": 1,
+          "weight": 4
+        },
+        {
+          "id": "minecraft:potato",
+          "min": 1,
+          "max": 7,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:bread",
+          "min": 1,
+          "max": 4,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:beetroot_seeds",
+          "min": 1,
+          "max": 5,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:beetroot_soup",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:furnace",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:emerald",
+          "min": 1,
+          "max": 4,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:snowball",
+          "min": 1,
+          "max": 7,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:coal",
+          "min": 1,
+          "max": 4,
+          "weight": 5
+        }
+      ]
+    },
+    {
+      "weight": 3,
+      "items": [
+        {
+          "id": "minecraft:bundle",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

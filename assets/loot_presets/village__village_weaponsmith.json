@@ -1,0 +1,143 @@
+{
+  "empty_weight": 2,
+  "rolls_min": 4,
+  "rolls_max": 9,
+  "themes": [
+    {
+      "weight": 107,
+      "items": [
+        {
+          "id": "minecraft:diamond",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:iron_ingot",
+          "min": 1,
+          "max": 5,
+          "weight": 10
+        },
+        {
+          "id": "minecraft:gold_ingot",
+          "min": 1,
+          "max": 3,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:bread",
+          "min": 1,
+          "max": 3,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:apple",
+          "min": 1,
+          "max": 3,
+          "weight": 15
+        },
+        {
+          "id": "minecraft:iron_pickaxe",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:iron_sword",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:iron_spear",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:copper_spear",
+          "min": 1,
+          "max": 1,
+          "weight": 7
+        },
+        {
+          "id": "minecraft:iron_chestplate",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:iron_helmet",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:iron_leggings",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:iron_boots",
+          "min": 1,
+          "max": 1,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:obsidian",
+          "min": 3,
+          "max": 7,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:oak_sapling",
+          "min": 3,
+          "max": 7,
+          "weight": 5
+        },
+        {
+          "id": "minecraft:saddle",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:copper_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:iron_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:diamond_horse_armor",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "weight": 3,
+      "items": [
+        {
+          "id": "minecraft:bundle",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}
