@@ -433,11 +433,11 @@
       <label>Terrain
         <span class="i" title="Generate real elevation/terrain (uses the elevation lock). Off = flat ground.">i</span>
         <input id="terrain" type="checkbox"></label>
-      <label>AWS-only elevation
-        <span class="i" title="Skip the regional high-res elevation providers (USGS, IGN, Japan GSI) and use only AWS Terrain Tiles. Recommended for big parallel runs: the regional providers rate-limit under many cells at once ('Elevation request retry' per tile, slow). Trades ~30m resolution for far fewer retries.">i</span>
+      <label>Legacy AWS elevation
+        <span class="i" title="Force the legacy AWS Terrain Tiles source (~30m) and skip BOTH the regional high-res providers (USGS, IGN, Japan GSI) AND the default global Mapterhorn tiles. Normally left off: by default Meld uses the regional providers where they cover the area and Mapterhorn (global terrarium, pyramid hole-proofing) everywhere else. Only use this if Mapterhorn is unreachable and you need the old behaviour.">i</span>
         <input id="awsonly" type="checkbox"></label>
       <label>Regional elevation only (no AWS)
-        <span class="i" title="The inverse: use ONLY the regional high-res providers (USGS 1m, IGN France 1m, IGN Spain 5m, Japan GSI 5m) and NEVER AWS Terrain Tiles — for areas where the AWS terrarium set has broken no-data tiles that carve holes/cliffs into the terrain. The terrain warm-up pre-fills the regional provider's tile cache in one polite pass, so parallel cells read from disk instead of rate-limiting the provider (which is what used to force the silent AWS fallback). If a fetch still fails, the cell ERRORS and is retried instead of silently using AWS. Only works where a regional provider has coverage (US, France, Spain, Japan).">i</span>
+        <span class="i" title="Use ONLY the regional high-res providers (USGS 1m, IGN France 1m, IGN Spain 5m, Japan GSI 5m) plus the global Mapterhorn tiles, and NEVER legacy AWS Terrain Tiles — for areas where the old AWS terrarium set has broken no-data tiles that carve holes/cliffs into the terrain. The terrain warm-up pre-fills the selected provider's tile cache in one polite pass, so parallel cells read from disk instead of rate-limiting the provider. If a fetch still fails, the cell ERRORS and is retried instead of silently using AWS.">i</span>
         <input id="regionalonly" type="checkbox"></label>
       <label>Buildings
         <span class="i" title="Generate OSM buildings. Off = a roads + land-cover only world (roads, bridges, railways, water and terrain are still built).">i</span>
