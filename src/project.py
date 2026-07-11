@@ -71,6 +71,14 @@ def default_settings() -> dict:
         "tile_invariant_rendering": True,
         "generate_3d_models": False,        # reserved no-op in this fork (light-docs/05)
         "poi_3d_only": True,                # reserved
+        # Bundled schematic props placed at OSM features. All on by default. The UI
+        # currently exposes the wired families; the rest stay on until wired.
+        "props": {
+            "boat": True, "car": True, "crane": True, "excavator": True,
+            "fountain": True, "helicopter": True, "lighthouse": True,
+            "playground": True, "starship": True, "tombstone": True,
+            "tractor": True, "windturbine": True,
+        },
         "overpass_url": "",
         "timeout": 600,
         # Generation is mostly CPU bound now. The rule that matters: keep workers x threads at or

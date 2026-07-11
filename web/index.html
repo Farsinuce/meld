@@ -408,6 +408,9 @@
       <label>3D models
         <span class="i" title="Fetch + place real 3D structure models for landmarks (3DMR + Wikimedia). Off = faster & smaller, plain block buildings. Needs internet.">i</span>
         <input id="m3d" type="checkbox"></label>
+      <label>Props
+        <span class="i" title="Bundled 3D props placed at real OSM features: boats on open water, cranes and excavators on construction sites, tractors on farmland, wind turbines at wind generators, and lighthouses. Untick a family to skip it (no extra time or RAM). More families (cars, fountains, playgrounds, tombstones) are coming.">i</span></label>
+      <div id="propsMenu" style="display:flex;flex-wrap:wrap;gap:4px 10px;margin:2px 0 6px;font-size:12px"></div>
       <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:6px"></div>
       <label>Terrain
         <span class="i" title="Generate real elevation/terrain (uses the elevation lock). Off = flat ground.">i</span>
@@ -1704,6 +1707,7 @@ async function refreshState() {
   if (document.activeElement !== $('size')) $('size').value = snapSize(st.job_size_regions);
   $('ground').value = st.ground_level; $('road').value = st.road_detail_level;
   if ($('treeRealm')) $('treeRealm').value = st.tree_realm || 'auto';
+  { const pv = st.props || {}; PROP_FAMILIES.forEach(([k]) => { const el = $('prop_' + k); if (el) el.checked = pv[k] !== false; }); }
   { const ts = st.tree_sizes || {small:true,medium:true,big:true,tall:true,giant:false};
     const map = {szSmall:'small',szMedium:'medium',szBig:'big',szTall:'tall',szGiant:'giant'};
     for (const id in map) if ($(id)) $(id).checked = !!ts[map[id]]; }
@@ -2178,6 +2182,15 @@ function cbSyncVisibility(){
   if ($('caveBiomesWrap')) $('caveBiomesWrap').style.display = $('caves').checked ? '' : 'none';
 }
 if ($('caves')) $('caves').addEventListener('change', cbSyncVisibility);
+
+// ---- Schematic props (per-family toggle; only wired families shown) ----
+const PROP_FAMILIES = [['boat','Boats'],['crane','Cranes'],['excavator','Excavators'],['tractor','Tractors'],['windturbine','Wind turbines'],['lighthouse','Lighthouses']];
+(function(){
+  const m = $('propsMenu'); if (!m) return;
+  m.innerHTML = PROP_FAMILIES.map(([k,l]) => `<label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input id="prop_${k}" type="checkbox" checked><span>${l}</span></label>`).join('');
+  const collect = () => { const o = {}; PROP_FAMILIES.forEach(([k]) => { const el = $('prop_'+k); if (el) o[k] = el.checked; }); return o; };
+  PROP_FAMILIES.forEach(([k]) => { const el = $('prop_'+k); if (el) el.addEventListener('change', () => api('/api/settings', { props: collect() })); });
+})();
 
 // ---- Chest loot editor: visual, sprite-backed, with vanilla presets ----
 let lootState = null;

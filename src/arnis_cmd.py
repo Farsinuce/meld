@@ -227,6 +227,20 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     if not settings.get("generate_3d_models", False):
         cmd.append("--no-3d")
 
+    # Bundled schematic props at OSM features. --props takes an allow-list; omit it
+    # when every family is on (byte-identical default), else pass the enabled set
+    # ("none" if all off). A family missing from the settings dict counts as on, so
+    # families not yet exposed in the UI stay enabled.
+    PROP_FAMILIES = ("boat", "car", "crane", "excavator", "fountain", "helicopter",
+                     "lighthouse", "playground", "starship", "tombstone", "tractor",
+                     "windturbine")
+    pv = settings.get("props") or {}
+    enabled = [f for f in PROP_FAMILIES if pv.get(f, True)]
+    if not enabled:
+        cmd += ["--props", "none"]
+    elif len(enabled) != len(PROP_FAMILIES):
+        cmd += ["--props", ",".join(enabled)]
+
     # Schematic trees (default on): stamp a bundled region pack so the fork places detailed
     # schematic trees instead of procedural ones. The realm is picked from the selection centre
     # (Auto) or forced via the "tree_realm" setting; the fork loads <realm>/region.json and the
