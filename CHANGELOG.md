@@ -7,14 +7,14 @@ All notable changes to Meld are documented here. The format is based on
 ## [1.6.0] - 2026-07-12 - "Above & Beyond"
 
 An above-ground release to match the underground one. The bundled Arnis fork jumps to
-**3.1.0**, reaching feature parity with upstream louis-e/arnis 3.0.0, and Meld surfaces
+**3.0.1**, reaching feature parity with upstream louis-e/arnis 3.0.0, and Meld surfaces
 the new world-shaping options: bundled 3D props at real map features, a visual chest-loot
 editor, per-world game mode and time-of-day settings, an in-world map item, richer building
 facades, and a global Mapterhorn elevation source that replaces the legacy AWS tiles'
 broken-tile cliffs. Everything stays seam-safe: the master-origin elevation grid and
 tile-invariant rendering are unchanged, so multi-cell worlds still merge seamlessly.
 
-> Engine note: the bundled Arnis fork moves Teddy563/arnis 2.9.3 -> 3.1.0. Every upstream
+> Engine note: the bundled Arnis fork moves Teddy563/arnis 2.9.3 -> 3.0.1. Every upstream
 > 3.0.0 feature was ported faithfully and audited for cross-tile seam-safety. Existing
 > worlds are untouched; new behaviour applies to newly generated cells only.
 
@@ -43,7 +43,7 @@ tile-invariant rendering are unchanged, so multi-cell worlds still merge seamles
   catenary**, **street lamps**, **highway tunnels**, **modular bridges**, **helipad pads**,
   **more surface materials**, **climate-driven biomes** with warm / cold / frozen oceans
   and rivers, **street trees on plazas**, trees that no longer grow through bridge decks,
-  and canopies that drape over low roofs. All from the 3.1.0 engine, driven automatically
+  and canopies that drape over low roofs. All from the 3.0.1 engine, driven automatically
   per cell.
 
 ### Changed
