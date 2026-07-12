@@ -4,6 +4,32 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.6.1] - 2026-07-12
+
+Engine refresh: bundles the Arnis fork at **3.0.1**, which completes upstream
+3.0.0 parity with a big **building-facade** upgrade and several fixes. All new
+generation behaviour is internal to the per-cell pipeline, so worlds pick it up
+automatically with no Meld UI change; every change was audited for cross-tile
+seam-safety before shipping.
+
+### Changed
+
+- **Richer building facades.** Downtowns render six distinct skyscraper styles
+  (glass / glass-corner / grid / contemporary / modern / masonry) chosen from
+  real OSM material and historic tags, plus base-course plinths, full-glass shop
+  storefronts, string-course cornices, coherent window frames on commercial and
+  historic buildings, and a per-building window offset so neighbouring buildings
+  stop sharing one citywide window grid.
+- **Climate water biomes** (warm / cold / frozen oceans and rivers), proper
+  `aeroway=helipad` pads, street trees allowed on plazas, farmyard surfaces, and
+  straight power-line spans.
+
+### Fixed
+
+- A **stream-to-disk corruption guard** (large exports could truncate saved
+  chunk data), a **CLI spawn-Y** fix, and **basin-gated farmland irrigation**
+  (no more crops washed out on slopes).
+
 ## [1.6.0] - 2026-07-12 — "Above & Beyond"
 
 An above-ground release to match the underground one. The bundled Arnis fork reaches **3.0.0

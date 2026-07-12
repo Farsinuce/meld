@@ -499,7 +499,7 @@ def _write_run_report() -> None:
                    "ram_speed": hw.get("ram_speed"), "ram_modules": hw.get("ram_modules"),
                    "drive_type": hw.get("drive_type")}
         rep = runreport.build_report(
-            world_name=name, meld_version="1.6.0", run=run, timing=timing,
+            world_name=name, meld_version="1.6.1", run=run, timing=timing,
             timeline=timeline, grid=PROJECT.load_grid(), prefetch_timings=pf_timings,
             settings=PROJECT.settings(), actual_mb=run.get("actual_mb"),
             max_workers=POOL.max_workers, machine=machine)
@@ -1411,7 +1411,7 @@ _META_SKIP_SETTINGS = {
 def _world_meta_dict() -> dict:
     data = PROJECT.load()
     return {
-        "meld_version": "1.6.0",
+        "meld_version": "1.6.1",
         "saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "name": data.get("name", "Meld World"),
         "origin": data.get("origin", {}),                  # lat, lon, locked
