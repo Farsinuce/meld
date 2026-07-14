@@ -836,6 +836,11 @@
         <input id="dpPreview" type="checkbox"></label>
       <label style="margin-top:2px">Preview style
         <select id="dpPreviewMode" style="width:120px"><option value="grayscale">grayscale</option><option value="hillshade">hillshade</option></select></label>
+      <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:6px">
+        <button class="sec" id="btnMaptPreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Render the NEW Mapterhorn heightmap for your drawn selection (or planned cells) using the exact provider generation uses, and overlay it on the map. Unlike the tile 'Height preview' above (legacy AWS terrarium), this shows what the world's terrain will actually be.">⛰ Preview Mapterhorn (overlay)</button>
+        <select id="maptMode" style="width:auto;font-size:11px"><option value="hillshade">hillshade</option><option value="grayscale">grayscale</option></select>
+        <button class="sec xbtn" id="btnMaptClear" type="button" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:11px">✕</button>
+      </div>
       <div style="border-top:1px solid var(--line);margin:9px 0 0;padding-top:8px"></div>
       <div class="stat" style="margin-bottom:3px">Downloaded packs <button id="btnDpList" class="sec" style="width:auto;margin:0;padding:1px 7px;font-size:11px;float:right">↻</button></div>
       <div id="dpList" class="stat" style="color:var(--mut)">…</div>
@@ -3894,6 +3899,25 @@ async function dpBakeMapterhorn() {
   if (_dpPoll) clearInterval(_dpPoll);
   _dpPoll = setInterval(dpPollStatus, 1000); dpPollStatus();
 }
+// Mapterhorn heightmap PREVIEW as a Leaflet image overlay (the real provider render, so it
+// matches the world) — distinct from the legacy AWS tile 'Height preview' checkbox above.
+let _maptOverlay = null;
+async function maptPreview() {
+  const mode = ($('maptMode') && $('maptMode').value) || 'hillshade';
+  $('dpCov').textContent = 'Rendering Mapterhorn terrain…';
+  const r = await api('/api/elevationmap', { mode });
+  if (!r || !r.ok) { $('dpCov').textContent = (r && r.error) || 'elevation map failed'; return; }
+  if (!map.getPane('maptPane')) { map.createPane('maptPane'); map.getPane('maptPane').style.zIndex = 355; }
+  if (_maptOverlay) { map.removeLayer(_maptOverlay); _maptOverlay = null; }
+  _maptOverlay = L.imageOverlay(r.image + '?t=' + Date.now(), r.bounds,
+    { opacity: 0.7, pane: 'maptPane', interactive: false }).addTo(map);
+  const lo = (r.min_m != null) ? Math.round(r.min_m) : '?';
+  const hi = (r.max_m != null) ? Math.round(r.max_m) : '?';
+  $('dpCov').textContent = `Mapterhorn terrain (${r.provider || 'mapterhorn'}) · ${lo}…${hi} m`;
+}
+function maptClear() { if (_maptOverlay) { map.removeLayer(_maptOverlay); _maptOverlay = null; } }
+if ($('btnMaptPreview')) $('btnMaptPreview').onclick = maptPreview;
+if ($('btnMaptClear')) $('btnMaptClear').onclick = maptClear;
 async function dpRefetchView() {
   if (map.getZoom() < 11) { $('dpCov').textContent = 'Zoom in to the bad area first (≥11) — re-fetch covers only the current view.'; return; }
   const b = map.getBounds();

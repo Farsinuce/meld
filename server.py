@@ -4148,6 +4148,94 @@ def api_climatemap_img():
     return resp
 
 
+@app.route("/api/elevationmap", methods=["POST"])
+def api_elevationmap():
+    """Render the elevation heightmap for the drawn selection (or planned cells) through the arnis
+    fork's --elevation-map mode, which uses the REAL provider stack generation uses (Mapterhorn /
+    regional / AWS), so the preview matches the world's terrain. Returns the PNG + geographic bounds
+    for a Leaflet imageOverlay + the min/max metres. Fast (no worldgen); runs synchronously."""
+    origin = PROJECT.origin()
+    if origin.get("lat") is None:
+        return jsonify({"ok": False, "error": "set the origin first"}), 400
+    exe = resolve_arnis_exe()
+    if not exe:
+        return jsonify({"ok": False, "error": "arnis binary not found"}), 400
+    st = PROJECT.settings()
+    sel = PROJECT.load_selection()
+    if sel:
+        b = sel["bbox"]
+    else:
+        grid = PROJECT.load_grid()
+        scale_f = float(st.get("scale", 1.0) or 1.0)
+        b = None
+        for key in grid:
+            parts = key.split(",")
+            if len(parts) != 3:
+                continue
+            cb = cell_bbox(int(parts[0]), int(parts[1]), int(parts[2]),
+                           origin["lat"], origin["lon"], scale_f)
+            if b is None:
+                b = dict(cb)
+            else:
+                b["south"] = min(b["south"], cb["south"])
+                b["west"] = min(b["west"], cb["west"])
+                b["north"] = max(b["north"], cb["north"])
+                b["east"] = max(b["east"], cb["east"])
+        if b is None:
+            return jsonify({"ok": False, "error": "draw a selection (or plan cells) first"}), 400
+    seed = int((PROJECT.load().get("elevation") or {}).get("seed", 1) or 1)
+    mode = (request.get_json(silent=True) or {}).get("mode", "hillshade")
+    if mode not in ("hillshade", "grayscale"):
+        mode = "hillshade"
+    out_dir = Path(PROJECT.root) / "elevmap"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    prefix = out_dir / "elev"
+    cmd = [str(exe),
+           "--bbox", f"{b['south']},{b['west']},{b['north']},{b['east']}",
+           "--scale", str(float(st.get("scale", 1.0) or 1.0)),
+           "--master-origin-lat", str(origin["lat"]),
+           "--master-origin-lng", str(origin["lon"]),
+           "--tile-invariant-rendering", str(seed),
+           "--elevation-map", str(prefix),
+           "--elevation-map-mode", mode]
+    # Use the SAME provider generation will: force legacy AWS only if that toggle is set.
+    if st.get("aws_only_elevation"):
+        cmd += ["--aws-only-elevation"]
+    elif st.get("regional_elevation_only"):
+        cmd += ["--regional-elevation-only"]
+    try:
+        pr = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=300)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return jsonify({"ok": False, "error": f"elevation-map run failed: {e}"}), 400
+    stats = None
+    for line in (pr.stdout or "").splitlines():
+        if line.startswith("ELEVMAP "):
+            try:
+                stats = json.loads(line[len("ELEVMAP "):])
+            except ValueError:
+                pass
+    if pr.returncode != 0 or stats is None:
+        tail = ((pr.stderr or "") + (pr.stdout or ""))[-300:]
+        return jsonify({"ok": False, "error": f"elevation-map failed (rc={pr.returncode}): {tail}"}), 400
+    bb = stats.get("bbox", [b["south"], b["west"], b["north"], b["east"]])
+    return jsonify({"ok": True,
+                    "bounds": [[bb[0], bb[1]], [bb[2], bb[3]]],
+                    "image": "/api/elevationmap/img",
+                    "min_m": stats.get("min_m"), "max_m": stats.get("max_m"),
+                    "provider": stats.get("provider"), "mode": stats.get("mode", mode)})
+
+
+@app.route("/api/elevationmap/img")
+def api_elevationmap_img():
+    p = Path(PROJECT.root) / "elevmap" / "elev.png"
+    if not p.is_file():
+        return jsonify({"ok": False, "error": "no elevation map rendered yet"}), 404
+    resp = send_file(str(p), mimetype="image/png")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 # ── one-click Leaf server setup ───────────────────────────────────────────────
 # Turns the finished world into a ready-to-run Leaf server. Every step that
 # downloads or executes anything checks an explicit confirm flag SERVER-SIDE;
