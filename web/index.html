@@ -476,7 +476,11 @@
         <div id="treeSizeSliders" style="margin-top:2px"></div>
         <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:4px">
           <button class="sec" id="tsReset" type="button" style="width:auto;padding:4px 8px;font-size:11px" title="All tiers back to defaults (small/medium/big/tall 100%, giant off).">Reset</button>
+          <button class="sec" id="tsPreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Show the spatial mix of tree sizes these sliders + the project scale produce (a speckle map, one colour per tier). Updates live as you drag. Scroll to zoom, drag to pan.">🌳 Preview sizes</button>
+          <button class="sec xbtn" id="tsClear" type="button" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:11px">✕</button>
         </div>
+        <canvas id="treeCanvas" width="256" height="160" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504;margin-top:5px"></canvas>
+        <div id="treeLegend" class="stat" style="margin-top:3px"></div>
       </div>
       <label>Roofs
         <span class="i" title="Generate building roofs.">i</span>
@@ -2311,6 +2315,106 @@ function tsSyncVisibility(){
 if ($('trees')) $('trees').addEventListener('change', tsSyncVisibility);
 tsSyncVisibility();
 
+// ── Reusable zoom + pan for a preview canvas (scroll = zoom, drag = pan, dbl-click = reset) ──
+function makeZoomable(canvas){
+  if (!canvas || canvas._zoomable) return;
+  canvas._zoomable = true;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;overflow:hidden;touch-action:none;border-radius:2px';
+  wrap.title = 'scroll = zoom · drag = pan · double-click = reset';
+  wrap.style.marginTop = canvas.style.marginTop || '';   // keep the canvas's own top spacing
+  canvas.style.marginTop = '0';
+  canvas.parentNode.insertBefore(wrap, canvas);
+  wrap.appendChild(canvas);
+  canvas.style.transformOrigin = '0 0';
+  canvas.style.cursor = 'grab';
+  let s = 1, tx = 0, ty = 0, drag = false, lx = 0, ly = 0;
+  const apply = () => { canvas.style.transform = `translate(${tx}px,${ty}px) scale(${s})`; };
+  const clamp = () => {
+    const w = wrap.clientWidth, h = canvas.clientHeight;
+    tx = Math.max(Math.min(0, w - w * s), Math.min(0, tx));
+    ty = Math.max(Math.min(0, h - h * s), Math.min(0, ty));
+  };
+  canvas._resetZoom = () => { s = 1; tx = 0; ty = 0; apply(); };
+  wrap.addEventListener('wheel', e => {
+    e.preventDefault();
+    const r = wrap.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+    const ns = Math.max(1, Math.min(12, s * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+    tx = px - (px - tx) * (ns / s); ty = py - (py - ty) * (ns / s); s = ns;
+    if (s <= 1.001) { s = 1; tx = 0; ty = 0; }
+    clamp(); apply();
+  }, { passive: false });
+  wrap.addEventListener('pointerdown', e => {
+    drag = true; lx = e.clientX; ly = e.clientY; canvas.style.cursor = 'grabbing';
+    try { wrap.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  wrap.addEventListener('pointermove', e => {
+    if (!drag) return; tx += e.clientX - lx; ty += e.clientY - ly; lx = e.clientX; ly = e.clientY; clamp(); apply();
+  });
+  const end = () => { drag = false; canvas.style.cursor = 'grab'; };
+  wrap.addEventListener('pointerup', end);
+  wrap.addEventListener('pointercancel', end);
+  wrap.addEventListener('dblclick', () => { s = 1; tx = 0; ty = 0; apply(); });
+}
+['climateCanvas', 'cbCanvasU', 'cbCanvasD', 'treeCanvas'].forEach(id => makeZoomable($(id)));
+
+// ── Tree-size preview: client-side speckle map of the size mix the sliders + scale produce ──
+const TREE_TIER_COLORS = {
+  small: [150, 210, 120], medium: [96, 170, 90], big: [56, 120, 60],
+  tall: [70, 150, 150], giant: [60, 90, 170],
+};
+const _TREE_ORDER = ['small', 'medium', 'big', 'tall', 'giant'];
+// base share per 1000 by scale band, matching arnis region.rs base_share_for_scale (S,M,B,T,G).
+function treeBaseShare(scale){
+  if (scale < 0.3) return [650, 335, 15, 0, 0];
+  if (scale < 0.7) return [380, 440, 165, 15, 0];
+  if (scale < 1.0) return [260, 440, 230, 70, 0];
+  return [200, 400, 280, 95, 25];
+}
+function _treeHash(x, y){   // cheap uniform 32-bit hash -> [0,1000); only the MIX must match, not world coords
+  let h = Math.imul(x | 0, 0x9E3779B1) ^ Math.imul(y | 0, 0x85EBCA77);
+  h = Math.imul(h ^ (h >>> 15), 0xC2B2AE3D); h ^= h >>> 13;
+  return (h >>> 0) % 1000;
+}
+let _treeShown = false;
+function renderTreePreview(){
+  const c = $('treeCanvas'); if (!c) return;
+  const scale = (typeof projScale === 'number' && projScale > 0) ? projScale : 0.3;
+  const weights = (typeof tsCollect === 'function') ? tsCollect() : {};
+  const base = treeBaseShare(scale);
+  const w = base.map((b, i) => b * ((weights[_TREE_ORDER[i]] != null ? weights[_TREE_ORDER[i]] : 100) / 100));
+  const sum = w.reduce((a, b) => a + b, 0);
+  const W = c.width, H = c.height, ctx = c.getContext('2d'), img = ctx.createImageData(W, H);
+  const counts = [0, 0, 0, 0, 0];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){
+    let tier = 0;
+    if (sum > 0){
+      const target = (_treeHash(x + 101, y + 233) / 1000) * sum;
+      let cum = 0;
+      for (let i = 0; i < 5; i++){ cum += w[i]; if (target < cum){ tier = i; break; } }
+    }
+    counts[tier]++;
+    const col = TREE_TIER_COLORS[_TREE_ORDER[tier]], o = (y * W + x) * 4;
+    img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  c.style.display = '';
+  if (c._resetZoom) c._resetZoom();
+  const total = W * H;
+  $('treeLegend').innerHTML = _TREE_ORDER.map((k, i) =>
+    '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:8px">' +
+    `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgb(${TREE_TIER_COLORS[k].join(',')})"></span>` +
+    k + ' ' + (counts[i] * 100 / total).toFixed(0) + '%</span>').join('');
+}
+if ($('tsPreview')) $('tsPreview').onclick = () => { _treeShown = true; renderTreePreview(); };
+if ($('tsClear')) $('tsClear').onclick = () => {
+  _treeShown = false;
+  if ($('treeCanvas')) $('treeCanvas').style.display = 'none';
+  if ($('treeLegend')) $('treeLegend').innerHTML = '';
+};
+// live update while dragging sliders, once the preview is shown
+TREE_SIZES.forEach(([k]) => { const el = $('ts_' + k); if (el) el.addEventListener('input', () => { if (_treeShown) renderTreePreview(); }); });
+
 // ---- Schematic props (per-family toggle; only wired families shown) ----
 const PROP_FAMILIES = [['boat','Boats'],['car','Cars'],['crane','Cranes'],['excavator','Excavators'],['fountain','Fountains'],['lighthouse','Lighthouses'],['playground','Playgrounds'],['tombstone','Tombstones'],['tractor','Tractors'],['windturbine','Wind turbines']];
 (function(){
@@ -2529,6 +2633,7 @@ if ($('cbPreview')) $('cbPreview').onclick = async () => {
   caveMapStats = r.stats;
   cbRender();
   cbShowStats();
+  ['cbCanvasU', 'cbCanvasD'].forEach(id => { const c = $(id); if (c && c._resetZoom) c._resetZoom(); });
 };
 if ($('cbClear')) $('cbClear').onclick = () => {
   cbImgData.upper = cbImgData.deep = null;
@@ -2562,6 +2667,7 @@ if ($('climatePreview')) $('climatePreview').onclick = async () => {
       c.width = im.naturalWidth; c.height = im.naturalHeight;
       c.getContext('2d').drawImage(im, 0, 0);
       c.style.display = '';
+      if (c._resetZoom) c._resetZoom();
       resolve();
     };
     im.onerror = () => { $('climateStats').textContent = 'image load failed'; resolve(); };
