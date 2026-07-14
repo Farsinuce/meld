@@ -2926,6 +2926,14 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
     bboxes) and the generation (cell bboxes), so the two always agree."""
     settings = PROJECT.settings()
     origin = PROJECT.origin()
+    # Re-assert the configured worker count at the START of EVERY run (initial + all retry paths
+    # funnel through here), so a run never inherits a stale pool size — e.g. a 2 left behind by a
+    # prior low-scale AWS-burst clamp. The clamp (now legacy-AWS-only) may lower it again later,
+    # but the default Mapterhorn/regional path keeps exactly what you set.
+    _cfg_workers = min(WorkerPool.MAX_WORKERS_HARD_CAP, int(settings.get("max_workers") or 4))
+    if POOL.max_workers != _cfg_workers:
+        POOL.set_max_workers(_cfg_workers)
+        log(f"[Workers] generation start: set pool to your {_cfg_workers} worker(s)")
     exe = resolve_arnis_exe()
     # NOTE: stream-to-disk is delivered via the ARNIS_STREAM_TO_DISK env var in _runner
     # (the merged Arnis dropped the CLI flag). The env var is harmless on a binary that
@@ -3029,14 +3037,19 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
         try:
             uw = min(WorkerPool.MAX_WORKERS_HARD_CAP, int(settings.get("max_workers") or 4))
             sc = float(settings.get("scale", 1.0) or 1.0)
-            if settings.get("regional_elevation_only"):
-                # This clamp reads the AWS terrarium cache, which regional-only cells never
-                # touch — measuring it would clamp to 2 on a coverage number that is irrelevant.
-                # The regional warm already filled the provider cache; and if a cell still
-                # rate-limits on a live fetch, strict mode errors + retries it (off the now-warm
-                # cache) instead of bursting into bad data. So keep the user's worker count.
-                log(f"[Workers] full {uw} workers — regional-only elevation (warm fills the "
-                    f"provider cache; live fetches retry on error, no AWS burst)")
+            # The AWS-burst clamp is LEGACY-AWS-ONLY. It exists because >2 cells live-fetching the
+            # AWS terrarium set at scale<0.5 burst S3 and truncate terrain into flat seams. The
+            # DEFAULT source is now Mapterhorn (plus the regional providers), which cells fetch
+            # instead of the AWS terrarium set — so its coverage is irrelevant here, and measuring
+            # it would wrongly hold the whole run at 2 workers even though you set more. Mapterhorn
+            # caps its own downloads and has pyramid-parent hole-proofing (it degrades gracefully,
+            # never the flat-seam truncation AWS does), and regional-only retries on error off the
+            # warmed provider cache — so in both cases keep the user's full worker count. (Bake
+            # Mapterhorn elevation up front if you want the run fully offline.) Only force the clamp
+            # when the run is pinned to legacy AWS via --aws-only-elevation.
+            if not settings.get("aws_only_elevation"):
+                log(f"[Workers] using your {uw} worker(s) — Mapterhorn/regional elevation "
+                    f"(no legacy-AWS S3 burst risk)")
             elif sc < 0.5 and uw > 2:
                 bs = [c["bbox"] for c in cells if c.get("bbox")]
                 if bs:
@@ -3046,10 +3059,13 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
                     cov = dp.coverage_elevation(ubb, zoom=ez2)
                     if cov.get("pct", 0) < 99.0:
                         POOL.set_max_workers(2)
-                        log(f"[Workers] clamped to 2 — elevation only {cov.get('pct', 0)}% cached at "
-                            f"z{ez2} (scale<0.5 AWS-burst safety); cells would re-fetch S3 live")
+                        log(f"[Workers] clamped to 2 — LEGACY AWS elevation only {cov.get('pct', 0)}% "
+                            f"cached at z{ez2} (scale<0.5 S3-burst safety); cells would re-fetch S3 live")
                     else:
-                        log(f"[Workers] full {uw} workers — elevation {cov.get('pct', 0)}% cached at z{ez2}")
+                        log(f"[Workers] using your {uw} worker(s) — AWS elevation "
+                            f"{cov.get('pct', 0)}% cached at z{ez2}")
+            else:
+                log(f"[Workers] using your {uw} worker(s) — legacy AWS elevation")
         except Exception as ex:  # noqa: BLE001
             log(f"[Workers] coverage clamp check skipped ({ex}); keeping user worker count")
 
