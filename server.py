@@ -47,6 +47,7 @@ from src import arnis_cmd
 from src.prefetch import (run_prefetch, preview_clumps, run_terrain_prefetch,
                           run_mapterhorn_bake, purge_small_tiles)
 from src import datapack as dp
+from src import finalcheck
 from src import osm_pack as op
 from src import osm_grid
 from src import border
@@ -548,6 +549,12 @@ def _osm_cache_dir() -> Path:
 # missing land cover). Suspect cells are ringed in the UI and can be redone in one click.
 _CELL_HEALTH_LOCK = threading.Lock()
 _CELL_HEALTH: dict[str, dict] = {}
+
+# Post-generation missing-region final check: interior holes / dropped cells detected on disk
+# after a run, surfaced on the map (black square + ⚠️) and re-queueable through the normal retry
+# path. Reset per project. See src/finalcheck.py.
+_MISSING_LOCK = threading.Lock()
+_MISSING: list[dict] = []
 
 
 def _cell_health_path() -> Path:
@@ -2039,6 +2046,33 @@ def _maybe_run_export() -> None:
     _start_export_job("compress", force_keep_both=force_keep)
 
 
+def _scan_missing_regions() -> list[dict]:
+    """Scan the merged world for interior missing/empty regions (finalcheck) and store the result
+    in _MISSING for /api/status. Best-effort: never raises into the run-completion path. Should run
+    BEFORE any export converts .mca -> .linear (finalcheck tolerates .linear too, but .mca lets it
+    detect header-only 'empty' regions)."""
+    try:
+        origin = PROJECT.origin()
+        if origin.get("lat") is None:
+            return []
+        scale = float(PROJECT.settings().get("scale", 1.0) or 1.0)
+        world = master_world_path(create=False)
+        missing = finalcheck.find_missing_regions(PROJECT.load_grid(), world, origin, scale)
+        with _MISSING_LOCK:
+            _MISSING.clear()
+            _MISSING.extend(missing)
+        if missing:
+            cells = finalcheck.missing_cell_keys(missing)
+            log(f"[FinalCheck] ⚠️ {len(missing)} missing region(s) across {len(cells)} cell(s) — "
+                f"use 'Retry missing' to regenerate")
+        else:
+            log("[FinalCheck] no missing regions — world looks complete")
+        return missing
+    except Exception as e:  # noqa: BLE001
+        log(f"[FinalCheck] warning: {e}")
+        return []
+
+
 def _on_complete(job, ok, err):
     if not ok:
         ck = job.get("cell_key")
@@ -2086,6 +2120,7 @@ def _on_complete(job, ok, err):
     if run_done:
         _write_run_report()   # benchmark JSON + HTML into the world folder (best-effort)
         _maybe_write_map_item()  # add the world map item (before export may convert regions)
+        _scan_missing_regions()  # ⚠️ flag interior holes (before export converts .mca -> .linear)
         _maybe_run_export()   # compress/export the finished world if a format is selected
 
 
@@ -3246,6 +3281,42 @@ def api_cell_regenerate_cells():
     return jsonify({"ok": True, "queued": queued, "count": len(queued), "prefetching": prefetching})
 
 
+@app.route("/api/finalcheck", methods=["POST"])
+def api_finalcheck():
+    """On-demand missing-region scan of the merged world (the same one that auto-runs at end of a
+    run). Returns the interior holes + the owning cell keys, and stores them for /api/status so the
+    map draws the black-square + ⚠️ markers."""
+    if _run_active():
+        return jsonify({"ok": False, "error": "a generation is running — wait for it to finish"}), 409
+    missing = _scan_missing_regions()
+    return jsonify({"ok": True, "missing": missing,
+                    "cells": finalcheck.missing_cell_keys(missing), "count": len(missing)})
+
+
+@app.route("/api/finalcheck/retry", methods=["POST"])
+def api_finalcheck_retry():
+    """Re-queue the cells that own the detected missing regions through the normal generation path
+    (_start_generation) - the same route the failed-cell retry uses. Re-merging a cell overwrites
+    its own disjoint canonical regions, so the holes fill in seamlessly."""
+    if _run_active():
+        return jsonify({"ok": False, "error": "stop the generation first"}), 409
+    origin = PROJECT.origin()
+    if origin.get("lat") is None:
+        return jsonify({"ok": False, "error": "no origin set"}), 400
+    scale = float(PROJECT.settings().get("scale", 1.0) or 1.0)
+    grid = PROJECT.load_grid()
+    with _MISSING_LOCK:
+        keys = [k for k in finalcheck.missing_cell_keys(list(_MISSING)) if k in grid]
+    if not keys:
+        return jsonify({"ok": True, "queued": [], "count": 0, "note": "no missing cells to retry"})
+    cells = [{"cell_key": k, "bbox": _bbox_from_cell_key(k, origin, scale)} for k in keys]
+    queued, prefetching = _start_generation(cells)
+    # the re-run will produce a fresh scan when it finishes; clear the stale markers now
+    with _MISSING_LOCK:
+        _MISSING.clear()
+    return jsonify({"ok": True, "queued": queued, "count": len(queued), "prefetching": prefetching})
+
+
 # ── project switching (multiple worlds, swap between test + big) ─────────────
 def _switch_project(slug: str) -> dict:
     global PROJECT, ACTIVE_SLUG
@@ -3259,6 +3330,8 @@ def _switch_project(slug: str) -> dict:
     ACTIVE_SLUG = slug
     _write_active_slug(slug)
     _load_cell_health()    # suspects are per-project
+    with _MISSING_LOCK:    # missing-region markers are per-project
+        _MISSING.clear()
     with _PREFETCH_LOCK:
         _PREFETCH.update(active=False, done=False, chunks=[], phase="idle", note="",
                          terrain={"done": 0, "total": 0, "ok": 0, "failed": 0})
@@ -3471,6 +3544,8 @@ def api_status():
     with _CELL_HEALTH_LOCK:
         suspects = {k: v for k, v in _CELL_HEALTH.items() if v.get("suspect")}
         cell_fail = dict(_CELL_FAIL)
+    with _MISSING_LOCK:
+        missing = [dict(m) for m in _MISSING]
     with _EXPORT_LOCK:
         export = dict(_EXPORT)
     with _MCSERVER_LOCK:
@@ -3494,6 +3569,7 @@ def api_status():
         "run": run,
         "prefetch": prefetch,
         "cell_health": suspects,
+        "missing": missing,
         "stats": stats,
         "export": export,
         "mcserver": mcstat,

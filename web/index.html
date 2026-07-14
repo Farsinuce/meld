@@ -774,6 +774,8 @@
       <button id="btnRetrySelect" class="sec" title="Drag a square over the map to mark every cell inside it for re-run — they get a cyan fill + 🔁. A click toggles one cell; drag again over marked cells to unmark. The locked selection box can't move while this is on. Then hit Retry; marked cells switch to the normal build emoji as they run.">◉ Select to retry</button>
       <button id="btnRetryQueued" class="sec" style="display:none" title="Re-run the cells you marked with Select to retry.">↻ Retry selected</button>
       <button id="btnRedoSuspect" class="sec" style="display:none" title="Re-run only the cells flagged suspect (truncated terrain tiles / missing land cover). Fixes the localized cliffs without redoing the whole world; the redo pre-warms terrain so they cache cleanly.">↻ Redo suspect</button>
+      <button id="btnRetryMissing" class="sec" style="display:none" title="After generation, Meld checks the finished world for missing/empty regions (interior holes and cells that silently dropped out) and marks them on the map with a ⚠️ black square. This re-runs exactly those cells through the normal path so the holes fill in and merge back seamlessly. Runs automatically at the end of a generation; you can also trigger the scan with Check for gaps.">⚠️ Retry missing</button>
+      <button id="btnCheckGaps" class="sec" title="Scan the finished world now for missing/empty regions (interior holes / dropped cells) and mark them on the map with a ⚠️ black square. This also runs automatically at the end of every generation.">🔍 Check for gaps</button>
       <button id="btnRedoRegion" class="sec" title="Re-run only the cells inside your current selection (draw a box/polygon first). Fix a localized area without redoing the whole world.">↻ Regenerate selected region</button>
     </div>
 
@@ -947,6 +949,7 @@ let projScale = 0.3;
 const drawnItems = new L.FeatureGroup().addTo(map);
 const prefetchGroup = L.layerGroup().addTo(map);   // cyan dashed OSM-download chunks
 const suspectGroup = L.layerGroup().addTo(map);    // amber rings on cells flagged suspect
+const missingGroup = L.layerGroup().addTo(map);    // black squares + ⚠️ on missing regions (final check)
 const retryGroup = L.layerGroup().addTo(map);      // blue dashed rings on cells queued for retry
 const borderGroup = L.layerGroup().addTo(map);     // country/zone border preview (cyan/orange/yellow/lime)
 const _retryQueue = new Set();                     // cell_keys the user has marked to re-run
@@ -954,6 +957,8 @@ let _retrySig = '';
 let _cellHealth = {};                              // cell_key -> {suspect, reasons}
 let _suspectSig = '';
 let _cellFail = {};                                // cell_key -> short reason a cell failed
+let _missing = [];                                 // [{cell_key,rx,rz,reason,bbox}] from the final check
+let _missingSig = '';
 function cellTip(key) {                             // tooltip text: key + WHY it failed, if it did
   const r = _cellFail[key];
   return r ? `${key}\n⚠ ${r}` : key;
@@ -3371,6 +3376,44 @@ $('btnRedoSuspect').onclick = async () => {
   if (!r.ok) { modalInfo('Meld', r.error || 'failed'); return; }
   refreshState();
 };
+// Missing-region final check: draw a black square + ⚠️ over every detected hole.
+function renderMissing(missing) {
+  missing = missing || [];
+  const sig = JSON.stringify(missing.map(m => `${m.rx},${m.rz}`).sort());
+  if (sig === _missingSig) return;   // only redraw when the set changed
+  _missingSig = sig;
+  missingGroup.clearLayers();
+  for (const m of missing) {
+    const b = m.bbox; if (!b) continue;
+    L.rectangle([[b.south, b.west], [b.north, b.east]],
+      { renderer: cellRenderer, color: '#000', weight: 2, fillColor: '#000', fillOpacity: 0.75, interactive: false })
+      .addTo(missingGroup);
+    const clat = (b.south + b.north) / 2, clon = (b.west + b.east) / 2;
+    L.marker([clat, clon], { icon: L.divIcon({ className: 'cellemoji', html: '<div>⚠️</div>' }), interactive: false })
+      .addTo(missingGroup);
+  }
+  const bm = $('btnRetryMissing');
+  if (bm) {
+    const cells = new Set(missing.map(m => m.cell_key));
+    bm.style.display = missing.length ? '' : 'none';
+    bm.textContent = missing.length ? `⚠️ Retry missing (${cells.size})` : '⚠️ Retry missing';
+  }
+}
+$('btnCheckGaps').onclick = async () => {
+  const r = await api('/api/finalcheck', {});
+  if (!r || !r.ok) { modalInfo('Meld', (r && r.error) || 'gap check failed'); return; }
+  renderMissing(r.missing || []);
+  if (!r.count) modalInfo('Meld', 'No missing regions — the world looks complete.');
+  else kickPoll();
+};
+$('btnRetryMissing').onclick = async () => {
+  const cells = new Set(_missing.map(m => m.cell_key));
+  if (!cells.size) { modalInfo('Meld', 'No missing regions to retry.'); return; }
+  if (!(await modalConfirm('Retry missing regions', `Re-run ${cells.size} cell(s) with missing/empty regions? They regenerate and merge back seamlessly, filling the holes.`, 'Retry ' + cells.size))) return;
+  const r = await api('/api/finalcheck/retry', {});
+  if (!r || !r.ok) { modalInfo('Meld', (r && r.error) || 'failed'); return; }
+  refreshState();
+};
 $('btnRedoRegion').onclick = async () => {
   if (!selection && !selectionPolygon) { modalInfo('Meld', 'Draw a box or polygon over the area to redo first.'); return; }
   if (!(await modalConfirm('Regenerate region', 'Re-run every merged cell inside your current selection? They merge back seamlessly.', 'Regenerate'))) return;
@@ -3400,6 +3443,7 @@ $('btnNewWorld').onclick = async () => {
   if (polyLayer) { map.removeLayer(polyLayer); polyLayer = null; }
   combinedBorder.forEach(l => map.removeLayer(l)); combinedBorder = [];
   suspectGroup.clearLayers(); _cellHealth = {}; _suspectSig = '';
+  missingGroup.clearLayers(); _missing = []; _missingSig = ''; if ($('btnRetryMissing')) $('btnRetryMissing').style.display = 'none';
   retryGroup.clearLayers(); _retryQueue.clear(); _retrySig = ''; setRetrySelect(false);
   selection = null; selectionPolygon = null; plannedCells = []; projOrigin = null; _overlaySig = '';
   _userDrew = false;   // fresh project → let its (empty) saved selection govern, allow future restore
@@ -3652,6 +3696,9 @@ async function poll() {
     // Suspect cells: amber rings + the Redo-suspect button with a live count.
     _cellHealth = s.cell_health || {};
     renderSuspects(_cellHealth);
+    // Missing-region final check: black squares + ⚠️ + the Retry-missing button.
+    _missing = s.missing || [];
+    renderMissing(_missing);
     // Drop retry marks whose cell no longer exists (cleared / removed) so the blue ring + count
     // don't become ghosts that outlive the cell.
     for (const k of _retryQueue) if (!(s.grid && k in s.grid)) _retryQueue.delete(k);
