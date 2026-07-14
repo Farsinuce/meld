@@ -4,6 +4,22 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.6.1] - 2026-07-14 - "Climate & Contours"
+
+A focused follow-up on climate, heightmaps, trees, and finishing a world cleanly. Bundles the Arnis fork **3.0.2**. Everything here is additive.
+
+### Added
+
+- **Climate preview.** A "Climate (Koppen)" card under the terrain toggles renders the exact grouped climate your area will get (biome tint plus arid/polar surface blocks) to a sidebar canvas with a colour-swatch legend and measured percentages. Backed by the fork's new per-block climate sampling, so a large region now varies smoothly across the map instead of snapping to one climate per cell.
+- **Tree size popularity sliders.** The five tree-size on/off checkboxes become five relative-popularity sliders (0 to 200 percent, 100 = default, cave-slider UX with exact-value typing and reset), so you can make rarer big trees or a denser giant-heavy old-growth look. Emits the fork's new `--tree-size-weights`; a saved legacy checkbox setting is migrated automatically.
+- **Bake Mapterhorn elevation.** A new Data pack button pre-downloads the tiles the new default heightmap (Mapterhorn, plus regional high-res providers) actually uses for your selection, so generation runs offline and is never rate-limited. Runs at the project scale so the cached zoom matches what the cells request.
+- **Mapterhorn heightmap preview overlay.** A "Preview Mapterhorn" button renders the new heightmap for your selection using the real provider stack and overlays it on the map (hillshade or grayscale), distinct from the legacy AWS tile height preview, so you see the terrain the world will actually get.
+- **Missing-region final check.** After a run finishes, Meld scans the merged world for regions that should exist but are missing or empty and marks each on the map with a warning emoji and a black square. A "Retry missing" button re-runs exactly those cells through the normal retry path so the holes fill in and merge back seamlessly; a "Check for gaps" button runs the scan on demand. The detector only flags interior holes and dropped-out cells surrounded by finished neighbours, so it never false-positives on the normal ragged coast or ocean edges.
+
+### Changed
+
+- The heightmap source toggle is confirmed and documented: the "Legacy AWS elevation" checkbox (off by default) is the switch, with Mapterhorn plus regional providers as the default modern source.
+
 ## [1.6.0] - 2026-07-12 - "Above & Beyond"
 
 An above-ground release to match the underground one. The bundled Arnis fork jumps to
