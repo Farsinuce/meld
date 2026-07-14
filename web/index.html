@@ -446,6 +446,11 @@
           <button class="sec" id="climatePreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Render the Köppen climate layout for your drawn selection (or planned cells) as a top-down map. Colours match the climate groups that drive biome + surface blocks.">🗺 Preview climate</button>
           <button class="sec xbtn" id="climateClear" type="button" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:11px">✕</button>
         </div>
+        <div id="climateWinRow" style="display:none;align-items:center;gap:5px;font-size:11px;color:#9aa;margin-top:3px">
+          area <button class="sec" id="climateWout" type="button" style="width:auto;padding:0 7px;font-size:13px;line-height:1.4" title="Zoom out (wider area)">−</button>
+          <span id="climateWlbl">3×3</span>
+          <button class="sec" id="climateWin" type="button" style="width:auto;padding:0 7px;font-size:13px;line-height:1.4" title="Zoom in (tighter)">+</button> reg · scroll=zoom
+        </div>
         <canvas id="climateCanvas" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504;margin-top:5px"></canvas>
         <div id="climateStats" class="stat" style="margin-top:3px;white-space:pre-wrap"></div>
       </div>
@@ -479,7 +484,12 @@
           <button class="sec" id="tsPreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Show the spatial mix of tree sizes these sliders + the project scale produce (a speckle map, one colour per tier). Updates live as you drag. Scroll to zoom, drag to pan.">🌳 Preview sizes</button>
           <button class="sec xbtn" id="tsClear" type="button" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:11px">✕</button>
         </div>
-        <canvas id="treeCanvas" width="256" height="160" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504;margin-top:5px"></canvas>
+        <div id="tsWinRow" style="display:none;align-items:center;gap:5px;font-size:11px;color:#9aa;margin-top:3px">
+          area <button class="sec" id="tsWout" type="button" style="width:auto;padding:0 7px;font-size:13px;line-height:1.4" title="Zoom out (wider area)">−</button>
+          <span id="tsWlbl">3×3</span>
+          <button class="sec" id="tsWin" type="button" style="width:auto;padding:0 7px;font-size:13px;line-height:1.4" title="Zoom in (tighter)">+</button> reg · scroll=zoom
+        </div>
+        <canvas id="treeCanvas" width="288" height="288" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504;margin-top:5px"></canvas>
         <div id="treeLegend" class="stat" style="margin-top:3px"></div>
       </div>
       <label>Roofs
@@ -525,6 +535,11 @@
           <button class="sec" id="cbReset" type="button" style="width:auto;padding:4px 8px;font-size:11px" title="All biomes back to their 100% defaults.">Reset</button>
           <button class="sec" id="cbPreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Render the biome layout for this world's seed and these sliders: a zoomed-in window at the centre of your area, patches in their real noise shapes. Hover a biome above to highlight its patches.">🗺 Preview</button>
           <button class="sec xbtn" id="cbClear" type="button" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:11px">✕</button>
+        </div>
+        <div id="cbWinRow" style="display:none;align-items:center;gap:5px;font-size:11px;color:#9aa;margin-top:3px">
+          area <button class="sec" id="cbWout" type="button" style="width:auto;padding:0 7px;font-size:13px;line-height:1.4" title="Zoom out (wider area)">−</button>
+          <span id="cbWlbl">3×3</span>
+          <button class="sec" id="cbWin" type="button" style="width:auto;padding:0 7px;font-size:13px;line-height:1.4" title="Zoom in (tighter)">+</button> reg · scroll=zoom
         </div>
         <div id="cbCapU" class="stat" style="display:none;margin-top:5px;color:#00e5ff">upper caves (zoomed centre window · gray = plain cave)</div>
         <canvas id="cbCanvasU" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504"></canvas>
@@ -2376,7 +2391,32 @@ function _treeHash(x, y){   // cheap uniform 32-bit hash -> [0,1000); only the M
   h = Math.imul(h ^ (h >>> 15), 0xC2B2AE3D); h ^= h >>> 13;
   return (h >>> 0) % 1000;
 }
+// ── Preview window: NxN Minecraft regions (512 blocks each), centered on the selection ──
+// The default is 3x3 so previews start zoomed to LOCAL detail instead of the whole selection.
+// The −/+ stepper widens/tightens the window (re-renders); makeZoomable's scroll zooms within it.
+const _winRegions = { climate: 3, cave: 3, tree: 3 };
+function wireWindow(key, prefix, render){
+  const wo = $(prefix + 'Wout'), wi = $(prefix + 'Win'), lbl = $(prefix + 'Wlbl');
+  const upd = () => { if (lbl) lbl.textContent = _winRegions[key] + '×' + _winRegions[key]; };
+  if (wo) wo.onclick = () => { _winRegions[key] = Math.min(25, _winRegions[key] + 2); upd(); render(); };
+  if (wi) wi.onclick = () => { _winRegions[key] = Math.max(1, _winRegions[key] - 2); upd(); render(); };
+  upd();
+}
+function showWinRow(prefix){ const r = $(prefix + 'WinRow'); if (r) r.style.display = 'flex'; }
+
 let _treeShown = false;
+// Center block of the current selection (uniform noise, but keeps the window "located"); 0 if none.
+function _selCenterBlock(){
+  try {
+    if (selection && projOrigin && projOrigin.lat != null){
+      const clat = (selection.south + selection.north) / 2, clon = (selection.west + selection.east) / 2;
+      const mpdLat = 111320, mpdLon = 111320 * Math.cos(clat * Math.PI / 180);
+      return [Math.floor((clon - projOrigin.lon) * mpdLon * projScale),
+              Math.floor((projOrigin.lat - clat) * mpdLat * projScale)];
+    }
+  } catch (_) {}
+  return [0, 0];
+}
 function renderTreePreview(){
   const c = $('treeCanvas'); if (!c) return;
   const scale = (typeof projScale === 'number' && projScale > 0) ? projScale : 0.3;
@@ -2385,11 +2425,14 @@ function renderTreePreview(){
   const w = base.map((b, i) => b * ((weights[_TREE_ORDER[i]] != null ? weights[_TREE_ORDER[i]] : 100) / 100));
   const sum = w.reduce((a, b) => a + b, 0);
   const W = c.width, H = c.height, ctx = c.getContext('2d'), img = ctx.createImageData(W, H);
+  const span = _winRegions.tree * 512, step = span / W;   // blocks per pixel for this window
+  const [cx, cz] = _selCenterBlock(), bx0 = cx - span / 2, bz0 = cz - span / 2;
   const counts = [0, 0, 0, 0, 0];
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){
     let tier = 0;
     if (sum > 0){
-      const target = (_treeHash(x + 101, y + 233) / 1000) * sum;
+      const bx = Math.floor(bx0 + x * step), bz = Math.floor(bz0 + y * step);
+      const target = (_treeHash(bx + 101, bz + 233) / 1000) * sum;
       let cum = 0;
       for (let i = 0; i < 5; i++){ cum += w[i]; if (target < cum){ tier = i; break; } }
     }
@@ -2400,18 +2443,21 @@ function renderTreePreview(){
   ctx.putImageData(img, 0, 0);
   c.style.display = '';
   if (c._resetZoom) c._resetZoom();
+  showWinRow('ts');
   const total = W * H;
   $('treeLegend').innerHTML = _TREE_ORDER.map((k, i) =>
     '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:8px">' +
     `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgb(${TREE_TIER_COLORS[k].join(',')})"></span>` +
     k + ' ' + (counts[i] * 100 / total).toFixed(0) + '%</span>').join('');
 }
-if ($('tsPreview')) $('tsPreview').onclick = () => { _treeShown = true; renderTreePreview(); };
+if ($('tsPreview')) $('tsPreview').onclick = () => { _treeShown = true; _winRegions.tree = 3; renderTreePreview(); };
 if ($('tsClear')) $('tsClear').onclick = () => {
   _treeShown = false;
   if ($('treeCanvas')) $('treeCanvas').style.display = 'none';
   if ($('treeLegend')) $('treeLegend').innerHTML = '';
+  if ($('tsWinRow')) $('tsWinRow').style.display = 'none';
 };
+wireWindow('tree', 'ts', renderTreePreview);
 // live update while dragging sliders, once the preview is shown
 TREE_SIZES.forEach(([k]) => { const el = $('ts_' + k); if (el) el.addEventListener('input', () => { if (_treeShown) renderTreePreview(); }); });
 
@@ -2625,21 +2671,25 @@ function cbLoad(tag, url){
     im.src = url;
   });
 }
-if ($('cbPreview')) $('cbPreview').onclick = async () => {
+async function renderCaves(){
   $('cbStats').textContent = 'rendering zone map…';
-  const r = await api('/api/cavemap', { step: 0 });   // fine blotch shapes, always
+  const r = await api('/api/cavemap', { step: 0, regions: _winRegions.cave });   // fine blotch shapes
   if (!r || !r.ok) { $('cbStats').textContent = 'preview failed: ' + ((r && r.error) || '?'); return; }
   await Promise.all(['upper', 'deep'].map(tag => cbLoad(tag, r.images[tag] + '?t=' + Date.now())));
   caveMapStats = r.stats;
   cbRender();
   cbShowStats();
   ['cbCanvasU', 'cbCanvasD'].forEach(id => { const c = $(id); if (c && c._resetZoom) c._resetZoom(); });
-};
+  showWinRow('cb');
+}
+if ($('cbPreview')) $('cbPreview').onclick = () => { _winRegions.cave = 3; renderCaves(); };
+wireWindow('cave', 'cb', renderCaves);
 if ($('cbClear')) $('cbClear').onclick = () => {
   cbImgData.upper = cbImgData.deep = null;
   caveMapStats = null;
   cbHighlight = null;
   ['cbCanvasU', 'cbCanvasD', 'cbCapU', 'cbCapD'].forEach(id => { if ($(id)) $(id).style.display = 'none'; });
+  if ($('cbWinRow')) $('cbWinRow').style.display = 'none';
   $('cbStats').textContent = '';
 };
 // ── Climate (Köppen) preview: sidebar canvas + legend ───────────────────────
@@ -2656,9 +2706,9 @@ const CLIMATE_GROUPS = [
   ['tundra','Tundra',[170,200,205]],
   ['ice_cap','Ice cap',[240,248,255]],
 ];
-if ($('climatePreview')) $('climatePreview').onclick = async () => {
+async function renderClimate(){
   $('climateStats').textContent = 'rendering climate map…';
-  const r = await api('/api/climatemap', {});
+  const r = await api('/api/climatemap', { regions: _winRegions.climate });
   if (!r || !r.ok) { $('climateStats').textContent = 'preview failed: ' + ((r && r.error) || '?'); return; }
   await new Promise(resolve => {
     const im = new Image();
@@ -2673,6 +2723,7 @@ if ($('climatePreview')) $('climatePreview').onclick = async () => {
     im.onerror = () => { $('climateStats').textContent = 'image load failed'; resolve(); };
     im.src = r.image + '?t=' + Date.now();
   });
+  showWinRow('climate');
   const shares = (r.stats && r.stats.shares) || {};
   const rows = CLIMATE_GROUPS
     .filter(([k]) => (shares[k] || 0) > 0)
@@ -2682,9 +2733,12 @@ if ($('climatePreview')) $('climatePreview').onclick = async () => {
       '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgb(' +
       col.join(',') + ')"></span>' + name + ': ' + (shares[k] || 0).toFixed(1) + '%</div>');
   $('climateStats').innerHTML = rows.join('') || 'no climate data';
-};
+}
+if ($('climatePreview')) $('climatePreview').onclick = () => { _winRegions.climate = 3; renderClimate(); };
+wireWindow('climate', 'climate', renderClimate);
 if ($('climateClear')) $('climateClear').onclick = () => {
   if ($('climateCanvas')) $('climateCanvas').style.display = 'none';
+  if ($('climateWinRow')) $('climateWinRow').style.display = 'none';
   $('climateStats').textContent = '';
 };
 // hover a biome row -> highlight its patches in both preview layers

@@ -4058,6 +4058,37 @@ def api_border_export():
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
+def _preview_window_bbox(b: dict, scale: float, regions: int) -> dict:
+    """Centered sub-bbox spanning at most `regions` x `regions` Minecraft regions (512 blocks
+    each) about the center of `b`, so a preview shows LOCAL detail instead of a whole huge
+    selection downsampled to nothing. Clipped to `b`, so a selection smaller than the window
+    just returns the whole selection. `regions <= 0` means no windowing (full selection)."""
+    if regions is None or regions <= 0:
+        return dict(b)
+    mpd_lat = 111_320.0
+    clat = (float(b["south"]) + float(b["north"])) / 2.0
+    clon = (float(b["west"]) + float(b["east"])) / 2.0
+    mpd_lon = mpd_lat * math.cos(math.radians(clat))
+    scale = scale if scale and scale > 0 else 1.0
+    half_lat = (regions / 2.0) * 512.0 / (mpd_lat * scale)
+    half_lon = (regions / 2.0) * 512.0 / (max(mpd_lon, 1e-6) * scale)
+    return {
+        "south": max(float(b["south"]), clat - half_lat),
+        "north": min(float(b["north"]), clat + half_lat),
+        "west": max(float(b["west"]), clon - half_lon),
+        "east": min(float(b["east"]), clon + half_lon),
+    }
+
+
+def _preview_regions_arg(default: int = 3) -> int:
+    """Read the `regions` window size from the request body (clamped 0..25; 0 = full)."""
+    try:
+        r = int((request.get_json(silent=True) or {}).get("regions", default))
+    except (TypeError, ValueError):
+        r = default
+    return max(0, min(25, r))
+
+
 # ── cave biome zone-map preview ───────────────────────────────────────────────
 
 @app.route("/api/cavemap", methods=["POST"])
@@ -4097,6 +4128,8 @@ def api_cavemap():
         if b is None:
             return jsonify({"ok": False, "error": "draw a selection (or plan cells) first"}), 400
     seed = int((PROJECT.load().get("elevation") or {}).get("seed", 1) or 1)
+    # Window to a centered NxN-region patch (default 3x3) so the preview shows local detail.
+    b = _preview_window_bbox(b, float(st.get("scale", 1.0) or 1.0), _preview_regions_arg())
     out_dir = Path(PROJECT.root) / "cavemap"
     out_dir.mkdir(parents=True, exist_ok=True)
     prefix = out_dir / "zones"
@@ -4188,6 +4221,8 @@ def api_climatemap():
                 b["east"] = max(b["east"], cb["east"])
         if b is None:
             return jsonify({"ok": False, "error": "draw a selection (or plan cells) first"}), 400
+    # Window to a centered NxN-region patch (default 3x3) so the preview shows local detail.
+    b = _preview_window_bbox(b, float(st.get("scale", 1.0) or 1.0), _preview_regions_arg())
     out_dir = Path(PROJECT.root) / "climatemap"
     out_dir.mkdir(parents=True, exist_ok=True)
     prefix = out_dir / "climate"
