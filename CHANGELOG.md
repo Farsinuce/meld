@@ -4,6 +4,23 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.6.2] - 2026-07-15 - "Clear Waters"
+
+Preview zoom and framing, a tree-size preview, and a worker-count fix. Bundles arnis fork 3.0.3, which removes the water colour bands, the thin land and road lines across water, and the cave lava seams, and renders climate boundaries as organic blobs.
+
+### Added
+
+- **Zoom and pan on every preview.** The climate, cave, and tree previews support scroll to zoom, drag to pan, and double-click to reset, so you can inspect the detail up close.
+- **Tree-size preview.** The tree-size sliders now have their own live preview showing the spatial mix of sizes the sliders and the project scale produce, with a percentage legend, updating as you drag.
+
+### Changed
+
+- **Previews open on a centered 3x3-region window.** All three previews now start on a centered patch of at most 3x3 Minecraft regions in the middle of the selection, so you begin on local detail instead of the whole area downsampled to nothing, with a stepper to widen or tighten the window.
+
+### Fixed
+
+- **Generation starting with only 2 workers.** The low-scale burst clamp measured the legacy AWS tile cache, which the default Mapterhorn source never fills, so it wrongly held every run at 2 workers even when more were configured. The clamp now only applies when a run is pinned to legacy AWS, and the configured worker count is re-asserted at the start of every run so no run inherits a stale value.
+
 ## [1.6.1] - 2026-07-14 - "Climate & Contours"
 
 A focused follow-up on climate, heightmaps, trees, and finishing a world cleanly. Bundles the Arnis fork **3.0.2**. Everything here is additive.
