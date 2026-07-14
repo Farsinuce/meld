@@ -4012,6 +4012,79 @@ def api_cavemap_img(tag):
     return resp
 
 
+@app.route("/api/climatemap", methods=["POST"])
+def api_climatemap():
+    """Render the Koppen CLIMATE layout for the drawn selection (or planned cells)
+    through the arnis fork's --climate-map mode, which colours each sample by the same
+    grouped Climate that drives biome tint + arid/polar surface blocks during real
+    generation. Sampled in lat/lon over the bbox, so it is a pure function of the
+    bounding box. Fast (no worldgen); runs synchronously."""
+    origin = PROJECT.origin()
+    if origin.get("lat") is None:
+        return jsonify({"ok": False, "error": "set the origin first"}), 400
+    exe = resolve_arnis_exe()
+    if not exe:
+        return jsonify({"ok": False, "error": "arnis binary not found"}), 400
+    st = PROJECT.settings()
+    sel = PROJECT.load_selection()
+    if sel:
+        b = sel["bbox"]
+    else:
+        # no drawn selection: cover the PLANNED/merged cells instead
+        grid = PROJECT.load_grid()
+        scale_f = float(st.get("scale", 1.0) or 1.0)
+        b = None
+        for key in grid:
+            parts = key.split(",")
+            if len(parts) != 3:
+                continue
+            cb = cell_bbox(int(parts[0]), int(parts[1]), int(parts[2]),
+                           origin["lat"], origin["lon"], scale_f)
+            if b is None:
+                b = dict(cb)
+            else:
+                b["south"] = min(b["south"], cb["south"])
+                b["west"] = min(b["west"], cb["west"])
+                b["north"] = max(b["north"], cb["north"])
+                b["east"] = max(b["east"], cb["east"])
+        if b is None:
+            return jsonify({"ok": False, "error": "draw a selection (or plan cells) first"}), 400
+    out_dir = Path(PROJECT.root) / "climatemap"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    prefix = out_dir / "climate"
+    cmd = [str(exe),
+           "--bbox", f"{b['south']},{b['west']},{b['north']},{b['east']}",
+           "--climate-map", str(prefix)]
+    try:
+        pr = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=180)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return jsonify({"ok": False, "error": f"climate-map run failed: {e}"}), 400
+    stats = None
+    for line in (pr.stdout or "").splitlines():
+        if line.startswith("CLIMATEMAP "):
+            try:
+                stats = json.loads(line[len("CLIMATEMAP "):])
+            except ValueError:
+                pass
+    if pr.returncode != 0 or stats is None:
+        tail = ((pr.stderr or "") + (pr.stdout or ""))[-300:]
+        return jsonify({"ok": False, "error": f"climate-map failed (rc={pr.returncode}): {tail}"}), 400
+    return jsonify({"ok": True, "stats": stats,
+                    "bounds": [[b["south"], b["west"]], [b["north"], b["east"]]],
+                    "image": "/api/climatemap/img"})
+
+
+@app.route("/api/climatemap/img")
+def api_climatemap_img():
+    p = Path(PROJECT.root) / "climatemap" / "climate.png"
+    if not p.is_file():
+        return jsonify({"ok": False, "error": "no climate map rendered yet"}), 404
+    resp = send_file(str(p), mimetype="image/png")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 # ── one-click Leaf server setup ───────────────────────────────────────────────
 # Turns the finished world into a ready-to-run Leaf server. Every step that
 # downloads or executes anything checks an explicit confirm flag SERVER-SIDE;

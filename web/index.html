@@ -439,6 +439,16 @@
       <label>Regional elevation only (no AWS)
         <span class="i" title="Use ONLY the regional high-res providers (USGS 1m, IGN France 1m, IGN Spain 5m, Japan GSI 5m) plus the global Mapterhorn tiles, and NEVER legacy AWS Terrain Tiles — for areas where the old AWS terrarium set has broken no-data tiles that carve holes/cliffs into the terrain. The terrain warm-up pre-fills the selected provider's tile cache in one polite pass, so parallel cells read from disk instead of rate-limiting the provider. If a fetch still fails, the cell ERRORS and is retried instead of silently using AWS.">i</span>
         <input id="regionalonly" type="checkbox"></label>
+      <div id="climateWrap" style="margin:2px 0 6px;padding:6px 8px;border:1px solid var(--line);border-radius:2px">
+        <div style="font-weight:600;color:#7bd88f;font-size:12px">Climate (Köppen)
+          <span class="i" title="The whole map's biome tint and arid/polar surface blocks (desert sand, tundra gravel, ice cap snow, ...) follow the real Köppen-Geiger climate, sampled per block so it varies smoothly across a large region instead of jumping cell-to-cell. Always on. Preview renders the exact grouped climate this area will get, straight from the bundled climate grid — one colour per group, with measured percentages.">i</span></div>
+        <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:4px">
+          <button class="sec" id="climatePreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Render the Köppen climate layout for your drawn selection (or planned cells) as a top-down map. Colours match the climate groups that drive biome + surface blocks.">🗺 Preview climate</button>
+          <button class="sec xbtn" id="climateClear" type="button" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:11px">✕</button>
+        </div>
+        <canvas id="climateCanvas" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504;margin-top:5px"></canvas>
+        <div id="climateStats" class="stat" style="margin-top:3px;white-space:pre-wrap"></div>
+      </div>
       <label>Buildings
         <span class="i" title="Generate OSM buildings. Off = a roads + land-cover only world (roads, bridges, railways, water and terrain are still built).">i</span>
         <input id="buildings" type="checkbox"></label>
@@ -2429,6 +2439,50 @@ if ($('cbClear')) $('cbClear').onclick = () => {
   cbHighlight = null;
   ['cbCanvasU', 'cbCanvasD', 'cbCapU', 'cbCapD'].forEach(id => { if ($(id)) $(id).style.display = 'none'; });
   $('cbStats').textContent = '';
+};
+// ── Climate (Köppen) preview: sidebar canvas + legend ───────────────────────
+// keys/names/colors mirror climate_map.rs style() exactly, so the legend matches the render.
+const CLIMATE_GROUPS = [
+  ['temperate','Temperate',[120,180,90]],
+  ['tropical_savanna','Tropical savanna',[170,190,80]],
+  ['hot_desert','Hot desert',[237,201,120]],
+  ['hot_steppe','Hot steppe',[214,178,110]],
+  ['cold_desert','Cold desert',[200,190,160]],
+  ['cold_steppe','Cold steppe',[190,185,140]],
+  ['dry_continental','Dry continental',[200,140,80]],
+  ['boreal','Boreal',[80,150,120]],
+  ['tundra','Tundra',[170,200,205]],
+  ['ice_cap','Ice cap',[240,248,255]],
+];
+if ($('climatePreview')) $('climatePreview').onclick = async () => {
+  $('climateStats').textContent = 'rendering climate map…';
+  const r = await api('/api/climatemap', {});
+  if (!r || !r.ok) { $('climateStats').textContent = 'preview failed: ' + ((r && r.error) || '?'); return; }
+  await new Promise(resolve => {
+    const im = new Image();
+    im.onload = () => {
+      const c = $('climateCanvas');
+      c.width = im.naturalWidth; c.height = im.naturalHeight;
+      c.getContext('2d').drawImage(im, 0, 0);
+      c.style.display = '';
+      resolve();
+    };
+    im.onerror = () => { $('climateStats').textContent = 'image load failed'; resolve(); };
+    im.src = r.image + '?t=' + Date.now();
+  });
+  const shares = (r.stats && r.stats.shares) || {};
+  const rows = CLIMATE_GROUPS
+    .filter(([k]) => (shares[k] || 0) > 0)
+    .sort((a, b) => (shares[b[0]] || 0) - (shares[a[0]] || 0))
+    .map(([k, name, col]) =>
+      '<div style="display:flex;align-items:center;gap:5px">' +
+      '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgb(' +
+      col.join(',') + ')"></span>' + name + ': ' + (shares[k] || 0).toFixed(1) + '%</div>');
+  $('climateStats').innerHTML = rows.join('') || 'no climate data';
+};
+if ($('climateClear')) $('climateClear').onclick = () => {
+  if ($('climateCanvas')) $('climateCanvas').style.display = 'none';
+  $('climateStats').textContent = '';
 };
 // hover a biome row -> highlight its patches in both preview layers
 CAVE_BIOMES.forEach(([k]) => {
