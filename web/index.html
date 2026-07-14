@@ -824,6 +824,7 @@
         <button class="sec" id="btnDpBuild" title="Bulk-download the selection's missing AWS elevation tiles into the global cache (one controlled downloader, not rate-limited).">⤓ Download AWS elevation</button>
       </div>
       <button class="sec" id="btnDpRegional" style="margin-top:4px" title="Pre-warm the regional high-res elevation cache (IGN France 1m, IGN Spain 5m, USGS 1m, Japan GSI 5m) for the selection — the regional-provider counterpart to the AWS download above. Fills the on-disk regional tile cache in one polite pass so parallel generation cells read from disk instead of rate-limiting the provider (which is what forces the silent AWS fallback and its broken no-data holes). Only does anything where a regional provider has coverage (US, France, Spain, Japan). Pairs with the 'Regional elevation only (no AWS)' toggle in Settings.">⤓ Prefetch regional (IGN / USGS / GSI)</button>
+      <button class="sec" id="btnDpBakeMapt" style="margin-top:4px" title="Bake the NEW default heightmap: pre-download the Mapterhorn global terrain tiles (plus any regional high-res provider) that generation actually uses, for the selection, so generation runs offline and is never rate-limited. Runs at the project scale so the cached zoom matches what the cells request. This is the recommended warm now that Mapterhorn is the default elevation source (AWS is legacy).">⤓ Bake Mapterhorn elevation (new default)</button>
       <div class="bar" id="dpBarWrap" style="display:none;margin-top:6px"><i id="dpBar" style="width:0%"></i></div>
       <div class="stat" id="dpProg" style="display:none;margin-top:2px"></div>
       <button class="sec" id="btnDpStop" style="display:none;margin-top:4px" title="Stop the running download (already-fetched tiles are kept).">Stop download</button>
@@ -3883,6 +3884,16 @@ async function dpPrefetchRegional() {
   if (_dpPoll) clearInterval(_dpPoll);
   _dpPoll = setInterval(dpPollStatus, 1000); dpPollStatus();
 }
+async function dpBakeMapterhorn() {
+  const sel = _dpSelection();
+  if (!sel) { $('dpCov').textContent = 'Draw or search an area first.'; return; }
+  $('dpCov').textContent = 'Baking Mapterhorn elevation tiles…';
+  const r = await _dpApi('/api/datapack/bake-mapterhorn', sel);
+  if (!r || !r.ok) { $('dpCov').textContent = (r && r.error) || 'Mapterhorn bake failed'; return; }
+  $('dpBarWrap').style.display = ''; $('dpProg').style.display = ''; $('btnDpStop').style.display = '';
+  if (_dpPoll) clearInterval(_dpPoll);
+  _dpPoll = setInterval(dpPollStatus, 1000); dpPollStatus();
+}
 async function dpRefetchView() {
   if (map.getZoom() < 11) { $('dpCov').textContent = 'Zoom in to the bad area first (≥11) — re-fetch covers only the current view.'; return; }
   const b = map.getBounds();
@@ -4024,6 +4035,7 @@ function toggleTerrainPreview() {
 if ($('btnDpCoverage')) $('btnDpCoverage').onclick = dpCoverage;
 if ($('btnDpBuild')) $('btnDpBuild').onclick = dpBuild;
 if ($('btnDpRegional')) $('btnDpRegional').onclick = dpPrefetchRegional;
+if ($('btnDpBakeMapt')) $('btnDpBakeMapt').onclick = dpBakeMapterhorn;
 if ($('btnDpRefetch')) $('btnDpRefetch').onclick = dpRefetchView;
 if ($('btnDpRepair')) $('btnDpRepair').onclick = dpRepair;
 if ($('btnDpRepairAll')) $('btnDpRepairAll').onclick = dpRepairAll;

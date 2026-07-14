@@ -45,7 +45,7 @@ from src.arnis_cmd import (build_arnis_cmd, run_arnis, find_world_dir, clean_out
                            parse_progress, effective_elev_zoom)
 from src import arnis_cmd
 from src.prefetch import (run_prefetch, preview_clumps, run_terrain_prefetch,
-                          purge_small_tiles)
+                          run_mapterhorn_bake, purge_small_tiles)
 from src import datapack as dp
 from src import osm_pack as op
 from src import osm_grid
@@ -1010,6 +1010,60 @@ def api_datapack_prefetch_regional():
 
     threading.Thread(target=_worker, daemon=True).start()
     return jsonify({"ok": True, "areas": len(tiles), "zoom": ez})
+
+
+@app.route("/api/datapack/bake-mapterhorn", methods=["POST"])
+def api_datapack_bake_mapterhorn():
+    """Pre-download the elevation TILE cache generation reads (Mapterhorn global terrain, or the
+    regional/AWS provider the fork picks for the area) for the selection, so generation runs
+    offline and is never rate-limited. Runs the fork's --prewarm-elevation over a grid of the
+    selection at the generation scale so the cached zoom matches what the cells later request."""
+    if _run_active():
+        return jsonify({"ok": False, "error": "stop the generation first"}), 409
+    with _DATAPACK_LOCK:
+        if _DATAPACK["active"]:
+            return jsonify({"ok": False, "error": "a data-pack job is already running"}), 409
+    bbox, rings, name = _datapack_selection()
+    if not bbox:
+        return jsonify({"ok": False, "error": "bbox or polygon required"}), 400
+    exe = resolve_arnis_exe()
+    if exe is None:
+        return jsonify({"ok": False, "error": "arnis binary not found"}), 400
+    settings = PROJECT.settings()
+    scale = float(settings.get("scale", 1.0) or 1.0)
+    aws_only = bool(settings.get("aws_only_elevation"))
+    tiles = _bbox_grid(bbox)
+    _DATAPACK_STOP["flag"] = False
+    with _DATAPACK_LOCK:
+        _DATAPACK.update(active=True, done=False, total=len(tiles), done_n=0, ok=0, absent=0, fail=0,
+                         region=name or "mapterhorn-bake",
+                         note=f"baking elevation tiles over {len(tiles)} area(s)…")
+
+    def _prog(done_n, total, ok, failed):
+        with _DATAPACK_LOCK:
+            _DATAPACK.update(done_n=done_n, total=total, ok=ok, fail=failed)
+
+    def _worker():
+        _t0 = time.time()
+        try:
+            log(f"[Mapterhorn] baking elevation tiles over {len(tiles)} area(s) at scale {scale}…")
+            res = run_mapterhorn_bake(tiles, str(exe), log, _prog, scale=scale, aws_only=aws_only,
+                                      should_stop=lambda: _DATAPACK_STOP["flag"])
+            _el = time.time() - _t0
+            prov = res.get("provider") or "elevation"
+            msg = (f"done in {_el:.0f}s: {prov} - {res.get('ok', 0)} tile(s) cached, "
+                   f"{res.get('absent', 0)} ocean/absent"
+                   + (f", {res.get('failed', 0)} failed" if res.get("failed") else ""))
+            with _DATAPACK_LOCK:
+                _DATAPACK.update(active=False, done=True, elapsed=round(_el, 1), note=msg)
+            log(f"[Mapterhorn] {msg}")
+        except Exception as ex:  # noqa: BLE001
+            with _DATAPACK_LOCK:
+                _DATAPACK.update(active=False, done=True, note=f"error: {ex}")
+            log(f"[Mapterhorn] error: {ex}")
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"ok": True, "areas": len(tiles)})
 
 
 @app.route("/api/datapack/status")

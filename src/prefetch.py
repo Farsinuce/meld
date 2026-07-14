@@ -411,6 +411,56 @@ def run_terrain_prefetch(bboxes, exe, log, on_progress=None, timeout_s: int = 12
             "regional_ok": reg_ok, "regional_failed": reg_fail, "regional_provider": reg_provider}
 
 
+def run_mapterhorn_bake(bboxes, exe, log, on_progress=None, timeout_s: int = 1800,
+                        scale: float = 1.0, aws_only: bool = False, should_stop=None) -> dict:
+    """Pre-warm the elevation TILE cache for each bbox SEQUENTIALLY via `arnis
+    --prewarm-elevation` (one process at a time, 8 concurrent downloads inside). Fills the exact
+    per-tile disk cache the generation cells read (Mapterhorn globally, or the regional/AWS
+    provider the fork picks for the area), so later cells hit disk instead of rate-limiting the
+    tile server. Best-effort: a failed sweep just means those cells fetch live.
+
+    Driven per small sub-bbox at the GENERATION scale so the fork's scale-derived Mapterhorn zoom
+    (choose_zoom) matches what the cells later request — a whole-region single call would trip the
+    tile budget and pick a coarser zoom, and cells would re-fetch finer tiles live."""
+    total = len(bboxes)
+    cached = 0
+    absent = 0
+    failed = 0
+    provider = None
+    for i, bbox in enumerate(bboxes):
+        if should_stop is not None and should_stop():
+            log(f"  [Mapterhorn] stopped after {i}/{total} sweep(s) on request")
+            break
+        cmd = [
+            str(exe),
+            "--bbox", f"{bbox['south']},{bbox['west']},{bbox['north']},{bbox['east']}",
+            "--prewarm-elevation",
+            # --scale drives the Mapterhorn zoom (choose_zoom); it must match generation.
+            "--scale", str(scale),
+        ]
+        if aws_only:
+            cmd.append("--aws-only-elevation")
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=timeout_s, encoding="utf-8", errors="replace")
+            out = (proc.stdout or "") + (proc.stderr or "")
+            m = re.search(r"provider '([\w-]+)', (\d+) tile\(s\) cached, (\d+) ocean/absent, (\d+) failed", out)
+            if m:
+                provider = m.group(1)
+                cached += int(m.group(2))
+                absent += int(m.group(3))
+                failed += int(m.group(4))
+        except subprocess.TimeoutExpired:
+            log(f"  [Mapterhorn] sweep {i + 1}/{total} timed out (cells will fetch live)")
+        except Exception as ex:  # noqa: BLE001
+            log(f"  [Mapterhorn] sweep {i + 1}/{total} error: {ex}")
+        if on_progress:
+            on_progress(i + 1, total, cached, failed)
+    log(f"  [Mapterhorn] cached {cached} tile(s), {absent} ocean/absent, {failed} failed "
+        f"across {total} sweep(s)")
+    return {"sweeps": total, "ok": cached, "absent": absent, "failed": failed, "provider": provider}
+
+
 def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk) -> dict:
     """Pre-fetch OSM for `cells` and return {cell_key: osm_source}.
 
