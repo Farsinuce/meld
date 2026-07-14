@@ -39,8 +39,8 @@ MAX_SETTINGS = {
     "timeout": 60, "aws_only_elevation": False, "regional_elevation_only": True,
     "road_detail": "clean", "overpass_url": ["https://overpass.example/api"],
     "generate_3d_models": False, "vertical_exaggeration": 1.2,
-    "trees": True, "tree_sizes": {"small": True, "medium": True, "big": True,
-                                  "tall": True, "giant": False},
+    "trees": True, "tree_size_weights": {"small": 100, "medium": 100, "big": 50,
+                                         "tall": 100, "giant": 200},
     "stream_to_disk": True,
 }
 

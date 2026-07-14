@@ -271,20 +271,45 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
         if os.path.isdir(pack):
             cmd += ["--tree-pack", pack]
 
-        # Size-tier toggle (5 stages: small/medium/big/tall/giant). The UI stores `tree_sizes` as a
-        # dict of bools or a list of enabled tiers; default keeps all but Giant (the very-tall 29+
-        # tier stays off). Giant only renders at 1:1 even when enabled (gated in the fork).
-        TIERS = ("small", "medium", "big", "tall", "giant")
-        ts = settings.get("tree_sizes")
-        if isinstance(ts, dict):
-            enabled = [t for t in TIERS if ts.get(t)]
-        elif isinstance(ts, (list, tuple)):
-            enabled = [str(t).strip().lower() for t in ts if str(t).strip().lower() in TIERS]
-        else:
-            enabled = ["small", "medium", "big", "tall"]
-        if enabled:
-            cmd += ["--tree-sizes", ",".join(enabled)]
+        # Size-tier popularity sliders (relative weights). Emits --tree-size-weights only when a
+        # tier differs from its default (small/medium/big/tall=100, giant=0), so default runs stay
+        # byte-identical. Falls back to the legacy tree_sizes checkbox dict if that's all that's
+        # saved. Giant only renders at 1:1 and tiny maps never place tall/giant (gated in the fork).
+        spec = tree_size_weights_spec(settings)
+        if spec:
+            cmd += ["--tree-size-weights", spec]
     return cmd
+
+
+# Tree size tiers in display order + their default weight (giant off = 0, like the old checkbox).
+TREE_SIZE_TIERS = (("small", 100), ("medium", 100), ("big", 100), ("tall", 100), ("giant", 0))
+
+
+def tree_size_weights_spec(settings: dict) -> str:
+    """`--tree-size-weights` value from tree_size_weights (name=pct pairs), emitting only tiers
+    that differ from their default so default runs stay byte-identical. Migrates a legacy
+    tree_sizes checkbox dict (True->100 / False->0) when tree_size_weights is absent."""
+    weights = settings.get("tree_size_weights")
+    if not isinstance(weights, dict):
+        legacy = settings.get("tree_sizes")
+        weights = {}
+        if isinstance(legacy, dict):
+            for name, _ in TREE_SIZE_TIERS:
+                weights[name] = 100 if legacy.get(name) else 0
+        elif isinstance(legacy, (list, tuple)):
+            low = {str(t).strip().lower() for t in legacy}
+            for name, _ in TREE_SIZE_TIERS:
+                weights[name] = 100 if name in low else 0
+    parts = []
+    for name, default in TREE_SIZE_TIERS:
+        try:
+            pct = int(weights.get(name, default))
+        except (TypeError, ValueError):
+            pct = default
+        pct = max(0, min(200, pct))
+        if pct != default:
+            parts.append(f"{name}={pct}")
+    return ",".join(parts)
 
 
 def find_world_dir(output_path: str) -> str | None:

@@ -470,15 +470,14 @@
           <option value="sam">South America</option>
           <option value="aus">Australia / Oceania</option>
         </select></label>
-      <label>Tree sizes
-        <span class="i" title="Which of the 5 height tiers to place. small &le;6, medium 7-12, big 13-20, tall 21-28, giant 29-40 blocks. Giant (very tall) only renders at 1:1 and is OFF by default; tall is rare. A disabled tier falls back to a smaller tree (never leaves a gap).">i</span>
-        <span class="szgroup">
-          <label><input id="szSmall" type="checkbox" checked><span>S</span></label>
-          <label><input id="szMedium" type="checkbox" checked><span>M</span></label>
-          <label><input id="szBig" type="checkbox" checked><span>Big</span></label>
-          <label><input id="szTall" type="checkbox" checked><span>Tall</span></label>
-          <label><input id="szGiant" type="checkbox"><span>Giant</span></label>
-        </span></label>
+      <div id="treeSizeWrap" style="margin:2px 0 6px;padding:6px 8px;border:1px solid var(--line);border-radius:2px">
+        <div style="font-weight:600;color:#7bd88f;font-size:12px">Tree sizes
+          <span class="i" title="Relative popularity of each height tier, like the cave-biome sliders: 100% = the pack's default share, 0 = off, 200% = ~double. small &le;6, medium 7-12, big 13-20, tall 21-28, giant 29-40 blocks. Crank big/giant up for a denser old-growth look, or down for mostly-small. Scale rules always apply: Giant only renders at 1:1 (default off), and tiny maps never place tall/giant no matter the slider. A tier set to 0 falls back to a smaller tree (never leaves a gap). Only affects the schematic region packs.">i</span></div>
+        <div id="treeSizeSliders" style="margin-top:2px"></div>
+        <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:4px">
+          <button class="sec" id="tsReset" type="button" style="width:auto;padding:4px 8px;font-size:11px" title="All tiers back to defaults (small/medium/big/tall 100%, giant off).">Reset</button>
+        </div>
+      </div>
       <label>Roofs
         <span class="i" title="Generate building roofs.">i</span>
         <input id="roof" type="checkbox"></label>
@@ -1739,9 +1738,21 @@ async function refreshState() {
   if ($('gamemode')) $('gamemode').value = st.gamemode || 'creative';
   if ($('worldtime')) $('worldtime').value = String(st.world_time != null ? st.world_time : 6000);
   if ($('mapitem')) $('mapitem').checked = !!st.map_item;
-  { const ts = st.tree_sizes || {small:true,medium:true,big:true,tall:true,giant:false};
-    const map = {szSmall:'small',szMedium:'medium',szBig:'big',szTall:'tall',szGiant:'giant'};
-    for (const id in map) if ($(id)) $(id).checked = !!ts[map[id]]; }
+  { // Tree-size sliders. Migrate a legacy tree_sizes checkbox dict (true->100, false->0) if
+    // that's all that's saved; otherwise use tree_size_weights (giant defaults off = 0).
+    let tw = st.tree_size_weights;
+    if (!tw && st.tree_sizes) {
+      const b = st.tree_sizes; tw = {};
+      ['small','medium','big','tall','giant'].forEach(k => { tw[k] = b[k] ? 100 : 0; });
+    }
+    tw = tw || {small:100,medium:100,big:100,tall:100,giant:0};
+    if (typeof TREE_SIZES !== 'undefined') {
+      TREE_SIZES.forEach(([k, , def]) => {
+        const el = $('ts_' + k);
+        if (el && document.activeElement !== el) el.value = (tw[k] != null ? tw[k] : def);
+      });
+      if (typeof tsPaint === 'function') tsPaint();
+    } }
   if ($('vexag') && document.activeElement !== $('vexag')) $('vexag').value = st.vertical_exaggeration || 1;
   if ($('snowMode')) $('snowMode').value = st.snow_mode || 'peaks';
   if (typeof updateSnowFields === 'function') updateSnowFields();
@@ -2098,13 +2109,8 @@ $('btnSave').onclick = async () => {
     bake_lighting: $('bakelight').checked, stream_to_disk: $('streamdisk').checked,
     trees: $('trees') ? $('trees').checked : true,
     tree_realm: $('treeRealm') ? $('treeRealm').value : 'auto',
-    tree_sizes: {
-      small: $('szSmall') ? $('szSmall').checked : true,
-      medium: $('szMedium') ? $('szMedium').checked : true,
-      big: $('szBig') ? $('szBig').checked : true,
-      tall: $('szTall') ? $('szTall').checked : true,
-      giant: $('szGiant') ? $('szGiant').checked : false,
-    },
+    tree_size_weights: (typeof tsCollect === 'function') ? tsCollect()
+      : {small:100,medium:100,big:100,tall:100,giant:0},
     vertical_exaggeration: $('vexag') ? (parseFloat($('vexag').value) || 1) : 1,
     snow_mode: $('snowMode') ? $('snowMode').value : 'peaks',
     snow_percent: $('snowPct') ? (parseFloat($('snowPct').value) || 6) : 6,
@@ -2118,11 +2124,7 @@ $('m3d').addEventListener('change', () => api('/api/settings', { generate_3d_mod
  ['fillground','fill_ground'],['caves','caves'],['heightlimit','disable_height_limit'],
  ['bakelight','bake_lighting'],['streamdisk','stream_to_disk']].forEach(([id, key]) =>
   $(id) && $(id).addEventListener('change', () => api('/api/settings', { [key]: $(id).checked })));
-// Tree size tiers auto-save the whole dict so the 5 toggles apply without clicking Save.
-['szSmall','szMedium','szBig','szTall','szGiant'].forEach(id =>
-  $(id) && $(id).addEventListener('change', () => api('/api/settings', { tree_sizes: {
-    small: $('szSmall').checked, medium: $('szMedium').checked, big: $('szBig').checked,
-    tall: $('szTall').checked, giant: $('szGiant').checked } })));
+// Tree size tiers now auto-save via the ts_ slider onchange handlers (tsSave), below.
 
 // ── Cave biome mix: per-theme sliders (0–200% of the default share) + zone preview ──
 const CAVE_BIOMES = [
@@ -2213,6 +2215,90 @@ function cbSyncVisibility(){
   if ($('caveBiomesWrap')) $('caveBiomesWrap').style.display = $('caves').checked ? '' : 'none';
 }
 if ($('caves')) $('caves').addEventListener('change', cbSyncVisibility);
+
+// ── Tree size sliders (relative popularity per tier, like the cave-biome sliders) ──
+// key -> label + default weight% (giant off by default, matching the old checkbox).
+const TREE_SIZES = [
+  ['small', 'Small', 100], ['medium', 'Medium', 100], ['big', 'Big', 100],
+  ['tall', 'Tall', 100], ['giant', 'Giant', 0]];
+(function buildTreeSizeSliders(){
+  const host = $('treeSizeSliders'); if (!host) return;
+  host.innerHTML = TREE_SIZES.map(([key, name, def]) =>
+    `<div style="display:flex;align-items:center;gap:6px;margin:1px 0;border-radius:2px;padding:0 2px">
+       <span style="width:64px;font-size:11px;color:#cdbfa3;flex:0 0 auto">${name}</span>
+       <input id="ts_${key}" type="range" min="0" max="200" step="1" value="${def}" style="flex:1;min-width:0">
+       <span id="tsv_${key}" title="Click to type an exact percentage (any value 0–200)" style="width:34px;text-align:right;font-size:11px;color:#9aa;flex:0 0 auto;cursor:pointer;text-decoration:underline dotted #55503f">${def === 0 ? 'off' : def + '%'}</span>
+     </div>`).join('');
+})();
+function tsCollect(){
+  const out = {};
+  TREE_SIZES.forEach(([k]) => { const el = $('ts_' + k); if (el) out[k] = parseInt(el.value, 10); });
+  return out;
+}
+function tsPaint(){
+  TREE_SIZES.forEach(([k]) => {
+    const el = $('ts_' + k); if (!el) return;
+    const v = parseInt(el.value, 10);
+    const vs = $('tsv_' + k);
+    if (vs && !vs.querySelector('input')) vs.textContent = v === 0 ? 'off' : v + '%';
+    if (typeof paintRange === 'function') paintRange(el);
+  });
+}
+function tsSave(){ return api('/api/settings', { tree_size_weights: tsCollect() }); }
+TREE_SIZES.forEach(([k, , def]) => {
+  const el = $('ts_' + k); if (!el) return;
+  el.oninput = () => {
+    el.value = Math.round(el.value / 10) * 10;
+    const open = $('tsv_' + k).querySelector('input');
+    if (open) open.value = parseInt(el.value, 10);
+    tsPaint();
+  };
+  el.onchange = tsSave;
+  const tsResetOne = () => { el.value = def; tsPaint(); tsSave(); };
+  el.addEventListener('dblclick', tsResetOne);
+  let tsLastTap = 0;
+  el.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch') return;
+    const now = performance.now();
+    if (now - tsLastTap < 350) tsResetOne();
+    tsLastTap = now;
+  });
+  const val = $('tsv_' + k);
+  val.onclick = () => {
+    if (val.querySelector('input')) return;
+    const cur = parseInt(el.value, 10);
+    val.textContent = '';
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.min = 0; inp.max = 200; inp.step = 1; inp.value = cur;
+    inp.style.cssText = 'width:46px;font-size:11px;padding:1px 2px';
+    const commit = () => {
+      let v = parseInt(inp.value, 10);
+      if (isNaN(v)) v = cur;
+      el.value = Math.max(0, Math.min(200, v));
+      inp.remove();
+      tsPaint();
+      tsSave();
+    };
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') inp.blur();
+      if (e.key === 'Escape') { inp.value = cur; inp.blur(); }
+    });
+    inp.addEventListener('blur', commit);
+    val.appendChild(inp);
+    inp.focus();
+    inp.select();
+  };
+});
+if ($('tsReset')) $('tsReset').onclick = async () => {
+  TREE_SIZES.forEach(([k, , def]) => { const el = $('ts_' + k); if (el) el.value = def; });
+  tsPaint();
+  await tsSave();
+};
+function tsSyncVisibility(){
+  if ($('treeSizeWrap')) $('treeSizeWrap').style.display = ($('trees') && $('trees').checked) ? '' : 'none';
+}
+if ($('trees')) $('trees').addEventListener('change', tsSyncVisibility);
+tsSyncVisibility();
 
 // ---- Schematic props (per-family toggle; only wired families shown) ----
 const PROP_FAMILIES = [['boat','Boats'],['car','Cars'],['crane','Cranes'],['excavator','Excavators'],['fountain','Fountains'],['lighthouse','Lighthouses'],['playground','Playgrounds'],['tombstone','Tombstones'],['tractor','Tractors'],['windturbine','Wind turbines']];

@@ -56,9 +56,10 @@ def default_settings() -> dict:
         "road_detail_level": "auto",       # auto: compact <0.7, clean >=0.7
         "trees": True,                      # stamp bundled schematic trees (off = procedural)
         "tree_realm": "auto",               # auto: realm from selection latlon; or a realm code
-        # 5 height tiers to place (small <=6, medium 7-12, big 13-20, tall 21-28, giant 29-40 blocks).
-        # Giant (very tall) is OFF by default + only renders at 1:1; tall is rare. Off tiers fall back.
-        "tree_sizes": {"small": True, "medium": True, "big": True, "tall": True, "giant": False},
+        # Relative popularity per height tier (the sliders): 100 = default share, 0 = off, 200 =
+        # ~double. small <=6, medium 7-12, big 13-20, tall 21-28, giant 29-40 blocks. Giant OFF by
+        # default + only renders at 1:1; tiny maps never place tall/giant. 0 tiers fall back smaller.
+        "tree_size_weights": {"small": 100, "medium": 100, "big": 100, "tall": 100, "giant": 0},
         "elevation_mode": "global",         # global = locked range, no cliffs
         # Vertical exaggeration: multiplies terrain HEIGHT only (not footprint). 1.0 = true scale;
         # 2-3 = dramatic mountains at the same map size. Auto-compresses to the build height.

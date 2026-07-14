@@ -2420,6 +2420,15 @@ def api_settings():
             except (TypeError, ValueError):
                 clean[name] = 100
         patch["cave_biome_amounts"] = clean
+    if patch.get("tree_size_weights") is not None:
+        raw = patch["tree_size_weights"] if isinstance(patch["tree_size_weights"], dict) else {}
+        clean = {}
+        for name, default in arnis_cmd.TREE_SIZE_TIERS:
+            try:
+                clean[name] = max(0, min(200, int(raw.get(name, default))))
+            except (TypeError, ValueError):
+                clean[name] = default
+        patch["tree_size_weights"] = clean
     if patch.get("cpu_stagger_seconds") is not None:
         patch["cpu_stagger_seconds"] = max(1, min(4, int(round(float(patch["cpu_stagger_seconds"])))))
     if patch.get("cpu_stagger_enabled") is not None:
