@@ -122,6 +122,10 @@
              border-radius:50%; width:15px; height:15px; text-align:center; line-height:13px; }
   input,select { background:rgba(0,0,0,.30); color:var(--fg); border:1px solid var(--hair);
                  border-radius:var(--rsm); padding:5px 8px; width:120px; font:inherit; }
+  /* darken the native option popup so it isn't a bright wide panel over the dark UI */
+  select { background:#151209; }
+  select option, select optgroup { background:#151209; color:var(--fg); }
+  button.sec.active { border-color:var(--acc); color:var(--acc2); background:rgba(227,164,23,.14); }
   input:focus,select:focus { outline:none; border-color:var(--acc); box-shadow:0 0 0 1px rgba(227,164,23,.6); }
   button { background:linear-gradient(180deg,#f0bf3a,#e3a417); color:#241a02;
            border:2px solid #9a6a12; border-radius:var(--rsm);
@@ -880,7 +884,7 @@
       <h2>Data pack <span class="i" title="Download a whole region's elevation (and OSM) ONCE into the shared cache, so generation runs offline and is never rate-limited. Draw/search an area, then Download. Reused by every project. Height preview shows what's cached (red = missing).">i</span></h2>
       <label style="margin-bottom:4px">Elevation detail
         <span class="i" title="Terrarium zoom used for elevation download + in-game generation. Auto matches the zoom's pixel to your block size (the right detail, no waste): 1:1 scale -> z15, 1:10 -> z13. Lower zoom = far fewer tiles + dodges the z14/z15 no-data holes. z15 finest (~3.4m/px), z11 coarsest (~54m/px).">i</span>
-        <select id="elevZoom" style="width:170px">
+        <select id="elevZoom" style="width:100%">
           <option value="auto">Auto (match scale)</option>
           <option value="15">z15 — finest (~3.4 m/px)</option>
           <option value="14">z14 — ~6.8 m/px</option>
@@ -902,16 +906,13 @@
       <button class="sec" id="btnDpRefetch" style="margin-top:4px" title="Re-download EVERY elevation tile in the current map view, replacing stale/flat/wrong ones that still decode (so plain Download skips them). Zoom to a bad area first; this re-fetches only what's on screen.">↻ Re-fetch this view (fix flat tiles)</button>
       <button class="sec" id="btnDpRepair" style="margin-top:4px" title="The AWS terrarium set has real GAPS at z14/z15 — it serves an all-black no-data tile there, which shows as dark bands here and flat dips in-game. This scans the SELECTION and rebuilds each hole by upsampling the deepest parent zoom that DOES have data. Fixes both the preview and in-game generation (Arnis reads the same files). It only touches holes — good tiles are left as-is, nothing is re-downloaded.">✦ Fix no-data holes (selection)</button>
       <button class="sec" id="btnDpRepairAll" style="margin-top:4px" title="Same overzoom repair, but scans your ENTIRE elevation cache in one pass and fixes every no-data hole everywhere — no need to draw an area or click holes one by one. Only decodes the tiny uniform tiles (a hole is always tiny), so it's fast even over a whole country. Good tiles are untouched.">✦ Fix ALL holes (whole cache)</button>
-      <label style="margin-top:8px">Height preview
-        <span class="i" title="Overlay the cached elevation on the map (grayscale or hillshade). Red tiles = elevation NOT cached yet — exactly where a gap would be.">i</span>
-        <input id="dpPreview" type="checkbox"></label>
-      <label style="margin-top:2px">Preview style
-        <select id="dpPreviewMode" style="width:120px"><option value="grayscale">grayscale</option><option value="hillshade">hillshade</option></select></label>
-      <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:6px">
-        <button class="sec" id="btnMaptPreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Render the NEW Mapterhorn heightmap for your drawn selection (or planned cells) using the exact provider generation uses, and overlay it on the map. Unlike the tile 'Height preview' above (legacy AWS terrarium), this shows what the world's terrain will actually be.">⛰ Preview Mapterhorn (overlay)</button>
-        <select id="maptMode" style="width:auto;font-size:11px"><option value="hillshade">hillshade</option><option value="grayscale">grayscale</option></select>
-        <button class="sec xbtn" id="btnMaptClear" type="button" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:11px">✕</button>
+      <div class="stat" style="margin-top:8px">Preview elevation on the map (hillshade):</div>
+      <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:4px">
+        <button class="sec" id="btnMaptPreview" type="button" style="flex:1;padding:5px 8px;font-size:11px" title="Render the NEW Mapterhorn heightmap for your drawn selection (or planned cells) using the exact provider generation uses, and overlay it on the map — what the world's terrain will actually be.">⛰ Preview site</button>
+        <button class="sec" id="btnHeightPreview" type="button" style="flex:1;padding:5px 8px;font-size:11px" title="Toggle the cached-tile elevation overlay (legacy AWS terrarium, hillshade). Red tiles = elevation NOT cached yet — exactly where a gap would be.">▦ Height</button>
+        <button class="sec xbtn" id="btnMaptClear" type="button" style="width:auto;flex:0 0 auto;padding:5px 8px;font-size:11px" title="Clear both elevation overlays">✕</button>
       </div>
+      <input id="dpPreview" type="checkbox" style="display:none">
       <div style="border-top:1px solid var(--line);margin:9px 0 0;padding-top:8px"></div>
       <div class="stat" style="margin-bottom:3px">Downloaded packs <button id="btnDpList" class="sec" style="width:auto;margin:0;padding:1px 7px;font-size:11px;float:right">↻</button></div>
       <div id="dpList" class="stat" style="color:var(--mut)">…</div>
@@ -4538,9 +4539,21 @@ async function maptPreview() {
   const hi = (r.max_m != null) ? Math.round(r.max_m) : '?';
   $('dpCov').textContent = `Mapterhorn terrain (${r.provider || 'mapterhorn'}) · ${lo}…${hi} m`;
 }
-function maptClear() { if (_maptOverlay) { map.removeLayer(_maptOverlay); _maptOverlay = null; } }
+function maptClear() {
+  if (_maptOverlay) { map.removeLayer(_maptOverlay); _maptOverlay = null; }
+  // also drop the legacy height overlay + reset its button
+  if ($('dpPreview') && $('dpPreview').checked) { $('dpPreview').checked = false; toggleTerrainPreview(); }
+  if ($('btnHeightPreview')) $('btnHeightPreview').classList.remove('active');
+}
 if ($('btnMaptPreview')) $('btnMaptPreview').onclick = maptPreview;
 if ($('btnMaptClear')) $('btnMaptClear').onclick = maptClear;
+// Height = the legacy cached-tile overlay; toggles the (now hidden) dpPreview checkbox.
+if ($('btnHeightPreview')) $('btnHeightPreview').onclick = () => {
+  const cb = $('dpPreview'); if (!cb) return;
+  cb.checked = !cb.checked;
+  $('btnHeightPreview').classList.toggle('active', cb.checked);
+  toggleTerrainPreview();
+};
 async function dpRefetchView() {
   if (map.getZoom() < 11) { $('dpCov').textContent = 'Zoom in to the bad area first (≥11) — re-fetch covers only the current view.'; return; }
   const b = map.getBounds();
@@ -4666,7 +4679,7 @@ async function dpImport() {
 function refreshTerrainLayer() {
   if (!map.getPane('terrainPane')) { map.createPane('terrainPane'); map.getPane('terrainPane').style.zIndex = 350; }
   if (terrainLayer) { map.removeLayer(terrainLayer); terrainLayer = null; }
-  const mode = $('dpPreviewMode').value || 'grayscale';
+  const mode = 'hillshade';
   // Full-detail terrain down to a regional view. maxNativeZoom = the pack zoom (the finest real tiles
   // we have); the browser stretches deeper map-zooms, so we never request a zoom past the pack data.
   terrainLayer = L.tileLayer(`/api/terrain-tile/{z}/{x}/{y}.png?mode=${mode}&_=${Date.now()}`,
