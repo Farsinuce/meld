@@ -86,6 +86,10 @@
   #side > .card[data-ord] .stepnum { display:inline-block; color:var(--acc2); font-size:10px;
     border:1px solid #5a4a1e; border-radius:3px; padding:0 5px; margin-right:7px; vertical-align:middle;
     font-family:var(--pixel); letter-spacing:.02em; }
+  /* cards grouped UNDER the Generate step (Project & world, Selection / search, Edit & retry):
+     indented with a gold connector so they read as part of step 3, not their own steps. */
+  #side > .card[data-substep] { margin-left:12px; border-left:2px solid rgba(227,164,23,.5); }
+  #side > .card[data-substep] > h2 { font-size:11px; }
   #side > .railfoot { order:99; }   /* footer disclaimer pinned to the very bottom of the rail */
   /* rail links use the theme gold, not the browser default blue */
   #side a, #sideL a { color:var(--acc2); text-decoration:underline; text-underline-offset:2px; }
@@ -3583,11 +3587,13 @@ function syncCardMapLayers(slug, collapsed) {
       syncCardMapLayers(slug, collapsed);
     });
   });
-  // One-open-at-a-time on load too: keep only the FIRST open section open, collapse the rest.
-  let _openSeen = false;
+  // One-open-at-a-time on load: open step 1 (Settings) and collapse every other section, so the
+  // rail always starts on the first step (not whichever card happens to be first in the DOM).
   document.querySelectorAll('#side > .card').forEach(card => {
-    if (card.classList.contains('collapsed')) return;
-    if (_openSeen) _collapseCard(card, true); else _openSeen = true;
+    const h2 = card.querySelector(':scope > h2');
+    const slug = h2 ? ((h2.firstChild && h2.firstChild.textContent) || h2.textContent).trim()
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : '';
+    _collapseCard(card, slug !== 'settings');
   });
 })();
 // Collapse (or open) a #side card + persist it + sync its map layer. Used by the accordion.
@@ -3608,9 +3614,14 @@ function _collapseCard(card, collapsed) {
 // (Settings..Generate), then the advanced tool cards (Elevation lock, Subregions) at the bottom —
 // and number the steps 1..6 with a small badge. The DOM never moves, so every handler keeps working.
 (function initRailOrder(){
-  const STEPS = { 'settings':1, 'project-world':2, 'selection-search':3, 'edit-retry':4, 'prepare-data':5, 'generate':6 };
-  const ORDER = { ...STEPS, 'elevation-lock':7, 'cache':8, 'data-pack':9, 'osm-data-pack':10,
-                  'buildings-overture':11, 'subregions-worlds':12 };
+  // THREE numbered steps: 1 Settings, 2 Prepare data, 3 Generate. The Generate step groups the
+  // cards you use to build (Project & world, Selection / search, Edit & retry) right beneath it,
+  // shown as nested sub-cards rather than their own numbered steps.
+  const STEPS = { 'settings':1, 'prepare-data':2, 'generate':3 };
+  const SUBSTEPS = { 'project-world':true, 'selection-search':true, 'edit-retry':true };
+  const ORDER = { 'settings':1, 'prepare-data':2, 'generate':3,
+                  'project-world':4, 'selection-search':5, 'edit-retry':6,
+                  'elevation-lock':7, 'subregions-worlds':8, 'border-zones':9, 'server-setup':10 };
   document.querySelectorAll('#side > .card').forEach(card => {
     const h2 = card.querySelector(':scope > h2'); if (!h2) return;
     const label = ((h2.firstChild && h2.firstChild.textContent) || h2.textContent).trim();
@@ -3620,6 +3631,8 @@ function _collapseCard(card, collapsed) {
       card.dataset.ord = STEPS[slug];                              // drives the STEP badge
       const b = document.createElement('span'); b.className = 'stepnum'; b.textContent = STEPS[slug];
       h2.insertBefore(b, h2.firstChild);
+    } else if (SUBSTEPS[slug]) {
+      card.dataset.substep = '1';                                 // nested under the Generate step
     }
   });
 })();
