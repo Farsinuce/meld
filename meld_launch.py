@@ -255,7 +255,7 @@ def check_only() -> int:
             f"{'build with cargo' if has_cargo else 'ask you to install Rust (no cargo found)'}")
         ok = False
     log(f"port {PORT}: {'in use (a Meld may already be running)' if _port_open() else 'free'}")
-    log("READY — run this launcher with no arguments to start Meld." if ok
+    log("READY - run this launcher with no arguments to start Meld." if ok
         else "Some pieces are missing; running the launcher normally will fetch/build them.")
     return 0 if ok else 1
 
