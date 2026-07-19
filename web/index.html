@@ -179,6 +179,9 @@
   details.drawer[open] > summary::before { transform:rotate(90deg); }
   details.drawer > .dbody { padding:2px 0 6px; }
   details.drawer > :not(summary):not(.dbody):last-child { padding-bottom:6px; }
+  /* settings search: ring the matching control(s), scroll the first into view */
+  .search-hit { box-shadow:0 0 0 2px var(--acc), 0 0 9px rgba(227,164,23,.55) !important;
+    border-radius:4px; scroll-margin:80px; }
   .lk { color:var(--ok); } .un { color:var(--mut); }
   /* segmented multi-toggle (tree sizes): connected chips, no wrap, multi-select */
   .szgroup { display:inline-flex; vertical-align:middle; }
@@ -365,6 +368,12 @@
   <div id="coordbox">move the mouse over the map</div>
   <div id="credit">Arnis by <a href="https://github.com/louis-e/arnis" target="_blank" rel="noopener">louis-e</a> · Meld by <a href="https://github.com/Teddy563/meld" target="_blank" rel="noopener">Teddy563</a></div>
   <div id="side">
+    <div id="railSearchWrap" style="order:-1;position:relative;margin-bottom:2px">
+      <input id="railSearch" type="search" placeholder="🔍 Search settings…" autocomplete="off"
+        title="Type to find any setting, toggle or button on the right. The first match opens its section and scrolls into view; all matches are highlighted."
+        style="width:100%;box-sizing:border-box;padding:7px 9px;font-size:12px">
+      <div id="railSearchCount" class="stat" style="display:none;margin-top:2px"></div>
+    </div>
     <div class="card">
       <h2>Generate</h2>
       <div class="legend">
@@ -3588,10 +3597,12 @@ function syncCardMapLayers(slug, collapsed) {
     pw.card.remove();
   }
   // 2) Selection / search + Edit & retry: drawers inside Generate.
+  const ICON = { 'selection-search': '🔍', 'edit-retry': '✏️' };
   for (const slug of ['selection-search', 'edit-retry']) {
     const it = bySlug[slug]; if (!it) continue;
     const det = document.createElement('details'); det.className = 'drawer';
     const sum = document.createElement('summary');
+    if (ICON[slug]) sum.appendChild(document.createTextNode(ICON[slug] + ' '));   // match the 📦 Export style
     [...it.h2.childNodes].forEach(n => sum.appendChild(n));   // keep title text + info icon
     det.appendChild(sum);
     moveKids(it.card, it.h2, det);
@@ -3636,14 +3647,8 @@ function syncCardMapLayers(slug, collapsed) {
       syncCardMapLayers(slug, collapsed);
     });
   });
-  // One-open-at-a-time on load: open step 1 (Settings) and collapse every other section, so the
-  // rail always starts on the first step (not whichever card happens to be first in the DOM).
-  document.querySelectorAll('#side > .card').forEach(card => {
-    const h2 = card.querySelector(':scope > h2');
-    const slug = h2 ? ((h2.firstChild && h2.firstChild.textContent) || h2.textContent).trim()
-      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : '';
-    _collapseCard(card, slug !== 'settings');
-  });
+  // Start with EVERY section collapsed, so the rail opens clean (nothing expanded by default).
+  document.querySelectorAll('#side > .card').forEach(card => _collapseCard(card, true));
 })();
 // Collapse (or open) a #side card + persist it + sync its map layer. Used by the accordion.
 function _collapseCard(card, collapsed) {
@@ -3662,6 +3667,41 @@ function _collapseCard(card, collapsed) {
 // One guided rail (no mode toggle): fix the card order once — the six build steps first
 // (Settings..Generate), then the advanced tool cards (Elevation lock, Subregions) at the bottom —
 // and number the steps 1..6 with a small badge. The DOM never moves, so every handler keeps working.
+// ── Settings search: type to find any control on the rail, jump to + highlight it ──
+(function railSearch(){
+  const inp = document.getElementById('railSearch');
+  const cnt = document.getElementById('railSearchCount');
+  if (!inp) return;
+  const clear = () => document.querySelectorAll('#side .search-hit').forEach(e => e.classList.remove('search-hit'));
+  const openAncestors = (el) => {
+    for (let n = el; n && n.id !== 'side'; n = n.parentElement) {
+      if (n.tagName === 'DETAILS') n.open = true;
+      if (n.classList && n.classList.contains('card') && n.classList.contains('collapsed')
+          && typeof _collapseCard === 'function') _collapseCard(n, false);
+    }
+  };
+  let t;
+  const run = () => {
+    const q = inp.value.trim().toLowerCase();
+    clear();
+    if (!q) { if (cnt) cnt.style.display = 'none'; return; }
+    // Only leaf-ish controls, so a card doesn't match just because a child does.
+    const els = document.querySelectorAll('#side label, #side summary, #side h2, #side button');
+    let first = null, hits = 0;
+    els.forEach(el => {
+      if (el.closest('#railSearchWrap')) return;
+      // skip a container whose match comes only from a nested control we'll also hit
+      if (el.querySelector('label, summary, button, select, input')) return;
+      const txt = (el.textContent || '').toLowerCase();
+      if (txt.includes(q)) { el.classList.add('search-hit'); hits++; if (!first) first = el; }
+    });
+    if (first) { openAncestors(first); first.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    if (cnt) { cnt.style.display = ''; cnt.textContent = hits ? (hits + ' match' + (hits > 1 ? 'es' : '')) : 'no match'; }
+  };
+  inp.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 120); });
+  inp.addEventListener('keydown', e => { if (e.key === 'Escape') { inp.value = ''; run(); } });
+})();
+
 (function initRailOrder(){
   // THREE numbered steps: 1 Settings, 2 Prepare data, 3 Generate. Project & world, Selection /
   // search, and Edit & retry live INSIDE the Generate card (nestGenerateGroup above), so they are
