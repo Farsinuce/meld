@@ -181,10 +181,9 @@
   details.drawer > :not(summary):not(.dbody):last-child { padding-bottom:6px; }
   /* settings search: tint the match like the drawer hover (gold box + left bar), no glow.
      The one you're cycled to (.search-cur) tints stronger with a full outline. */
-  .search-hit { background:rgba(227,164,23,.13) !important; box-shadow:inset 3px 0 0 var(--acc) !important;
-    border-radius:4px; scroll-margin:90px; transition:background .15s, box-shadow .15s; }
-  .search-hit.search-cur { background:rgba(227,164,23,.30) !important;
-    box-shadow:inset 3px 0 0 var(--acc), 0 0 0 1px var(--acc) !important; }
+  .search-hit { background:rgba(227,164,23,.13) !important; box-shadow:none !important;
+    border:none !important; border-radius:0 !important; scroll-margin:90px; transition:background .15s; }
+  .search-hit.search-cur { background:rgba(227,164,23,.32) !important; }
   #railSearchClear:hover { color:#ffd86b; }
   .lk { color:var(--ok); } .un { color:var(--mut); }
   /* segmented multi-toggle (tree sizes): connected chips, no wrap, multi-select */
