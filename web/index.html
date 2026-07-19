@@ -353,6 +353,7 @@
     <div id="projGalHeader" style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--hair);cursor:move;user-select:none">
       <div style="font-weight:700;font-size:14px;color:var(--acc2,#d6ba58)" title="Drag to move">🌍 Projects</div>
       <input id="projSearch" placeholder="filter…" style="flex:1;min-width:0;padding:4px 8px;font-size:12px">
+      <button class="sec" id="projGalNewFolder" style="width:auto;padding:5px 9px;font-size:12px" title="Create a folder. Drag projects onto it to group them.">📁＋</button>
       <button class="sec" id="projGalNew" style="width:auto;padding:5px 9px;font-size:12px" title="Create a new empty project.">＋ New</button>
       <button class="sec xbtn" id="projGalClose" style="width:auto;padding:5px 10px;font-size:12px">✕</button>
     </div>
@@ -2082,6 +2083,7 @@ if ($('showAllProjects')) $('showAllProjects').onchange = (e) => showAllProjectA
 async function projGalRefresh() {
   let r; try { r = await api('/api/projects'); } catch (e) { return; }
   _projData = r.projects || [];
+  _projFolders = r.folders || [];
   // drop queued slugs that no longer exist
   const have = new Set(_projData.map(p => p.slug));
   _projQueue = _projQueue.filter(s => have.has(s));
@@ -2089,10 +2091,44 @@ async function projGalRefresh() {
   projGalRenderCards();
   projGalRenderQueue();
 }
+// ── gallery organisation: folders + drag reorder (persisted via /api/projects/organize) ──
+let _projFolders = [], _dragSlug = null, _collapsedFolders = {};
+function saveProjOrg() {
+  const order = _projData.map(p => p.slug), assign = {};
+  _projData.forEach(p => { if (p.folder) assign[p.slug] = p.folder; });
+  api('/api/projects/organize', { order, folders: _projFolders, assign }).catch(() => {});
+}
+// Move `slug` to sit before `beforeSlug` (end if null) and set its folder ("" = ungrouped).
+function projReorder(slug, beforeSlug, folder) {
+  const i = _projData.findIndex(p => p.slug === slug); if (i < 0) return;
+  const [c] = _projData.splice(i, 1);
+  c.folder = folder || '';
+  const j = beforeSlug ? _projData.findIndex(p => p.slug === beforeSlug) : -1;
+  if (j < 0) _projData.push(c); else _projData.splice(j, 0, c);
+  projGalRenderCards(); saveProjOrg();
+}
+function newProjFolder() {
+  const name = (prompt('Folder name:') || '').trim(); if (!name) return;
+  if (!_projFolders.some(f => f.toLowerCase() === name.toLowerCase())) _projFolders.push(name);
+  projGalRenderCards(); saveProjOrg();
+}
+function renameProjFolder(folder) {
+  const name = (prompt('Rename folder:', folder) || '').trim(); if (!name || name === folder) return;
+  _projFolders = _projFolders.map(f => f === folder ? name : f);
+  _projData.forEach(p => { if (p.folder === folder) p.folder = name; });
+  if (_collapsedFolders[folder]) { _collapsedFolders[name] = true; delete _collapsedFolders[folder]; }
+  projGalRenderCards(); saveProjOrg();
+}
+function deleteProjFolder(folder) {
+  _projFolders = _projFolders.filter(f => f !== folder);
+  _projData.forEach(p => { if (p.folder === folder) p.folder = ''; });   // projects go back to ungrouped
+  projGalRenderCards(); saveProjOrg();
+}
 function projGalDrawBoxes() {
   projGalGroup.clearLayers(); _projRects = {};
   for (const p of _projData) {
     if (!p.bbox) continue;
+    if (_focusFolder && p.folder !== _focusFolder) continue;   // focused folder -> only its areas
     const b = p.bbox;
     const rect = L.rectangle([[b.south, b.west], [b.north, b.east]], {
       color: p.active ? '#d6ba58' : '#6c86b0', weight: p.active ? 2.5 : 1.5,
@@ -2109,55 +2145,101 @@ function projGalLocate(slug) {
   const rect = _projRects[slug];
   if (rect) { rect.setStyle({ weight: 3.5, fillOpacity: 0.18 }); setTimeout(() => rect.setStyle({ weight: p.active ? 2.5 : 1.5, fillOpacity: 0.06 }), 1200); }
 }
+let _focusFolder = null;   // when set, the map shows only this folder's project areas
+function buildProjCard(p) {
+  const inQ = _projQueue.includes(p.slug);
+  const loc = p.center ? `${p.center.lat.toFixed(3)}, ${p.center.lon.toFixed(3)}` : 'no area yet';
+  const area = p.area_km2 != null ? ` · ${p.area_km2} km²` : '';
+  const prog = p.merged ? `${p.merged}/${p.cells} merged` : (p.cells ? `${p.cells} planned` : 'not planned');
+  const card = document.createElement('div');
+  card.className = 'projCard'; card.draggable = true; card.dataset.slug = p.slug;
+  card.style.cssText = 'border:1px solid ' + (p.active ? 'var(--acc2,#d6ba58)' : 'var(--line)') + ';border-radius:6px;padding:8px 9px;background:' + (p.active ? 'rgba(214,186,88,.06)' : 'transparent') + ';cursor:grab';
+  card.innerHTML =
+    `<div style="display:flex;align-items:center;gap:6px">
+       <span title="Drag to reorder or drop on a folder" style="color:var(--mut,#9a917f)">⠿</span>
+       <input type="checkbox" class="pqchk" ${inQ ? 'checked' : ''} title="Add to the render queue">
+       <span class="pname" style="font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>
+       ${p.active ? '<span style="font-size:10px;color:var(--acc2,#d6ba58);border:1px solid var(--acc2,#d6ba58);border-radius:3px;padding:0 4px">ACTIVE</span>' : ''}
+     </div>
+     <div class="stat" style="margin-top:3px;color:var(--mut,#9a917f);font-size:11px">📍 ${loc}${area} · 1:${p.scale ? Math.round(1 / p.scale) : '?'} · ${prog}</div>
+     <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">
+       <button class="sec pOpen" style="width:auto;padding:3px 8px;font-size:11px"${p.active ? ' disabled' : ''}>Open</button>
+       <button class="sec pLoc" style="width:auto;padding:3px 8px;font-size:11px"${p.bbox ? '' : ' disabled'}>📍 Locate</button>
+       <button class="sec pClone" style="width:auto;padding:3px 8px;font-size:11px">⧉ Clone</button>
+       <button class="sec pRen" style="width:auto;padding:3px 8px;font-size:11px">✎ Rename</button>
+       <button class="sec xbtn pDel" style="width:auto;padding:3px 8px;font-size:11px"${p.active ? ' disabled' : ''}>🗑</button>
+     </div>`;
+  card.querySelector('.pqchk').onchange = (e) => {
+    if (e.target.checked) { if (!_projQueue.includes(p.slug)) _projQueue.push(p.slug); }
+    else { _projQueue = _projQueue.filter(s => s !== p.slug); }
+    projGalRenderQueue();
+  };
+  card.querySelector('.pLoc').onclick = () => projGalLocate(p.slug);
+  card.querySelector('.pOpen').onclick = async () => {
+    if (!(await modalConfirm('Open project', `Switch to "${p.name}"? The page reloads into its workspace.`, 'Open'))) return;
+    const rr = await api('/api/projects/switch', { slug: p.slug });
+    if (!rr.ok) { modalInfo('Meld', rr.error || 'cannot switch'); return; }
+    location.reload();
+  };
+  card.querySelector('.pClone').onclick = () => projGalClone(p);
+  card.querySelector('.pRen').onclick = () => projGalRename(p, card);
+  card.querySelector('.pDel').onclick = async () => {
+    if (!(await modalConfirm('Delete project', `Delete the workspace for "${p.name}"? The saved Minecraft world on disk is KEPT.`, 'Delete'))) return;
+    const rr = await api('/api/projects/delete', { slug: p.slug });
+    if (!rr.ok) { modalInfo('Meld', rr.error || 'failed'); return; }
+    projGalRefresh(); loadProjects();
+  };
+  card.ondragstart = (e) => { _dragSlug = p.slug; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', p.slug); } catch (_) {} card.style.opacity = '0.45'; };
+  card.ondragend = () => { _dragSlug = null; card.style.opacity = ''; };
+  card.ondragover = (e) => { e.preventDefault(); card.style.boxShadow = 'inset 0 2px 0 var(--acc)'; };
+  card.ondragleave = () => { card.style.boxShadow = ''; };
+  card.ondrop = (e) => { e.preventDefault(); e.stopPropagation(); card.style.boxShadow = ''; if (_dragSlug && _dragSlug !== p.slug) projReorder(_dragSlug, p.slug, p.folder); };
+  return card;
+}
 function projGalRenderCards() {
   const host = $('projCards'); if (!host) return;
   const q = ($('projSearch').value || '').toLowerCase();
-  const list = _projData.filter(p => !q || p.name.toLowerCase().includes(q) || p.slug.includes(q));
+  const match = p => !q || p.name.toLowerCase().includes(q) || p.slug.includes(q);
   host.innerHTML = '';
-  for (const p of list) {
-    const inQ = _projQueue.includes(p.slug);
-    const loc = p.center ? `${p.center.lat.toFixed(3)}, ${p.center.lon.toFixed(3)}` : 'no area yet';
-    const area = p.area_km2 != null ? ` · ${p.area_km2} km²` : '';
-    const prog = p.merged ? `${p.merged}/${p.cells} merged` : (p.cells ? `${p.cells} planned` : 'not planned');
-    const card = document.createElement('div');
-    card.style.cssText = 'border:1px solid ' + (p.active ? 'var(--acc2,#d6ba58)' : 'var(--line)') + ';border-radius:6px;padding:8px 9px;background:' + (p.active ? 'rgba(214,186,88,.06)' : 'transparent');
-    card.innerHTML =
-      `<div style="display:flex;align-items:center;gap:6px">
-         <input type="checkbox" class="pqchk" ${inQ ? 'checked' : ''} title="Add to the render queue">
-         <span class="pname" style="font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>
-         ${p.active ? '<span style="font-size:10px;color:var(--acc2,#d6ba58);border:1px solid var(--acc2,#d6ba58);border-radius:3px;padding:0 4px">ACTIVE</span>' : ''}
-       </div>
-       <div class="stat" style="margin-top:3px;color:var(--mut,#9a917f);font-size:11px">📍 ${loc}${area} · 1:${p.scale ? Math.round(1 / p.scale) : '?'} · ${prog}</div>
-       <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">
-         <button class="sec pOpen" style="width:auto;padding:3px 8px;font-size:11px"${p.active ? ' disabled' : ''}>Open</button>
-         <button class="sec pLoc" style="width:auto;padding:3px 8px;font-size:11px"${p.bbox ? '' : ' disabled'}>📍 Locate</button>
-         <button class="sec pClone" style="width:auto;padding:3px 8px;font-size:11px">⧉ Clone</button>
-         <button class="sec pRen" style="width:auto;padding:3px 8px;font-size:11px">✎ Rename</button>
-         <button class="sec xbtn pDel" style="width:auto;padding:3px 8px;font-size:11px"${p.active ? ' disabled' : ''}>🗑</button>
-       </div>`;
-    card.querySelector('.pqchk').onchange = (e) => {
-      if (e.target.checked) { if (!_projQueue.includes(p.slug)) _projQueue.push(p.slug); }
-      else { _projQueue = _projQueue.filter(s => s !== p.slug); }
-      projGalRenderQueue();
-    };
-    card.querySelector('.pLoc').onclick = () => projGalLocate(p.slug);
-    card.querySelector('.pOpen').onclick = async () => {
-      if (!(await modalConfirm('Open project', `Switch to "${p.name}"? The page reloads into its workspace.`, 'Open'))) return;
-      const rr = await api('/api/projects/switch', { slug: p.slug });
-      if (!rr.ok) { modalInfo('Meld', rr.error || 'cannot switch'); return; }
-      location.reload();
-    };
-    card.querySelector('.pClone').onclick = () => projGalClone(p);
-    card.querySelector('.pRen').onclick = () => projGalRename(p, card);
-    card.querySelector('.pDel').onclick = async () => {
-      if (!(await modalConfirm('Delete project', `Delete the workspace for "${p.name}"? The saved Minecraft world on disk is KEPT.`, 'Delete'))) return;
-      const rr = await api('/api/projects/delete', { slug: p.slug });
-      if (!rr.ok) { modalInfo('Meld', rr.error || 'failed'); return; }
-      projGalRefresh(); loadProjects();
-    };
-    host.appendChild(card);
+  const folderHeader = (folder, projs) => {
+    const hdr = document.createElement('div');
+    const collapsed = !!_collapsedFolders[folder], focused = _focusFolder === folder;
+    hdr.style.cssText = 'display:flex;align-items:center;gap:5px;padding:5px 6px;border:1px dashed ' + (focused ? 'var(--acc)' : 'var(--line)') + ';border-radius:6px;background:rgba(255,255,255,.03);font-weight:600;font-size:12px;margin-top:2px';
+    const tog = document.createElement('span'); tog.textContent = collapsed ? '▸' : '▾'; tog.style.cssText = 'color:var(--acc);cursor:pointer';
+    tog.onclick = () => { _collapsedFolders[folder] = !collapsed; projGalRenderCards(); };
+    const nm = document.createElement('span'); nm.textContent = '📁 ' + folder;
+    nm.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;' + (focused ? 'color:var(--acc2,#d6ba58)' : '');
+    nm.title = "Show only this folder's areas on the map (click again for all)";
+    nm.onclick = () => { _focusFolder = focused ? null : folder; projGalDrawBoxes(); projGalRenderCards(); };
+    const cnt = document.createElement('span'); cnt.textContent = projs.length; cnt.style.cssText = 'color:var(--mut,#9a917f);font-weight:400;font-size:11px';
+    const qbtn = document.createElement('button'); qbtn.className = 'sec'; qbtn.textContent = '▶'; qbtn.title = "Queue this folder's projects, in order"; qbtn.style.cssText = 'width:auto;padding:1px 6px;font-size:11px';
+    qbtn.onclick = () => { _projQueue = projs.map(p => p.slug); projGalRenderCards(); projGalRenderQueue(); };
+    const ren = document.createElement('button'); ren.className = 'sec'; ren.textContent = '✎'; ren.style.cssText = 'width:auto;padding:1px 6px;font-size:11px';
+    ren.onclick = () => renameProjFolder(folder);
+    const del = document.createElement('button'); del.className = 'sec xbtn'; del.textContent = '🗑'; del.style.cssText = 'width:auto;padding:1px 6px;font-size:11px';
+    del.onclick = () => deleteProjFolder(folder);
+    hdr.append(tog, nm, cnt, qbtn, ren, del);
+    hdr.ondragover = (e) => { e.preventDefault(); hdr.style.borderColor = 'var(--acc)'; };
+    hdr.ondragleave = () => { hdr.style.borderColor = focused ? 'var(--acc)' : ''; };
+    hdr.ondrop = (e) => { e.preventDefault(); hdr.style.borderColor = ''; if (_dragSlug) projReorder(_dragSlug, null, folder); };
+    return { hdr, collapsed };
+  };
+  for (const f of _projFolders) {
+    const projs = _projData.filter(p => p.folder === f);
+    const { hdr, collapsed } = folderHeader(f, projs);
+    host.appendChild(hdr);
+    if (!collapsed) for (const p of projs) if (match(p)) host.appendChild(buildProjCard(p));
   }
-  if (!list.length) host.innerHTML = '<div class="stat" style="color:var(--mut,#9a917f);padding:8px">no projects match.</div>';
+  const ung = _projData.filter(p => !p.folder);
+  if (_projFolders.length) {
+    const uh = document.createElement('div');
+    uh.textContent = 'Ungrouped'; uh.style.cssText = 'font-size:10px;color:var(--mut,#9a917f);padding:4px 4px 1px;text-transform:uppercase;letter-spacing:.04em';
+    uh.ondragover = (e) => e.preventDefault();
+    uh.ondrop = (e) => { e.preventDefault(); if (_dragSlug) projReorder(_dragSlug, null, ''); };
+    host.appendChild(uh);
+  }
+  for (const p of ung) if (match(p)) host.appendChild(buildProjCard(p));
+  if (!_projData.filter(match).length) host.innerHTML = '<div class="stat" style="color:var(--mut,#9a917f);padding:8px">no projects match.</div>';
 }
 async function projGalClone(p) {
   const mode = await _meldModal({ title: 'Clone "' + p.name + '"', html: _nl2br(
@@ -2287,6 +2369,7 @@ function renderQueueStatus(rq) {
 }
 if ($('btnProjectGallery')) $('btnProjectGallery').onclick = projGalOpen;
 if ($('btnProjectGalleryL')) $('btnProjectGalleryL').onclick = projGalOpen;
+if ($('projGalNewFolder')) $('projGalNewFolder').onclick = newProjFolder;
 if ($('btnDocs')) $('btnDocs').onclick = () => window.open('https://meldmc.com/docs', '_blank', 'noopener');
 if ($('projGalClose')) $('projGalClose').onclick = projGalClose;
 if ($('projSearch')) $('projSearch').oninput = projGalRenderCards;

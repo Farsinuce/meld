@@ -3442,6 +3442,34 @@ def _next_world_name() -> str:
     return name
 
 
+def _org_path() -> Path:
+    return PROJECTS_ROOT / "_org.json"
+
+
+def _load_org() -> dict:
+    """Gallery organisation: display ORDER, the FOLDER list, and each project's folder ASSIGNMENT."""
+    try:
+        d = json.loads(_org_path().read_text(encoding="utf-8"))
+        if isinstance(d, dict):
+            return {"order": [s for s in (d.get("order") or []) if isinstance(s, str)],
+                    "folders": [f for f in (d.get("folders") or []) if isinstance(f, str) and f.strip()],
+                    "assign": {k: v for k, v in (d.get("assign") or {}).items() if isinstance(v, str)}}
+    except Exception:
+        pass
+    return {"order": [], "folders": [], "assign": {}}
+
+
+def _save_org(org: dict) -> None:
+    try:
+        _org_path().write_text(json.dumps({
+            "order": list(org.get("order") or []),
+            "folders": list(org.get("folders") or []),
+            "assign": dict(org.get("assign") or {}),
+        }, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
 @app.route("/api/projects")
 def api_projects():
     PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -3449,7 +3477,39 @@ def api_projects():
                    if p.is_dir() and (p / "project.json").exists())
     if ACTIVE_SLUG not in slugs:
         slugs.insert(0, ACTIVE_SLUG)
-    return jsonify({"active": ACTIVE_SLUG, "projects": [_project_info(s) for s in slugs]})
+    org = _load_org()
+    ordered = [s for s in org["order"] if s in slugs]        # remembered order first
+    ordered += [s for s in slugs if s not in ordered]        # then any new projects, alpha
+    infos = []
+    for s in ordered:
+        info = _project_info(s)
+        info["folder"] = org["assign"].get(s, "")            # "" = ungrouped
+        infos.append(info)
+    return jsonify({"active": ACTIVE_SLUG, "projects": infos, "folders": org["folders"]})
+
+
+@app.route("/api/projects/organize", methods=["POST"])
+def api_projects_organize():
+    """Persist the gallery ORDER, FOLDER list, and per-project folder ASSIGNMENT (full replace of
+    whatever keys are sent). Purely presentational - never touches a project's own files."""
+    d = request.get_json(silent=True) or {}
+    org = _load_org()
+    if isinstance(d.get("order"), list):
+        org["order"] = [_slugify(s) for s in d["order"] if isinstance(s, str)]
+    if isinstance(d.get("folders"), list):
+        seen, folders = set(), []
+        for f in d["folders"]:
+            f = str(f).strip()
+            if f and f.lower() not in seen:
+                seen.add(f.lower())
+                folders.append(f)
+        org["folders"] = folders[:64]
+    if isinstance(d.get("assign"), dict):
+        valid = set(org["folders"])
+        org["assign"] = {_slugify(k): v for k, v in d["assign"].items()
+                         if isinstance(v, str) and v in valid}
+    _save_org(org)
+    return jsonify({"ok": True, **org})
 
 
 @app.route("/api/projects/switch", methods=["POST"])
