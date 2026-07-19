@@ -4288,7 +4288,7 @@ def _preview_regions_arg(default: int = 3) -> int:
         r = int((request.get_json(silent=True) or {}).get("regions", default))
     except (TypeError, ValueError):
         r = default
-    return max(0, min(25, r))
+    return max(0, min(100, r))
 
 
 # ── cave biome zone-map preview ───────────────────────────────────────────────

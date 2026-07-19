@@ -172,6 +172,10 @@
   details.drawer[open] > summary::before { transform:rotate(90deg); }
   details.drawer > summary:hover { background:rgba(240,191,58,.08); }
   details.drawer > .dbody { padding:2px 9px 9px; }
+  /* also pad direct children (for drawers converted from plain divs, no .dbody wrapper) */
+  details.drawer > :not(summary):not(.dbody) { padding-left:9px; padding-right:9px; }
+  details.drawer > :not(summary):not(.dbody):last-child { padding-bottom:9px; }
+  details.drawer > summary { font-weight:600; }
   .lk { color:var(--ok); } .un { color:var(--mut); }
   /* segmented multi-toggle (tree sizes): connected chips, no wrap, multi-select */
   .szgroup { display:inline-flex; vertical-align:middle; }
@@ -283,35 +287,11 @@
       <a href="https://meldmc.com" target="_blank" rel="noopener" title="meldmc.com" class="logo" style="margin:0">
         <img src="assets/meld_icon.png" alt="Meld" style="height:40px;width:auto;display:block;cursor:pointer"/></a>
       <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
-        <button id="btnRecommend" class="sec" style="width:auto;margin:0;padding:5px 8px;font-size:11px;white-space:nowrap" title="Check this PC (CPU, RAM, save-disk speed) and recommend the best cell size + worker count.">⚡ Recommend</button>
-        <div style="position:relative">
-          <button id="btnDocs" class="sec" style="width:auto;margin:0;padding:5px 8px;font-size:11px;white-space:nowrap" title="Open the Meld documentation index.">📖 Docs ▾</button>
-          <div id="docsMenu" class="docs-menu" hidden>
-            <a href="https://meldmc.com/docs/how-it-works" target="_blank" rel="noopener">How it works</a>
-            <a href="https://meldmc.com/docs/elevation" target="_blank" rel="noopener">Elevation</a>
-            <a href="https://meldmc.com/docs/parallel-generation" target="_blank" rel="noopener">Parallel generation</a>
-            <a href="https://meldmc.com/docs/the-arnis-fork" target="_blank" rel="noopener">The Arnis fork</a>
-            <a href="https://meldmc.com/docs/tree-packs" target="_blank" rel="noopener">Tree packs</a>
-            <a href="https://meldmc.com/docs/terrain-and-snow" target="_blank" rel="noopener">Terrain &amp; snow</a>
-            <a href="https://meldmc.com/docs/border-zones" target="_blank" rel="noopener">Border &amp; zones</a>
-            <a href="https://meldmc.com/docs" target="_blank" rel="noopener" class="docs-all">All docs →</a>
-          </div>
-        </div>
+        <button id="btnRecommend" class="sec" style="flex:1;margin:0;padding:5px 8px;font-size:11px;white-space:nowrap" title="Check this PC (CPU, RAM, save-disk speed) and recommend the best cell size + worker count.">⚡ Recommend</button>
+        <button id="btnDocs" class="sec" style="flex:1;margin:0;padding:5px 8px;font-size:11px;white-space:nowrap" title="Open the Meld documentation.">📖 Docs</button>
       </div>
+      <button id="btnProjectGalleryL" class="sec" style="width:100%;margin-top:6px;padding:6px;font-size:12px" title="Open the projects gallery: see, clone, rename, locate every world on the map, and queue several to render in order.">🗂 Projects</button>
     </div>
-    <script>
-    (function(){
-      var btn = document.getElementById('btnDocs'), menu = document.getElementById('docsMenu');
-      if (!btn || !menu) return;
-      var close = function(){ menu.hidden = true; };
-      btn.addEventListener('click', function(e){ e.stopPropagation(); menu.hidden = !menu.hidden; });
-      menu.addEventListener('click', close);                       // close after picking a link
-      document.addEventListener('click', function(e){
-        if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) close();
-      });
-      document.addEventListener('keydown', function(e){ if (e.key === 'Escape') close(); });
-    })();
-    </script>
     <div class="sub" style="font-size:10px;line-height:1.3;margin:0 0 10px">From a city block to a whole continent, in Minecraft.</div>
     <div class="sub" style="margin:0 0 12px">Live status</div>
     <div class="card">
@@ -511,6 +491,12 @@
       <label>Buildings
         <span class="i" title="Generate OSM buildings. Off = a roads + land-cover only world (roads, bridges, railways, water and terrain are still built).">i</span>
         <input id="buildings" type="checkbox"></label>
+      <label>Roofs
+        <span class="i" title="Generate building roofs.">i</span>
+        <input id="roof" type="checkbox"></label>
+      <label>Interiors
+        <span class="i" title="Generate building interiors (slower, bigger).">i</span>
+        <input id="interior" type="checkbox"></label>
       <label>Schematic trees
         <span class="i" title="Stamp detailed schematic trees from the bundled pack (geography-picked species, scale-aware sizes, spaced trunks, avoids roads/water/buildings). Off = the simpler procedural trees.">i</span>
         <input id="trees" type="checkbox" checked></label>
@@ -529,9 +515,9 @@
           <option value="sam">South America</option>
           <option value="aus">Australia / Oceania</option>
         </select></label>
-      <div id="treeSizeWrap" style="margin:2px 0 6px;padding:6px 8px;border:1px solid var(--line);border-radius:2px">
-        <div style="font-weight:600;color:#7bd88f;font-size:12px">Tree sizes
-          <span class="i" title="Relative popularity of each height tier, like the cave-biome sliders: 100% = the pack's default share, 0 = off, 200% = ~double. small &le;6, medium 7-12, big 13-20, tall 21-28, giant 29-40 blocks. Crank big/giant up for a denser old-growth look, or down for mostly-small. Scale rules always apply: Giant only renders at 1:1 (default off), and tiny maps never place tall/giant no matter the slider. A tier set to 0 falls back to a smaller tree (never leaves a gap). Only affects the schematic region packs.">i</span></div>
+      <details id="treeSizeWrap" class="drawer">
+        <summary>Tree sizes
+          <span class="i" title="Relative popularity of each height tier, like the cave-biome sliders: 100% = the pack's default share, 0 = off, 200% = ~double. small &le;6, medium 7-12, big 13-20, tall 21-28, giant 29-40 blocks. Crank big/giant up for a denser old-growth look, or down for mostly-small. Scale rules always apply: Giant only renders at 1:1 (default off), and tiny maps never place tall/giant no matter the slider. A tier set to 0 falls back to a smaller tree (never leaves a gap). Only affects the schematic region packs.">i</span></summary>
         <div id="treeSizeSliders" style="margin-top:2px"></div>
         <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:4px">
           <button class="sec" id="tsReset" type="button" style="width:auto;padding:4px 8px;font-size:11px" title="All tiers back to defaults (small/medium/big/tall 100%, giant off).">Reset</button>
@@ -545,16 +531,10 @@
         </div>
         <canvas id="treeCanvas" width="288" height="288" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504;margin-top:5px"></canvas>
         <div id="treeLegend" class="stat" style="margin-top:3px"></div>
-      </div>
-      <label>Roofs
-        <span class="i" title="Generate building roofs.">i</span>
-        <input id="roof" type="checkbox"></label>
-      <label>Interiors
-        <span class="i" title="Generate building interiors (slower, bigger).">i</span>
-        <input id="interior" type="checkbox"></label>
-      <div id="lootWrap" style="display:none;margin:2px 0 6px;padding:6px 8px;border:1px solid var(--line);border-radius:2px">
-        <div style="font-weight:600;color:#00e5ff;font-size:12px">Chest loot
-          <span class="i" title="What generated buildings' chests contain. Chests spawn only when Buildings AND Interiors are BOTH on. Pick a vanilla preset (trial chamber, stronghold, buried treasure, ...) or build your own: each theme is a weighted group, each item has a min-max stack count and a rarity weight. Loot is deterministic per chest, so re-rendering a tile always yields the same chest.">i</span></div>
+      </details>
+      <details id="lootWrap" class="drawer" style="display:none">
+        <summary>Chest loot
+          <span class="i" title="What generated buildings' chests contain. Chests spawn only when Buildings AND Interiors are BOTH on. Pick a vanilla preset (trial chamber, stronghold, buried treasure, ...) or build your own: each theme is a weighted group, each item has a min-max stack count and a rarity weight. Loot is deterministic per chest, so re-rendering a tile always yields the same chest.">i</span></summary>
         <div id="lootStatus" class="stat" style="margin-top:2px">built-in default</div>
         <select id="lootPreset" class="sec" style="width:100%;margin-top:4px;padding:4px 6px;font-size:11px" title="Load a vanilla-structure loot table as a starting point, then edit + Save.">
           <option value="">Load a vanilla preset...</option>
@@ -571,7 +551,7 @@
           <button class="sec" id="lootReset" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Delete the custom table and go back to the built-in default.">Reset</button>
         </div>
         <datalist id="lootItemList"></datalist>
-      </div>
+      </details>
       <label>Land cover
         <span class="i" title="ESA WorldCover surface blocks (forests, fields, water, built-up). Needs Terrain.">i</span>
         <input id="landcover" type="checkbox"></label>
@@ -581,9 +561,9 @@
       <label>Caves
         <span class="i" title="Vanilla-LIKE cave worldgen, carved during generation: Minecraft 1.21.8 cave shapes (noise caverns, winding tunnels, ravines) improved for real-world maps — themed cave biomes (lush, dripstone, deep dark, mushroom, ice under mountains, amethyst, volcanic, coral), underground rivers and half-flooded pools, a deep lava sea with obsidian shores, full vanilla ores, and hand-made cave formations. Not 1:1 vanilla: tuned to fill in what real-world terrain doesn't generate underground, so worlds play well for survival. Never breaks buildings or streets. Turns on Fill ground automatically.">i</span>
         <input id="caves" type="checkbox"></label>
-      <div id="caveBiomesWrap" style="display:none;margin:2px 0 6px;padding:6px 8px;border:1px solid var(--line);border-radius:2px">
-        <div style="font-weight:600;color:#00e5ff;font-size:12px">Cave biomes
-          <span class="i" title="How much of each cave theme this world gets, relative to the default mix. 100% = default, 0 = off, 200% ≈ double the area. Depth rules always apply: volcanic only at the very bottom, deep dark only deep, ice only under mountains, coral only in water pools. Preview renders the REAL zone layout for this world's seed on the map (upper + deep layers) with measured percentages — sliders are relative, the preview tells the truth.">i</span></div>
+      <details id="caveBiomesWrap" class="drawer" style="display:none">
+        <summary>Cave biomes
+          <span class="i" title="How much of each cave theme this world gets, relative to the default mix. 100% = default, 0 = off, 200% ≈ double the area. Depth rules always apply: volcanic only at the very bottom, deep dark only deep, ice only under mountains, coral only in water pools. Preview renders the REAL zone layout for this world's seed on the map (upper + deep layers) with measured percentages — sliders are relative, the preview tells the truth.">i</span></summary>
         <div id="caveBiomeSliders" style="margin-top:2px"></div>
         <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:4px">
           <button class="sec" id="cbReset" type="button" style="width:auto;padding:4px 8px;font-size:11px" title="All biomes back to their 100% defaults.">Reset</button>
@@ -600,7 +580,7 @@
         <div id="cbCapD" class="stat" style="display:none;margin-top:4px;color:#00e5ff">deep caves (volcanic + deep dark live here)</div>
         <canvas id="cbCanvasD" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504"></canvas>
         <div id="cbStats" class="stat" style="margin-top:3px;white-space:pre-wrap"></div>
-      </div>
+      </details>
       <label>Extend build height
         <span class="i" title="Disable the Y height limit (experimental; Java 1.21.4+ Y=-2032..2031).">i</span>
         <input id="heightlimit" type="checkbox"></label>
@@ -746,11 +726,8 @@
     <div class="card">
       <h2>Project &amp; world <span class="i" title="Switch project workspaces (each = one world's settings, origin, grid). Below: the name and save location of the world this project builds.">i</span></h2>
       <select id="projectSel" style="width:100%"></select>
-      <div class="row" style="margin-top:6px">
-        <button class="sec" id="btnProjectGallery" style="padding:6px;flex:1" title="Open the projects gallery: clone, rename, locate every project on the map, and queue several to render one after another.">🗂 Projects gallery</button>
-        <button class="sec" id="btnProjectNew" style="padding:6px" title="Create a new project (a fresh world workspace). The current one stays intact.">＋ New</button>
-        <button class="sec xbtn" id="btnProjectDelete" title="Delete this project's workspace (the saved Minecraft world on disk is kept)" style="width:auto;flex:0 0 auto;padding:6px 10px">🗑️</button>
-      </div>
+      <button class="sec" id="btnProjectGallery" style="width:100%;margin-top:6px;padding:7px" title="Open the projects gallery: switch, clone, rename, locate, delete (via 🗑 on each card), and queue worlds to render in order.">🗂 Projects gallery</button>
+      <button class="sec" id="btnProjectNew" style="width:100%;margin-top:6px;padding:7px" title="Create a new project (a fresh world workspace). The current one stays intact.">＋ New project</button>
       <label style="margin-top:8px;font-size:12px" title="Draw every project's saved selection area on the map, so you can see all your worlds and subprojects allocated at once while planning.">Show all project areas on the map
         <input id="showAllProjects" type="checkbox"></label>
       <div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:9px"></div>
@@ -2007,20 +1984,12 @@ $('btnProjectNew').onclick = async () => {
   if (!r.ok) { modalInfo('Meld', r.error || 'failed'); return; }
   location.reload();
 };
-$('btnProjectDelete').onclick = async () => {
+// Project deletion now lives only in the gallery (🗑 on each card); no sidebar delete button.
+if ($('btnProjectDelete')) $('btnProjectDelete').onclick = async () => {
   const sel = $('projectSel'); const slug = sel.value;
   const name = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : slug;
-  if (!(await modalConfirm('Delete project', `Delete the workspace for "${name}"? The saved Minecraft world on disk is KEPT, only Meld's project state (plan, logs, cache) is removed.`, 'Delete'))) return;
-  let r = await api('/api/projects/delete', { slug });
-  if (!r.ok && /active/.test(r.error || '')) {
-    // deleting the active project: switch to another one first
-    const list = (await api('/api/projects')).projects || [];
-    const other = list.find(p => p.slug !== slug);
-    if (!other) { modalInfo('Meld', 'This is your only project — create another first.'); return; }
-    await api('/api/projects/switch', { slug: other.slug });
-    r = await api('/api/projects/delete', { slug });
-    if (r.ok) { location.reload(); return; }
-  }
+  if (!(await modalConfirm('Delete project', `Delete the workspace for "${name}"? The saved Minecraft world on disk is KEPT.`, 'Delete'))) return;
+  const r = await api('/api/projects/delete', { slug });
   if (!r.ok) { modalInfo('Meld', r.error || 'failed'); return; }
   loadProjects();
 };
@@ -2224,6 +2193,8 @@ function renderQueueStatus(rq) {
 }
 if ($('btnProjectGallery')) $('btnProjectGallery').onclick = projGalOpen;
 if ($('btnProjectGallery2')) $('btnProjectGallery2').onclick = projGalOpen;
+if ($('btnProjectGalleryL')) $('btnProjectGalleryL').onclick = projGalOpen;
+if ($('btnDocs')) $('btnDocs').onclick = () => window.open('https://meldmc.com/docs', '_blank', 'noopener');
 if ($('projGalClose')) $('projGalClose').onclick = projGalClose;
 if ($('projSearch')) $('projSearch').oninput = projGalRenderCards;
 if ($('projGalNew')) $('projGalNew').onclick = async () => {
@@ -2393,7 +2364,7 @@ $('btnManual').onclick = async () => {
   refreshState();
 };
 
-$('btnSave').onclick = async () => {
+async function saveAllSettings() {
   const num = (v, d) => { const n = parseFloat(v); return isNaN(n) ? d : n; };
   await api('/api/settings', {
     scale: num($('scale').value, 0.1),
@@ -2418,7 +2389,21 @@ $('btnSave').onclick = async () => {
     snow_y: $('snowY') ? (parseInt($('snowY').value) || 80) : 80,
   });
   refreshState();
-};
+}
+$('btnSave').onclick = saveAllSettings;
+// Auto-save the whole Settings card on any change, so the Save button is optional (still works).
+(function () {
+  const card = [...document.querySelectorAll('#side > .card')].find(c => {
+    const h = c.querySelector(':scope > h2'); return h && /^settings\b/i.test(h.textContent.trim());
+  });
+  if (!card) return;
+  let t;
+  const kick = () => { clearTimeout(t); t = setTimeout(saveAllSettings, 450); };
+  card.addEventListener('change', kick);
+  card.addEventListener('input', e => {
+    if (e.target.matches('input[type=range],input[type=number],input[type=text]')) kick();
+  });
+})();
 $('m3d').addEventListener('change', () => api('/api/settings', { generate_3d_models: $('m3d').checked }));
 // Arnis toggles auto-save on change (so they apply even without clicking Save).
 [['terrain','terrain'],['buildings','buildings'],['awsonly','aws_only_elevation'],['regionalonly','regional_elevation_only'],['roof','roof'],['interior','interior'],['landcover','land_cover'],
@@ -2665,11 +2650,11 @@ function _treeHash(x, y){   // cheap uniform 32-bit hash -> [0,1000); only the M
 // ── Preview window: NxN Minecraft regions (512 blocks each), centered on the selection ──
 // The default is 3x3 so previews start zoomed to LOCAL detail instead of the whole selection.
 // The −/+ stepper widens/tightens the window (re-renders); makeZoomable's scroll zooms within it.
-const _winRegions = { climate: 3, cave: 3, tree: 3 };
+const _winRegions = { climate: 7, cave: 3, tree: 3 };   // climate opens more zoomed-out
 function wireWindow(key, prefix, render){
   const wo = $(prefix + 'Wout'), wi = $(prefix + 'Win'), lbl = $(prefix + 'Wlbl');
   const upd = () => { if (lbl) lbl.textContent = _winRegions[key] + '×' + _winRegions[key]; };
-  if (wo) wo.onclick = () => { _winRegions[key] = Math.min(25, _winRegions[key] + 2); upd(); render(); };
+  if (wo) wo.onclick = () => { _winRegions[key] = Math.min(100, _winRegions[key] + 2); upd(); render(); };
   if (wi) wi.onclick = () => { _winRegions[key] = Math.max(1, _winRegions[key] - 2); upd(); render(); };
   upd();
 }
@@ -3005,7 +2990,7 @@ async function renderClimate(){
       col.join(',') + ')"></span>' + name + ': ' + (shares[k] || 0).toFixed(1) + '%</div>');
   $('climateStats').innerHTML = rows.join('') || 'no climate data';
 }
-if ($('climatePreview')) $('climatePreview').onclick = () => { _winRegions.climate = 3; renderClimate(); };
+if ($('climatePreview')) $('climatePreview').onclick = () => { _winRegions.climate = 7; renderClimate(); };
 wireWindow('climate', 'climate', renderClimate);
 if ($('climateClear')) $('climateClear').onclick = () => {
   if ($('climateCanvas')) $('climateCanvas').style.display = 'none';
