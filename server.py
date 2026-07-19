@@ -507,7 +507,7 @@ def _write_run_report() -> None:
                    "ram_speed": hw.get("ram_speed"), "ram_modules": hw.get("ram_modules"),
                    "drive_type": hw.get("drive_type")}
         rep = runreport.build_report(
-            world_name=name, meld_version="1.6.2", run=run, timing=timing,
+            world_name=name, meld_version="1.7.0", run=run, timing=timing,
             timeline=timeline, grid=PROJECT.load_grid(), prefetch_timings=pf_timings,
             settings=PROJECT.settings(), actual_mb=run.get("actual_mb"),
             max_workers=POOL.max_workers, machine=machine)
@@ -1479,7 +1479,7 @@ _META_SKIP_SETTINGS = {
 def _world_meta_dict() -> dict:
     data = PROJECT.load()
     return {
-        "meld_version": "1.6.2",
+        "meld_version": "1.7.0",
         "saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "name": data.get("name", "Meld World"),
         "origin": data.get("origin", {}),                  # lat, lon, locked
@@ -3763,7 +3763,8 @@ def api_status():
     mcstat["profile"] = {k: _st.get(k) for k in
                          ("server_version", "server_mode", "server_dir", "server_world_src",
                           "server_extras", "server_voxy", "server_auto_restart",
-                          "server_ram_gb", "server_cpu_pct", "server_backup_first")}
+                          "server_ram_gb", "server_cpu_pct", "server_backup_first",
+                          "server_staging")}
     mcstat["machine"] = _machine_specs()
     return jsonify({
         "workers": states,
@@ -4676,13 +4677,14 @@ def api_mcs_stage():
     name = _safe_world_name(PROJECT.load().get("name", "Meld World")).replace(" ", "_").lower()
     port = int(d.get("port") or 25565)
     heap, cpu_n = _mcs_resources()
+    link = str(st.get("server_staging", "in_place")) != "copy"   # default: run the world in place (no copy)
     try:
         info = mcs.stage_server(
             sdir, src, mode=mode, world_name=name,
             region_format=fmt,
             motd=f"Meld — {PROJECT.load().get('name', 'Meld World')} (Leaf {version})",
             port=port, jar_name=plan["jar"]["jar_name"], java_exe=java["exe"],
-            with_voxy=bool(plan.get("voxy")), heap=heap, cpu_count=cpu_n)
+            with_voxy=bool(plan.get("voxy")), heap=heap, cpu_count=cpu_n, link=link)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
     _mcs_set(server_dir=str(sdir), target_world=info["target_world"], port=port,
@@ -4845,7 +4847,7 @@ def api_mcs_start():
     with _MCSERVER_LOCK:
         sdir, tw = _MCSERVER.get("server_dir"), _MCSERVER.get("target_world")
     marker = Path(sdir) / ".meld-first-start-done" if sdir else None
-    backup_first = PROJECT.settings().get("server_backup_first", True)
+    backup_first = PROJECT.settings().get("server_backup_first", False)
     if marker is not None and sdir and not marker.exists():
         # first start happened — record it even when the backup is skipped, so
         # enabling the toggle later never backs up an already-played world
@@ -5021,6 +5023,10 @@ def api_mcs_opts():
         v = d.get("backup_first") is True
         PROJECT.update_settings({"server_backup_first": v})
         out["backup_first"] = v
+    if "staging" in d:
+        v = "copy" if str(d.get("staging")) == "copy" else "in_place"
+        PROJECT.update_settings({"server_staging": v})
+        out["staging"] = v
     # voxy/extras persist the moment the checkbox flips (not only at Plan), so the
     # choice survives reloads even when added later
     if "voxy" in d:

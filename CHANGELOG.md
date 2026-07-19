@@ -4,6 +4,31 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.7.0] - 2026-07-19 - "Meld Compass"
+
+A big usability pass: a guided three-step rail, a settings search, a darker glass skin, a single Generate button, a slimmer server setup, and a one-click cross-platform launcher. The theme is guiding people to run and build everything easily.
+
+### Added
+
+- **Settings search.** A search bar at the top of the right rail finds any setting, toggle, or button. Press Enter to cycle through matches (Shift+Enter for previous); the first match opens its section and scrolls into view, and every match is tinted. Esc or the gold clear button resets it.
+- **One-click cross-platform launcher polish.** `meld.bat` / `meld.command` / `meld.sh` plus `meld_launch.py` create a private venv, install the dependencies, fetch or build the matching `arnis` binary, and start the app in one double-click on Windows, macOS, and Linux. New `python meld_launch.py --check` reports what is installed or missing without changing anything.
+- **Run the server against the world in place.** Server setup can now link the world's real files into the server (no copy, no doubled disk) instead of copying them. This is the default; a "Copy world into the server" option keeps the isolated behaviour when you want it.
+
+### Changed
+
+- **Three numbered steps.** The rail is now 1 Settings, 2 Prepare data, 3 Generate. Project & world, Selection / search, and Edit & retry live inside the Generate step. Every section starts collapsed and opens one at a time.
+- **One Generate button.** Prepare & build, Generate & merge, and Resume unfinished collapse into a single **▶ Generate world** that runs the right thing for the current stage, including resuming after a stop or crash.
+- **Projects everywhere.** A Projects gallery button sits in the left rail and directly under the Generate controls. The project switcher, New project, New world, and "show all project areas" controls are folded into the gallery.
+- **Darker glass skin.** Every semi-transparent surface is more opaque, so cards, rails, the projects overlay, and dialogs read as solid glass. Confirmation dialogs now open above the projects window instead of behind it.
+- **Tidier drawers.** Chest loot, tree sizes, cave biomes, climate, and export are collapsible drawers that look like a button closed and open flush (no boxed panel), with a smoother open animation.
+- **Cleaner Data pack and Border sections.** Elevation previews are hillshade-only with one Height preview button and a clear ✕; the elevation Preview no longer needs a locked origin and the hillshade relief is much stronger. Border & zones flows without boxed rows, its ring / margin / script settings fold into one drawer, and Export border files is a full-width button.
+- **Server setup does not back up on first start by default.** The automatic pre-start backup is off; the manual Backup button and the opt-in toggle remain.
+- **The page is served no-store**, so UI updates always appear on a plain refresh.
+
+### Removed
+
+- **Redundant `start.bat` / `start.sh`.** The `meld.*` one-click launchers replace them.
+
 ## [1.6.2] - 2026-07-15 - "Clear Waters"
 
 Preview zoom and framing, a tree-size preview, and a worker-count fix. Bundles arnis fork 3.0.3, which removes the water colour bands, the thin land and road lines across water, and the cave lava seams, and renders climate boundaries as organic blobs.

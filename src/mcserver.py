@@ -351,27 +351,54 @@ def safe_world_name(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_\-]+", "_", name).strip("_") or "meld_world"
 
 
+def _place_world(dest: Path, src: Path, link: bool) -> None:
+    """Put the world at `dest`: an in-place link to `src` (no copy, no extra disk — the server runs
+    the real world files) or a full copy. Clears whatever is already at `dest` (a prior copy,
+    junction or symlink) without ever touching the source."""
+    if dest.is_symlink():
+        dest.unlink()
+    elif dest.exists():
+        try:
+            dest.rmdir()          # empty dir OR a Windows junction -> unlinks it, keeps the target
+        except OSError:
+            shutil.rmtree(dest)   # a real copied world
+    if not link:
+        shutil.copytree(src, dest)
+        return
+    try:
+        os.symlink(src, dest, target_is_directory=True)           # unix, or Windows developer mode
+    except (OSError, NotImplementedError, AttributeError):
+        if os.name == "nt":
+            r = subprocess.run(["cmd", "/c", "mklink", "/J", str(dest), str(src)],
+                               capture_output=True, text=True)     # directory junction: no admin needed
+            if r.returncode != 0:
+                raise RuntimeError("could not link the world in place ("
+                                   + (r.stderr.strip() or r.stdout.strip() or "mklink failed")
+                                   + "); choose 'Copy world into the server' instead")
+        else:
+            raise
+
+
 def stage_server(server_dir: Path, world_src: Path, *, mode: str, world_name: str,
                  region_format: str, motd: str, port: int, jar_name: str, java_exe: str,
-                 with_voxy: bool = False, heap: str = "4G", cpu_count: int | None = None) -> dict:
-    """Create the server directory: configs + the world copy. `mode` = 'main'
-    (world becomes level-name=world) or 'subworld' (copied under its own name,
-    imported via Multiverse on first start)."""
+                 with_voxy: bool = False, heap: str = "4G", cpu_count: int | None = None,
+                 link: bool = True) -> dict:
+    """Create the server directory: configs + the world (linked in place by default, or copied when
+    link=False). `mode` = 'main' (world becomes level-name=world) or 'subworld' (placed under its
+    own name, imported via Multiverse on first start)."""
     server_dir.mkdir(parents=True, exist_ok=True)
     (server_dir / "plugins").mkdir(exist_ok=True)
 
-    # disk preflight: need world size + slack (mirrors export.preflight_export's intent)
-    need = _dir_size(world_src) + 512 * 1024 * 1024
-    free = shutil.disk_usage(server_dir).free
-    if free < need:
-        raise RuntimeError(f"not enough disk: need ~{need // 2**20} MB, have {free // 2**20} MB free")
-
     target_name = "world" if mode == "main" else safe_world_name(world_name)
     dest = server_dir / target_name
-    if dest.exists():
-        shutil.rmtree(dest)
-    shutil.copytree(world_src, dest)
-    # a staged copy must never carry a session lock from a client that had it open
+    if not link:
+        # copy mode only: disk preflight (mirrors export.preflight_export's intent)
+        need = _dir_size(world_src) + 512 * 1024 * 1024
+        free = shutil.disk_usage(server_dir).free
+        if free < need:
+            raise RuntimeError(f"not enough disk: need ~{need // 2**20} MB, have {free // 2**20} MB free")
+    _place_world(dest, world_src, link)
+    # the world folder must never carry a session lock from a client that had it open
     for lock in dest.glob("session.lock"):
         try:
             lock.unlink()
@@ -386,7 +413,8 @@ def stage_server(server_dir: Path, world_src: Path, *, mode: str, world_name: st
     write_start_scripts(server_dir, jar_name, java_exe, xms=heap, xmx=heap, cpu_count=cpu_count)
     if with_voxy:
         write_vss_config(server_dir)
-    return {"world_dir": str(dest), "region_format": fmt, "mode": mode, "target_world": target_name}
+    return {"world_dir": str(dest), "region_format": fmt, "mode": mode,
+            "target_world": target_name, "linked": link}
 
 
 # ── Stage 4: downloads (hash-verified) ───────────────────────────────────────

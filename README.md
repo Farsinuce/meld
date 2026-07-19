@@ -123,6 +123,17 @@ and opens `http://127.0.0.1:5630` in your browser. Re-running is instant, everyt
 The only prerequisite is **Python 3.9+** (the launcher tells you the one command to install it if
 it's missing). Set `PORT` to override the port.
 
+To see what's already installed and what's missing **without changing anything** (no venv, no
+downloads, no server), run:
+
+```bash
+python meld_launch.py --check
+```
+
+On **macOS / Linux** the same `meld.command` / `meld.sh` does the whole install-if-needed then start
+in one double-click; the shell wrappers are shipped with LF line endings and the executable bit set,
+so they run straight from a fresh clone.
+
 ### Manual (if you prefer)
 
 ```bash
@@ -141,10 +152,8 @@ Get the **generator**: use the bundled `arnis.exe`, or download the latest from 
 > `PKG_CONFIG_PATH` error), and Meld only needs the headless CLI - `--no-default-features` skips
 > all of that and builds clean. Or just download the prebuilt Linux binary and rename it `arnis`.
 
-Then, in the app: draw an area, set the cell size in Settings, and hit **Generate and merge**.
-
-> Windows: double click `start.bat`. macOS or Linux: run `./start.sh`. Both just launch
-> `python server.py`. The port is `5630`, or set `PORT` to override it.
+Then, in the app: draw an area, set the cell size in Settings, and hit **▶ Generate world** (one
+button runs prepare, build, and resume for the current stage).
 
 ---
 

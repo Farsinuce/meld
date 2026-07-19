@@ -233,7 +233,36 @@ def start_server() -> int:
         return 0
 
 
+def check_only() -> int:
+    """Report what's installed / missing WITHOUT installing or starting anything (meld_launch.py --check)."""
+    ok = True
+    log(f"Python {platform.python_version()} ({'ok' if sys.version_info >= (3, 9) else 'TOO OLD, need 3.9+'})")
+    if sys.version_info < (3, 9):
+        ok = False
+    log(f"virtual env: {'present' if venv_python().exists() else 'not created yet (will be made on first run)'}")
+    try:
+        import flask  # noqa: F401
+        log("core deps: importable in this interpreter")
+    except Exception:  # noqa: BLE001
+        log("core deps: not importable here (the venv installs them on first run)")
+    p = arnis_present()
+    if p:
+        log(f"arnis binary: {p}")
+    else:
+        asset, _ = _arnis_asset()
+        has_cargo = bool(shutil.which("cargo"))
+        log(f"arnis binary: MISSING — would try to download '{asset}', else "
+            f"{'build with cargo' if has_cargo else 'ask you to install Rust (no cargo found)'}")
+        ok = False
+    log(f"port {PORT}: {'in use (a Meld may already be running)' if _port_open() else 'free'}")
+    log("READY — run this launcher with no arguments to start Meld." if ok
+        else "Some pieces are missing; running the launcher normally will fetch/build them.")
+    return 0 if ok else 1
+
+
 def main() -> int:
+    if "--check" in sys.argv or "--check-only" in sys.argv:
+        return check_only()
     if sys.version_info < (3, 9):
         log(f"Python 3.9+ is required (found {platform.python_version()}).")
         return 1

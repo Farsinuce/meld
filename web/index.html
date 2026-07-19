@@ -698,8 +698,14 @@
             <option value="linear">[Linear] export — region-format LINEAR_V2</option>
             <option value="blinear">[BLinear] export — region-format B_LINEAR</option>
           </select></label>
+        <label style="margin-top:8px">World staging
+          <span class="i" title="In place (default): the server runs your world's real files directly via a folder link — no copy, no doubled disk. The server writes to the master world, and holds a session lock while running (so you can't open that world in single-player at the same time). Copy: duplicate the world into the server folder (isolated, uses extra disk equal to the world size).">i</span>
+          <select id="mcsStaging" style="width:100%;margin-top:2px">
+            <option value="in_place">Use world in place — no copy (link the real files)</option>
+            <option value="copy">Copy world into the server (isolated, extra disk)</option>
+          </select></label>
         <label style="margin-top:8px">Server folder
-          <span class="i" title="WHERE the server is set up. Blank = inside this project (server/leaf-&lt;version&gt;). Pick any folder — the server is self-contained there (jar, configs, plugins, the world copy).">i</span></label>
+          <span class="i" title="WHERE the server is set up. Blank = inside this project (server/leaf-&lt;version&gt;). Pick any folder — the server is self-contained there (jar, configs, plugins, and the world link or copy).">i</span></label>
         <div class="row" style="margin-top:2px">
           <input id="mcsDir" type="text" style="flex:1" placeholder="blank = project folder / server / leaf-<version>">
           <button class="sec" id="mcsBrowse" type="button" style="width:auto;flex:0 0 auto;padding:5px 9px">Browse…</button>
@@ -711,7 +717,7 @@
           <span class="i" title="Installs the Voxy Server Side plugin: players with the Voxy client mod see the WHOLE map as far terrain the moment they join — streamed straight from the server's region files, no exploring needed. Version-strict: it only exists for some MC versions (1.21.11 / 26.1.x) and the CLIENT must run the same MC version. If your chosen version has no build, Plan will say so.">i</span></label>
         <label style="font-weight:normal;margin-top:4px"><input id="mcsAutoRestart" type="checkbox" checked> auto-restart if the server crashes
           <span class="i" title="Crash watchdog: if the java process dies WITHOUT you pressing Stop, Meld restarts it automatically — at most 3 times per 10 minutes (then it stops trying and tells you to check the console/logs).">i</span></label>
-        <label style="font-weight:normal;margin-top:4px"><input id="mcsBackupFirst" type="checkbox" checked> backup world before first start
+        <label style="font-weight:normal;margin-top:4px"><input id="mcsBackupFirst" type="checkbox"> backup world before first start
           <span class="i" title="Zip the server's world copy to backups/ before the FIRST launch. Big worlds make big zips (region data barely recompresses — a 1 GB world ≈ a 1 GB zip), so turn this off to save disk. Your project's master world always remains the untouched source either way; the 💾 button below still works on demand.">i</span></label>
         <label style="margin-top:8px">RAM <span id="mcsRamVal" style="float:right;color:#9aa"></span>
           <span class="i" title="Java heap for the server (-Xms = -Xmx, Aikar style). Auto (slider at 0) = a quarter of your machine's RAM (2–8 GB). Always capped 2 GB below your total so the OS and Meld keep headroom. Applies on the next Start.">i</span>
@@ -3288,6 +3294,8 @@ if ($('mcsVoxy')) $('mcsVoxy').onchange = () => api('/api/mcserver/opts', { voxy
 if ($('mcsExtras')) $('mcsExtras').onchange = () => api('/api/mcserver/opts', { extras: $('mcsExtras').checked });
 if ($('mcsBackupFirst')) $('mcsBackupFirst').onchange = () =>
   api('/api/mcserver/opts', { backup_first: $('mcsBackupFirst').checked });
+if ($('mcsStaging')) $('mcsStaging').onchange = () =>
+  api('/api/mcserver/opts', { staging: $('mcsStaging').value });
 if ($('mcsPopConsole')) $('mcsPopConsole').onclick = () =>
   window.open('/console', 'meldconsole', 'width=900,height=560');
 
@@ -3309,11 +3317,12 @@ function mcsApplyProfile(prof){
   }
   if (prof.server_mode && $('mcsMode')) $('mcsMode').value = prof.server_mode;
   if (prof.server_world_src && $('mcsWorldSrc')) $('mcsWorldSrc').value = prof.server_world_src;
+  if (prof.server_staging && $('mcsStaging')) $('mcsStaging').value = prof.server_staging;
   if (prof.server_dir && $('mcsDir')) $('mcsDir').value = prof.server_dir;
   if ($('mcsExtras')) $('mcsExtras').checked = !!prof.server_extras;
   if ($('mcsVoxy')) $('mcsVoxy').checked = !!prof.server_voxy;
   if ($('mcsAutoRestart')) $('mcsAutoRestart').checked = prof.server_auto_restart !== false;
-  if ($('mcsBackupFirst')) $('mcsBackupFirst').checked = prof.server_backup_first !== false;
+  if ($('mcsBackupFirst')) $('mcsBackupFirst').checked = prof.server_backup_first === true;
   if ($('mcsRam')) $('mcsRam').value = prof.server_ram_gb > 0 ? prof.server_ram_gb : 0;
   if ($('mcsCpu')) $('mcsCpu').value = prof.server_cpu_pct || 100;
   mcsResReadout();
