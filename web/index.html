@@ -256,7 +256,7 @@
   .report .stat { margin:2px 0; }
   .report b { color:var(--fg); }
   /* themed center modal (replaces native alert/confirm) */
-  .modal-overlay { position:fixed; inset:0; z-index:5000; display:flex; align-items:center; justify-content:center;
+  .modal-overlay { position:fixed; inset:0; z-index:7000; display:flex; align-items:center; justify-content:center;
     background:rgba(6,5,4,.66); backdrop-filter:blur(3px); padding:20px; animation:mfade .12s ease; }
   @keyframes mfade { from { opacity:0; } to { opacity:1; } }
   /* glass card frame: hairline border + crisp 1px ring + backdrop blur (no soft drop shadow) */
@@ -665,10 +665,10 @@
 
       <button id="bExport" class="sec" type="button" style="width:100%;margin-top:8px" title="Write regions.yml + per-ring point files + border.sk to <project>/border/. Unrelated to the world Export &amp; compression dropdown in Project &amp; world.">📝 Export border files</button>
       <div class="row" style="margin-top:6px">
-        <button id="bPreview" class="sec" type="button" style="flex:1;padding:5px 9px">👁 Preview on map</button>
-        <button id="bTrim" class="sec" type="button" title="Restrict generation to cells touching the outer (hard) ring of the first zone" style="flex:1;padding:5px 9px">✂ Trim to ring</button>
-        <button id="bClear" class="sec xbtn" type="button" style="width:auto;flex:0 0 auto;padding:5px 9px">Clear</button>
+        <button id="bPreview" class="sec" type="button" style="flex:1;padding:5px 9px;margin-top:0">👁 Preview on map</button>
+        <button id="bTrim" class="sec" type="button" title="Restrict generation to cells touching the outer (hard) ring of the first zone" style="flex:1;padding:5px 9px;margin-top:0">✂ Trim to ring</button>
       </div>
+      <button id="bClear" class="sec" type="button" style="width:auto;padding:5px 9px;margin-top:6px">Clear</button>
       <div id="bStatus" class="stat" style="margin-top:4px"></div>
       <datalist id="countryList"></datalist>
     </div>
@@ -908,11 +908,11 @@
       <button class="sec" id="btnDpRepair" style="margin-top:4px" title="The AWS terrarium set has real GAPS at z14/z15 — it serves an all-black no-data tile there, which shows as dark bands here and flat dips in-game. This scans the SELECTION and rebuilds each hole by upsampling the deepest parent zoom that DOES have data. Fixes both the preview and in-game generation (Arnis reads the same files). It only touches holes — good tiles are left as-is, nothing is re-downloaded.">✦ Fix no-data holes (selection)</button>
       <button class="sec" id="btnDpRepairAll" style="margin-top:4px" title="Same overzoom repair, but scans your ENTIRE elevation cache in one pass and fixes every no-data hole everywhere — no need to draw an area or click holes one by one. Only decodes the tiny uniform tiles (a hole is always tiny), so it's fast even over a whole country. Good tiles are untouched.">✦ Fix ALL holes (whole cache)</button>
       <div class="stat" style="margin-top:8px">Preview elevation on the map (hillshade):</div>
-      <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:4px">
+      <div class="row" style="margin-top:4px">
         <button class="sec" id="btnMaptPreview" type="button" style="flex:1;padding:5px 8px;font-size:11px" title="Render the NEW Mapterhorn heightmap for your drawn selection (or planned cells) using the exact provider generation uses, and overlay it on the map — what the world's terrain will actually be.">⛰ Preview site</button>
         <button class="sec" id="btnHeightPreview" type="button" style="flex:1;padding:5px 8px;font-size:11px" title="Toggle the cached-tile elevation overlay (legacy AWS terrarium, hillshade). Red tiles = elevation NOT cached yet — exactly where a gap would be.">▦ Height</button>
-        <button class="sec xbtn" id="btnMaptClear" type="button" style="width:auto;flex:0 0 auto;padding:5px 8px;font-size:11px" title="Clear both elevation overlays">✕</button>
       </div>
+      <button class="sec" id="btnMaptClear" type="button" style="width:auto;padding:4px 10px;font-size:11px;margin-top:5px" title="Clear both elevation overlays">✕ Clear preview</button>
       <input id="dpPreview" type="checkbox" style="display:none">
       <div style="border-top:1px solid var(--line);margin:9px 0 0;padding-top:8px"></div>
       <div class="stat" style="margin-bottom:3px">Downloaded packs <button id="btnDpList" class="sec" style="width:auto;margin:0;padding:1px 7px;font-size:11px;float:right">↻</button></div>
