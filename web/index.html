@@ -791,6 +791,7 @@
         <option value="linear">Linear .linear (Leaf LINEAR_V2, smallest — ~4.8×)</option>
         <option value="blinear">B_Linear .b_linear (Leaf B_LINEAR, Rust-fast ~2.5× — ~4.3×)</option>
       </select>
+      <div id="exportEst" class="stat" style="margin-top:3px;color:var(--mut,#9a917f)"></div>
       <div id="exportBlinearRow" style="margin-top:6px;display:none">
         <label style="font-weight:normal">B_Linear version
           <span class="i" title="v3 (default) = bucketed Buffered Linear, what Leaf's B_LINEAR reads. v2 = older layout. Built by the bundled Rust region-convert; always written to a separate '<name> [BLinear]' world (the original .mca stays untouched).">i</span></label>
@@ -2200,6 +2201,17 @@ function fmtSize(mb) {
   if (!mb) return '?';
   return mb >= 1024 ? (mb / 1024).toFixed(mb >= 10240 ? 0 : 1) + ' GB' : Math.round(mb) + ' MB';
 }
+// Build-area estimate: reacts to the export format (Raw / Zip / Linear / B_Linear).
+async function updateBuildEst() {
+  const el = $('exportEst'); if (!el) return;
+  if (!_projData.length) { try { _projData = (await api('/api/projects')).projects || []; } catch (e) {} }
+  const p = _projData.find(x => x.active);
+  const fmt = ($('exportFmt') && $('exportFmt').value) || 'none';
+  if (!p || !p.area_km2) { el.textContent = ''; return; }
+  el.textContent = `Estimated output: ~${fmtSize(estWorldMb(p.area_km2, p.scale, fmt))} · ${p.area_km2} km² · ${fmt}`;
+}
+if ($('exportFmt')) $('exportFmt').addEventListener('change', updateBuildEst);
+setTimeout(updateBuildEst, 800);
 function projGalRenderQueue() {
   const host = $('projQueueList'); if (!host) return;
   const estEl = $('projQueueEst');
@@ -2252,11 +2264,26 @@ function renderQueueStatus(rq) {
       note.textContent = `— ${rq.note || 'done'} (${rq.results.filter(r => /done/.test(r.status)).length}/${rq.results.length})`;
     } else note.textContent = '';
   }
-  // When the queue advances to a new project, refresh the gallery so ACTIVE + progress follow it.
-  if (rq.active && rq.current !== _rqCurrent && $('projOverlay').style.display !== 'none') {
-    _rqCurrent = rq.current; projGalRefresh();
+  // When the queue advances to a new project, refresh so ACTIVE + progress follow it, and keep
+  // every queued project's area visible on the map (even with the gallery closed) so you can see
+  // them all at once — the currently-rendering one is highlighted by projGalDrawBoxes.
+  if (rq.active && rq.current !== _rqCurrent) {
+    _rqCurrent = rq.current;
+    if ($('projOverlay').style.display !== 'none') {
+      projGalRefresh();
+    } else {
+      if (!map.hasLayer(projGalGroup)) projGalGroup.addTo(map);
+      if (_projData.length) projGalDrawBoxes();
+      else api('/api/projects').then(r => { _projData = (r && r.projects) || []; projGalDrawBoxes(); }).catch(() => {});
+    }
   }
-  if (!rq.active) _rqCurrent = null;
+  if (!rq.active) {
+    _rqCurrent = null;
+    // queue done: drop the area boxes unless the gallery is open or "show all" is on
+    if ($('projOverlay').style.display === 'none' && !($('showAllProjects') && $('showAllProjects').checked)) {
+      projGalGroup.clearLayers(); if (map.hasLayer(projGalGroup)) map.removeLayer(projGalGroup);
+    }
+  }
 }
 if ($('btnProjectGallery')) $('btnProjectGallery').onclick = projGalOpen;
 if ($('btnProjectGalleryL')) $('btnProjectGalleryL').onclick = projGalOpen;
