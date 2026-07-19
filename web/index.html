@@ -86,10 +86,6 @@
   #side > .card[data-ord] .stepnum { display:inline-block; color:var(--acc2); font-size:10px;
     border:1px solid #5a4a1e; border-radius:3px; padding:0 5px; margin-right:7px; vertical-align:middle;
     font-family:var(--pixel); letter-spacing:.02em; }
-  /* cards grouped UNDER the Generate step (Project & world, Selection / search, Edit & retry):
-     indented with a gold connector so they read as part of step 3, not their own steps. */
-  #side > .card[data-substep] { margin-left:12px; border-left:2px solid rgba(227,164,23,.5); }
-  #side > .card[data-substep] > h2 { font-size:11px; }
   #side > .railfoot { order:99; }   /* footer disclaimer pinned to the very bottom of the rail */
   /* rail links use the theme gold, not the browser default blue */
   #side a, #sideL a { color:var(--acc2); text-decoration:underline; text-underline-offset:2px; }
@@ -110,7 +106,8 @@
   .tpsub { color:var(--mut); font-size:11px; margin:5px 0 7px; }
   .tpcopy { width:100%; margin:0; }
   /* "Prepare data" bundles the 4 data cards: nested cards render as flat sub-rows, no double border. */
-  #side .card.prep > .card { border:none; border-top:1px solid var(--line); border-radius:0;
+  /* box-shadow:none kills the glass 1px ring that read as a strange dark border on the nested rows */
+  #side .card.prep > .card { border:none; box-shadow:none; border-top:1px solid var(--line); border-radius:0;
     margin:0; padding:10px 2px 6px; background:transparent; }
   #side .card.prep > .card:first-of-type { border-top:none; padding-top:2px; }
   /* nested Prepare sub-cards are flat, not dropdowns: no collapse arrow, no click affordance. */
@@ -294,7 +291,7 @@
         <button id="btnRecommend" class="sec" style="flex:1;margin:0;padding:5px 8px;font-size:11px;white-space:nowrap" title="Check this PC (CPU, RAM, save-disk speed) and recommend the best cell size + worker count.">⚡ Recommend</button>
         <button id="btnDocs" class="sec" style="flex:1;margin:0;padding:5px 8px;font-size:11px;white-space:nowrap" title="Open the Meld documentation.">📖 Docs</button>
       </div>
-      <button id="btnProjectGalleryL" class="sec" style="width:100%;margin-top:6px;padding:6px;font-size:12px" title="Open the projects gallery: see, clone, rename, locate every world on the map, and queue several to render in order.">🗂 Projects</button>
+      <button id="btnProjectGalleryL" class="sec" style="width:100%;margin-top:6px;padding:6px;font-size:12px" title="Open the projects gallery: see, clone, rename, locate every world on the map, and queue several to render in order.">🌍 Projects</button>
     </div>
     <div class="sub" style="font-size:10px;line-height:1.3;margin:0 0 10px">From a city block to a whole continent, in Minecraft.</div>
     <div class="sub" style="margin:0 0 12px">Live status</div>
@@ -339,7 +336,7 @@
   <div id="map"></div>
   <div id="projOverlay" style="display:none;position:fixed;top:12px;left:312px;width:460px;height:min(86vh,860px);max-width:calc(100vw - 324px);z-index:6000;background:var(--glass);border:1px solid var(--hair);border-radius:var(--r);box-shadow:var(--ring);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);flex-direction:column;overflow:hidden">
     <div id="projGalHeader" style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--hair);cursor:move;user-select:none">
-      <div style="font-weight:700;font-size:14px;color:var(--acc2,#d6ba58)" title="Drag to move">🗂 Projects</div>
+      <div style="font-weight:700;font-size:14px;color:var(--acc2,#d6ba58)" title="Drag to move">🌍 Projects</div>
       <input id="projSearch" placeholder="filter…" style="flex:1;min-width:0;padding:4px 8px;font-size:12px">
       <button class="sec" id="projGalNew" style="width:auto;padding:5px 9px;font-size:12px" title="Create a new empty project.">＋ New</button>
       <button class="sec xbtn" id="projGalClose" style="width:auto;padding:5px 10px;font-size:12px">✕</button>
@@ -384,10 +381,7 @@
         <button class="sec" id="btnStop">Stop</button>
         <button class="sec xbtn" id="btnClear" title="Clear plan" style="width:auto;flex:0 0 auto;padding:8px 12px">🗑️</button>
       </div>
-      <div class="row" style="margin-top:6px">
-        <button class="sec" id="btnNewWorld" style="flex:1;margin-top:0" title="Start a fresh world. The current one stays saved in your worlds folder; the map clears for a new selection.">✦ New world</button>
-        <button class="sec" id="btnProjectGallery2" style="flex:1;margin-top:0" title="Open the projects gallery: clone worlds, rename, locate every project on the map, and queue several to render in order.">🗂 Projects</button>
-      </div>
+      <button class="sec" id="btnNewWorld" title="Start a fresh world. The current one stays saved in your worlds folder; the map clears for a new selection.">✦ New world</button>
     </div>
 
     <div class="card">
@@ -477,9 +471,9 @@
       <label>Regional elevation only (no AWS)
         <span class="i" title="Use ONLY the regional high-res providers (USGS 1m, IGN France 1m, IGN Spain 5m, Japan GSI 5m) plus the global Mapterhorn tiles, and NEVER legacy AWS Terrain Tiles — for areas where the old AWS terrarium set has broken no-data tiles that carve holes/cliffs into the terrain. The terrain warm-up pre-fills the selected provider's tile cache in one polite pass, so parallel cells read from disk instead of rate-limiting the provider. If a fetch still fails, the cell ERRORS and is retried instead of silently using AWS.">i</span>
         <input id="regionalonly" type="checkbox"></label>
-      <div id="climateWrap" style="margin:2px 0 6px;padding:6px 8px;border:1px solid var(--line);border-radius:2px">
-        <div style="font-weight:600;color:#7bd88f;font-size:12px">Climate (Köppen)
-          <span class="i" title="The whole map's biome tint and arid/polar surface blocks (desert sand, tundra gravel, ice cap snow, ...) follow the real Köppen-Geiger climate, sampled per block so it varies smoothly across a large region instead of jumping cell-to-cell. Always on. Preview renders the exact grouped climate this area will get, straight from the bundled climate grid — one colour per group, with measured percentages.">i</span></div>
+      <details id="climateWrap" class="drawer">
+        <summary>Climate (Köppen)
+          <span class="i" title="The whole map's biome tint and arid/polar surface blocks (desert sand, tundra gravel, ice cap snow, ...) follow the real Köppen-Geiger climate, sampled per block so it varies smoothly across a large region instead of jumping cell-to-cell. Always on. Preview renders the exact grouped climate this area will get, straight from the bundled climate grid — one colour per group, with measured percentages.">i</span></summary>
         <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:4px">
           <button class="sec" id="climatePreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Render the Köppen climate layout for your drawn selection (or planned cells) as a top-down map. Colours match the climate groups that drive biome + surface blocks.">🗺 Preview climate</button>
           <button class="sec xbtn" id="climateClear" type="button" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:11px">✕</button>
@@ -491,7 +485,7 @@
         </div>
         <canvas id="climateCanvas" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504;margin-top:5px"></canvas>
         <div id="climateStats" class="stat" style="margin-top:3px;white-space:pre-wrap"></div>
-      </div>
+      </details>
       <label>Buildings
         <span class="i" title="Generate OSM buildings. Off = a roads + land-cover only world (roads, bridges, railways, water and terrain are still built).">i</span>
         <input id="buildings" type="checkbox"></label>
@@ -730,7 +724,7 @@
     <div class="card">
       <h2>Project &amp; world <span class="i" title="Switch project workspaces (each = one world's settings, origin, grid). Below: the name and save location of the world this project builds.">i</span></h2>
       <select id="projectSel" style="width:100%"></select>
-      <button class="sec" id="btnProjectGallery" style="width:100%;margin-top:6px;padding:7px" title="Open the projects gallery: switch, clone, rename, locate, delete (via 🗑 on each card), and queue worlds to render in order.">🗂 Projects gallery</button>
+      <button class="sec" id="btnProjectGallery" style="width:100%;margin-top:6px;padding:7px" title="Open the projects gallery: switch, clone, rename, locate, delete (via 🗑 on each card), and queue worlds to render in order.">🌍 Projects gallery</button>
       <button class="sec" id="btnProjectNew" style="width:100%;margin-top:6px;padding:7px" title="Create a new project (a fresh world workspace). The current one stays intact.">＋ New project</button>
       <label style="margin-top:8px;font-size:12px" title="Draw every project's saved selection area on the map, so you can see all your worlds and subprojects allocated at once while planning.">Show all project areas on the map
         <input id="showAllProjects" type="checkbox"></label>
@@ -749,8 +743,8 @@
 
       <!-- Export / compression. Default None = a working vanilla .mca world. See MELD_EXPORT_PLAN.md.
            Kept in its own <details> dropdown — the block is longer than the rest of the card. -->
-      <details style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
-        <summary style="cursor:pointer;font-weight:bold">📦 Export &amp; compression <span id="exportFmtChip" class="stat" style="font-weight:normal;color:#9aa"></span></summary>
+      <details class="drawer" style="margin-top:10px">
+        <summary>📦 Export &amp; compression <span id="exportFmtChip" class="stat" style="font-weight:normal;color:#9aa"></span></summary>
       <label style="margin-top:8px;font-weight:bold">Export format
         <span class="i" title="How the finished world is packaged after generation. None keeps raw .mca (vanilla single-player). Zip / tar.zst shrink ~1.85× and still open in single-player after extracting. Linear shrinks ~4.8× but is SERVER ONLY (Leaf/Folia) — run linear2mca to open it in vanilla single-player. Numbers are from the real benchmark in MELD_EXPORT_PLAN.md.">i</span></label>
       <select id="exportFmt" style="width:100%">
@@ -791,8 +785,8 @@
           <option value="separate">Separate “[Linear]” folder — keep the original vanilla .mca untouched</option>
         </select>
       </div>
-      <details style="margin:6px 0;border-top:1px solid var(--line);padding-top:5px">
-        <summary style="cursor:pointer;font-size:12px;color:#9aa">Advanced compression</summary>
+      <details class="drawer" style="margin:6px 0">
+        <summary>Advanced compression</summary>
         <label style="margin-top:6px">Level <span id="exportLevelVal" style="float:right;color:#9aa"></span>
           <span class="i" title="0 = the format's sensible default (zip 6, tar.zst/linear 9). Higher = smaller but slower; for Anvil data the gain past level 9 is tiny.">i</span>
           <input id="exportLevel" type="range" min="0" max="22" step="1" style="width:100%"></label>
@@ -2196,7 +2190,6 @@ function renderQueueStatus(rq) {
   if (!rq.active) _rqCurrent = null;
 }
 if ($('btnProjectGallery')) $('btnProjectGallery').onclick = projGalOpen;
-if ($('btnProjectGallery2')) $('btnProjectGallery2').onclick = projGalOpen;
 if ($('btnProjectGalleryL')) $('btnProjectGalleryL').onclick = projGalOpen;
 if ($('btnDocs')) $('btnDocs').onclick = () => window.open('https://meldmc.com/docs', '_blank', 'noopener');
 if ($('projGalClose')) $('projGalClose').onclick = projGalClose;
@@ -2655,11 +2648,16 @@ function _treeHash(x, y){   // cheap uniform 32-bit hash -> [0,1000); only the M
 // The default is 3x3 so previews start zoomed to LOCAL detail instead of the whole selection.
 // The −/+ stepper widens/tightens the window (re-renders); makeZoomable's scroll zooms within it.
 const _winRegions = { climate: 7, cave: 3, tree: 3 };   // climate opens more zoomed-out
+// Per-preview window limits: tree stays LOCAL (1x1..3x3, tree dots are per-block detail);
+// climate/cave can pull far out (up to 100x100 regions).
+const _winCfg = { climate: { min: 1, max: 100, step: 2 }, cave: { min: 1, max: 100, step: 2 },
+                  tree: { min: 1, max: 3, step: 1 } };
 function wireWindow(key, prefix, render){
   const wo = $(prefix + 'Wout'), wi = $(prefix + 'Win'), lbl = $(prefix + 'Wlbl');
+  const cfg = _winCfg[key] || { min: 1, max: 100, step: 2 };
   const upd = () => { if (lbl) lbl.textContent = _winRegions[key] + '×' + _winRegions[key]; };
-  if (wo) wo.onclick = () => { _winRegions[key] = Math.min(100, _winRegions[key] + 2); upd(); render(); };
-  if (wi) wi.onclick = () => { _winRegions[key] = Math.max(1, _winRegions[key] - 2); upd(); render(); };
+  if (wo) wo.onclick = () => { _winRegions[key] = Math.min(cfg.max, _winRegions[key] + cfg.step); upd(); render(); };
+  if (wi) wi.onclick = () => { _winRegions[key] = Math.max(cfg.min, _winRegions[key] - cfg.step); upd(); render(); };
   upd();
 }
 function showWinRow(prefix){ const r = $(prefix + 'WinRow'); if (r) r.style.display = 'flex'; }
@@ -3556,6 +3554,50 @@ function syncCardMapLayers(slug, collapsed) {
     else { if (!map.hasLayer(lg)) map.addLayer(lg); }
   });
 }
+// ── Nest the build cards INSIDE the Generate step ─────────────────────────────
+// Project & world content merges into the Generate card body; Selection / search and
+// Edit & retry become Settings-style drawers (like Props / Tree sizes) appended after it.
+// Runs BEFORE initSections, so the accordion only ever sees the remaining top-level cards.
+// Moving DOM nodes preserves their ids and event listeners.
+(function nestGenerateGroup(){
+  const bySlug = {};
+  document.querySelectorAll('#side > .card').forEach(card => {
+    const h2 = card.querySelector(':scope > h2'); if (!h2) return;
+    const label = ((h2.firstChild && h2.firstChild.textContent) || h2.textContent).trim();
+    const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    bySlug[slug] = { card, h2 };
+  });
+  const gen = bySlug['generate'];
+  if (!gen) return;
+  const moveKids = (card, h2, target) => {
+    [...card.childNodes].forEach(n => { if (n !== h2) target.appendChild(n); });
+  };
+  // 1) Project & world: inline into the Generate body under a small divider title.
+  const pw = bySlug['project-world'];
+  if (pw) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'border-top:1px solid var(--hair);margin-top:10px;padding-top:8px';
+    const t = document.createElement('div');
+    t.style.cssText = 'font-family:var(--pixel);font-size:11px;color:var(--acc2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px';
+    t.textContent = 'Project & world';
+    wrap.appendChild(t);
+    moveKids(pw.card, pw.h2, wrap);
+    gen.card.appendChild(wrap);
+    pw.card.remove();
+  }
+  // 2) Selection / search + Edit & retry: drawers inside Generate.
+  for (const slug of ['selection-search', 'edit-retry']) {
+    const it = bySlug[slug]; if (!it) continue;
+    const det = document.createElement('details'); det.className = 'drawer';
+    const sum = document.createElement('summary');
+    [...it.h2.childNodes].forEach(n => sum.appendChild(n));   // keep title text + info icon
+    det.appendChild(sum);
+    moveKids(it.card, it.h2, det);
+    gen.card.appendChild(det);
+    it.card.remove();
+  }
+})();
+
 (function initSections(){
   registerCardMapLayer('border-zones', borderGroup);
   // Steps 1..6 start open (the guided look); only the advanced tool cards collapse by default.
@@ -3614,13 +3656,11 @@ function _collapseCard(card, collapsed) {
 // (Settings..Generate), then the advanced tool cards (Elevation lock, Subregions) at the bottom —
 // and number the steps 1..6 with a small badge. The DOM never moves, so every handler keeps working.
 (function initRailOrder(){
-  // THREE numbered steps: 1 Settings, 2 Prepare data, 3 Generate. The Generate step groups the
-  // cards you use to build (Project & world, Selection / search, Edit & retry) right beneath it,
-  // shown as nested sub-cards rather than their own numbered steps.
+  // THREE numbered steps: 1 Settings, 2 Prepare data, 3 Generate. Project & world, Selection /
+  // search, and Edit & retry live INSIDE the Generate card (nestGenerateGroup above), so they are
+  // not separate steps or cards anymore.
   const STEPS = { 'settings':1, 'prepare-data':2, 'generate':3 };
-  const SUBSTEPS = { 'project-world':true, 'selection-search':true, 'edit-retry':true };
   const ORDER = { 'settings':1, 'prepare-data':2, 'generate':3,
-                  'project-world':4, 'selection-search':5, 'edit-retry':6,
                   'elevation-lock':7, 'subregions-worlds':8, 'border-zones':9, 'server-setup':10 };
   document.querySelectorAll('#side > .card').forEach(card => {
     const h2 = card.querySelector(':scope > h2'); if (!h2) return;
@@ -3631,8 +3671,6 @@ function _collapseCard(card, collapsed) {
       card.dataset.ord = STEPS[slug];                              // drives the STEP badge
       const b = document.createElement('span'); b.className = 'stepnum'; b.textContent = STEPS[slug];
       h2.insertBefore(b, h2.firstChild);
-    } else if (SUBSTEPS[slug]) {
-      card.dataset.substep = '1';                                 // nested under the Generate step
     }
   });
 })();
