@@ -3087,13 +3087,16 @@ function bZoneRow(d){
   d = d || {};
   const row = document.createElement('div');
   row.className = 'zoneRow';
-  row.style = 'display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:3px 0;padding:3px;border:1px solid var(--line);border-radius:4px';
+  // No boxed border - the row flows in the card. Name + countries on the top line, then owners +
+  // colour + a small remove button. (The old delete button had no class, so it fell back to the
+  // full-width gold button style - that was the giant yellow x.)
+  row.style = 'display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:6px 0';
   row.innerHTML =
-    '<input class="zName" placeholder="zone name" value="'+(d.name||'')+'" style="width:90px">'+
-    '<input class="zCountries" list="countryList" placeholder="countries (comma)" value="'+(d.countries||'')+'" style="width:150px">'+
-    '<input class="zOwners" placeholder="WG owners (comma)" value="'+(d.owners||'')+'" style="width:120px">'+
-    '<input class="zColor" type="color" value="'+(d.color||'#00e5ff')+'" title="border color" style="width:32px">'+
-    '<button type="button" class="zDel" title="remove zone">x</button>';
+    '<input class="zName" placeholder="zone name" value="'+(d.name||'')+'" style="flex:1;min-width:80px">'+
+    '<input class="zCountries" list="countryList" placeholder="countries (comma)" value="'+(d.countries||'')+'" style="flex:1.6;min-width:120px">'+
+    '<input class="zOwners" placeholder="WG owners (comma)" value="'+(d.owners||'')+'" style="flex:1.2;min-width:110px">'+
+    '<input class="zColor" type="color" value="'+(d.color||'#00e5ff')+'" title="border colour" style="width:30px;height:28px;padding:2px;flex:0 0 auto">'+
+    '<button type="button" class="sec zDel" title="remove zone" style="width:auto;flex:0 0 auto;padding:5px 10px;margin-top:0">✕</button>';
   row.querySelector('.zDel').onclick = () => row.remove();
   return row;
 }
