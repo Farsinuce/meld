@@ -3712,8 +3712,9 @@ def api_render_queue_kill():
         _RQ["stop"] = True
         _RQ["pause"] = False
         _RQ["note"] = "killed — aborting the current render"
-    POOL.clear()      # abort the in-flight generation immediately
-    return jsonify({"ok": True, "was_running": running})
+    killed = POOL.terminate_all()   # terminate the running arnis processes NOW (not just drain queue)
+    POOL.clear()                    # then drop everything still pending
+    return jsonify({"ok": True, "was_running": running, "terminated": killed})
 
 
 @app.route("/api/new-world", methods=["POST"])
