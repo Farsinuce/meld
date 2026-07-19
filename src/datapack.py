@@ -414,10 +414,10 @@ def render_preview_tile(x: int, y: int, z: int = PACK_ZOOM, *, lo: float | None 
                 hu = height_at(ix, max(0, iy - 1))
                 hd = height_at(ix, min(h - 1, iy + 1))
                 dzdx = (hr - hl); dzdy = (hd - hu)
-                shade = max(0.0, min(1.0, 0.6 + 0.18 * (dzdx + dzdy)))
-                base = max(0, min(255, int((height_at(ix, iy) - lo) / span * 255)))
-                v = max(0, min(255, int(base * (0.5 + 0.5 * shade))))
-                op[ix, iy] = (v, v, v, 170)
+                shade = max(0.0, min(1.0, 0.5 + 0.45 * (dzdx - dzdy)))   # NW light, stronger relief
+                base = max(35, min(255, int((height_at(ix, iy) - lo) / span * 255)))
+                v = max(0, min(255, int(base * (0.30 + 0.70 * shade))))
+                op[ix, iy] = (v, v, v, 185)
     else:  # grayscale
         for iy in range(h):
             for ix in range(w):
@@ -501,10 +501,11 @@ def _render_height_array(h, missing, lo: float, hi: float, mode: str) -> bytes:
     if mode == "hillshade":
         # np.gradient uses ONE-SIDED differences at the array edges instead of a zeroed seam column,
         # so the tile's border pixels shade like their neighbours -> no bright/dark line every 256px.
+        # Light from the NW (dzdx - dzdy); strong coefficient + wide shade range = clearly visible relief.
         dzdy, dzdx = _np.gradient(hh)
-        shade = _np.clip(0.6 + 0.36 * (dzdx + dzdy), 0.0, 1.0)
-        base = _np.clip((hh - lo) / span * 255.0, 0, 255)
-        v = _np.clip(base * (0.5 + 0.5 * shade), 0, 255).astype(_np.uint8); alpha = 170
+        shade = _np.clip(0.5 + 0.9 * (dzdx - dzdy), 0.0, 1.0)
+        base = _np.clip((hh - lo) / span * 255.0, 35, 255)
+        v = _np.clip(base * (0.30 + 0.70 * shade), 0, 255).astype(_np.uint8); alpha = 185
     else:
         v = _np.clip((hh - lo) / span * 255.0, 0, 255).astype(_np.uint8); alpha = 150
     rgba = _np.dstack([v, v, v, _np.full(hh.shape, alpha, _np.uint8)])

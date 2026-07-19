@@ -4471,17 +4471,19 @@ def api_elevationmap():
     fork's --elevation-map mode, which uses the REAL provider stack generation uses (Mapterhorn /
     regional / AWS), so the preview matches the world's terrain. Returns the PNG + geographic bounds
     for a Leaflet imageOverlay + the min/max metres. Fast (no worldgen); runs synchronously."""
-    origin = PROJECT.origin()
-    if origin.get("lat") is None:
-        return jsonify({"ok": False, "error": "set the origin first"}), 400
     exe = resolve_arnis_exe()
     if not exe:
         return jsonify({"ok": False, "error": "arnis binary not found"}), 400
+    origin = PROJECT.origin()
+    olat, olon = origin.get("lat"), origin.get("lon")
     st = PROJECT.settings()
     sel = PROJECT.load_selection()
     if sel:
         b = sel["bbox"]
-    else:
+        if olat is None:                              # no locked origin yet -> use the selection
+            olat = (b["south"] + b["north"]) / 2.0    # centre (what generation does), so Preview
+            olon = (b["west"] + b["east"]) / 2.0      # works right after drawing, no origin lock
+    elif olat is not None:
         grid = PROJECT.load_grid()
         scale_f = float(st.get("scale", 1.0) or 1.0)
         b = None
@@ -4490,7 +4492,7 @@ def api_elevationmap():
             if len(parts) != 3:
                 continue
             cb = cell_bbox(int(parts[0]), int(parts[1]), int(parts[2]),
-                           origin["lat"], origin["lon"], scale_f)
+                           olat, olon, scale_f)
             if b is None:
                 b = dict(cb)
             else:
@@ -4500,6 +4502,8 @@ def api_elevationmap():
                 b["east"] = max(b["east"], cb["east"])
         if b is None:
             return jsonify({"ok": False, "error": "draw a selection (or plan cells) first"}), 400
+    else:
+        return jsonify({"ok": False, "error": "draw a selection first (or lock an origin)"}), 400
     seed = int((PROJECT.load().get("elevation") or {}).get("seed", 1) or 1)
     mode = (request.get_json(silent=True) or {}).get("mode", "hillshade")
     if mode not in ("hillshade", "grayscale"):
@@ -4510,8 +4514,8 @@ def api_elevationmap():
     cmd = [str(exe),
            "--bbox", f"{b['south']},{b['west']},{b['north']},{b['east']}",
            "--scale", str(float(st.get("scale", 1.0) or 1.0)),
-           "--master-origin-lat", str(origin["lat"]),
-           "--master-origin-lng", str(origin["lon"]),
+           "--master-origin-lat", str(olat),
+           "--master-origin-lng", str(olon),
            "--tile-invariant-rendering", str(seed),
            "--elevation-map", str(prefix),
            "--elevation-map-mode", mode]

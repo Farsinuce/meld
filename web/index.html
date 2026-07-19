@@ -4535,6 +4535,7 @@ async function dpBakeMapterhorn() {
 let _maptOverlay = null;
 async function maptPreview() {
   const mode = ($('maptMode') && $('maptMode').value) || 'hillshade';
+  if (typeof setExplore === 'function' && !exploreMode) setExplore(true);   // clean map view for the overlay
   $('dpCov').textContent = 'Rendering Mapterhorn terrain…';
   const r = await api('/api/elevationmap', { mode });
   if (!r || !r.ok) { $('dpCov').textContent = (r && r.error) || 'elevation map failed'; return; }
@@ -4559,6 +4560,7 @@ if ($('btnHeightPreview')) $('btnHeightPreview').onclick = () => {
   const cb = $('dpPreview'); if (!cb) return;
   cb.checked = !cb.checked;
   $('btnHeightPreview').classList.toggle('active', cb.checked);
+  if (cb.checked && typeof setExplore === 'function' && !exploreMode) setExplore(true);
   toggleTerrainPreview();
 };
 async function dpRefetchView() {
