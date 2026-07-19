@@ -2680,27 +2680,41 @@ function renderTreePreview(){
   const base = treeBaseShare(scale);
   const w = base.map((b, i) => b * ((weights[_TREE_ORDER[i]] != null ? weights[_TREE_ORDER[i]] : 100) / 100));
   const sum = w.reduce((a, b) => a + b, 0);
-  const W = c.width, H = c.height, ctx = c.getContext('2d'), img = ctx.createImageData(W, H);
-  const span = _winRegions.tree * 512, step = span / W;   // blocks per pixel for this window
+  const W = c.width, H = c.height, ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0a0f07'; ctx.fillRect(0, 0, W, H);      // dark canopy backdrop
+  // Draw a CANOPY: one dot per tree, sized by its tier (small = tiny dot, giant = big dot), so the
+  // mix reads visually. Trees sit on a real-world grid (~one per SPACING blocks), so a smaller
+  // window (area stepper -) shows FEWER, LARGER trees = a real zoom, not just bigger noise pixels.
+  const span = _winRegions.tree * 512;                     // blocks across this window
+  const SPACING = 14;                                      // ~one tree per 14 blocks
+  const n = Math.max(4, Math.round(span / SPACING));
+  const cell = W / n;
+  const RAD = [cell * 0.16, cell * 0.24, cell * 0.33, cell * 0.44, cell * 0.58];  // per tier
   const [cx, cz] = _selCenterBlock(), bx0 = cx - span / 2, bz0 = cz - span / 2;
   const counts = [0, 0, 0, 0, 0];
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){
+  for (let gy = 0; gy < n; gy++) for (let gx = 0; gx < n; gx++){
+    const bx = Math.floor(bx0 + gx * SPACING), bz = Math.floor(bz0 + gy * SPACING);
     let tier = 0;
     if (sum > 0){
-      const bx = Math.floor(bx0 + x * step), bz = Math.floor(bz0 + y * step);
       const target = (_treeHash(bx + 101, bz + 233) / 1000) * sum;
       let cum = 0;
       for (let i = 0; i < 5; i++){ cum += w[i]; if (target < cum){ tier = i; break; } }
     }
     counts[tier]++;
-    const col = TREE_TIER_COLORS[_TREE_ORDER[tier]], o = (y * W + x) * 4;
-    img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
+    const jx = (_treeHash(bx * 3 + 7, bz) % 100) / 100 - 0.5;   // slight jitter off the grid
+    const jz = (_treeHash(bx, bz * 3 + 7) % 100) / 100 - 0.5;
+    const px = (gx + 0.5 + jx * 0.7) * cell, py = (gy + 0.5 + jz * 0.7) * cell;
+    const col = TREE_TIER_COLORS[_TREE_ORDER[tier]];
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(0.7, RAD[tier]), 0, 6.2832);
+    ctx.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+    ctx.fill();
   }
-  ctx.putImageData(img, 0, 0);
   c.style.display = '';
   if (c._resetZoom) c._resetZoom();
   showWinRow('ts');
-  const total = W * H;
+  const total = counts.reduce((a, b) => a + b, 0) || 1;
   $('treeLegend').innerHTML = _TREE_ORDER.map((k, i) =>
     '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:8px">' +
     `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgb(${TREE_TIER_COLORS[k].join(',')})"></span>` +

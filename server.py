@@ -2141,9 +2141,13 @@ def index():
     # No-cache so a server update is never hidden behind a browser-cached copy of the page (a plain
     # refresh would otherwise re-serve a stale index.html and the new UI/buttons "wouldn't appear").
     resp = send_from_directory(str(BASE_DIR / "web"), "index.html")
-    resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    # no-store (not just no-cache): the browser must never REUSE a stored copy, including the
+    # back/forward bfcache and 304 revalidation, so UI edits always show on a plain refresh.
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
+    resp.headers.pop("ETag", None)
+    resp.headers.pop("Last-Modified", None)
     return resp
 
 
