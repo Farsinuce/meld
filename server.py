@@ -3520,8 +3520,27 @@ def api_projects_clone():
     else:
         data.pop("selection", None)                    # new-area clone: same settings, draw fresh
         data["origin"] = {"lat": None, "lon": None, "locked": False}
-    # deliberately DO NOT copy grid.json / cells / world / subworlds -> a clean workspace to (re)generate.
+    # deliberately DO NOT copy grid.json world / subworlds -> a clean workspace to (re)generate.
     p.save(data)
+    # BUT pre-plan the cells from the copied selection so the clone opens with its cell preview
+    # already showing (previously the grid was empty, so nothing appeared until you nudged the
+    # selection to re-plan). Planned only, never merged - the world is still a clean regenerate.
+    try:
+        o = data.get("origin") or {}
+        sel = data.get("selection") or {}
+        if keep_selection and o.get("lat") is not None and (sel.get("bbox") or sel.get("polygons")):
+            st = data.get("settings") or {}
+            scale = float(st.get("scale", 1.0) or 1.0)
+            size = max(1, min(64, int(st.get("job_size_regions") or 4)))
+            polys = sel.get("polygons")
+            if polys and any(isinstance(r, list) and len(r) >= 3 for r in polys):
+                cells = cells_for_polygons(polys, o, scale, size)
+            else:
+                cells = cells_for_bbox(sel["bbox"], o, scale, size)
+            if cells:
+                p.save_grid({c["cell_key"]: "planned" for c in cells})
+    except Exception:   # planning is best-effort; a clone must still succeed if it can't pre-plan
+        pass
     return jsonify({"ok": True, "slug": slug, "name": name, "keep_selection": keep_selection})
 
 
