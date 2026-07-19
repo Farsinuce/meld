@@ -6,12 +6,12 @@ Turn an OpenStreetMap selection into one seamless Minecraft world. Meld tiles th
 every tile in parallel, and melds them with no height cliffs and no seams. From a city block to a
 whole continent.
 
-&nbsp;![version](https://img.shields.io/badge/version-1.5.0-blue)
+&nbsp;![version](https://img.shields.io/badge/version-1.7.0-blue)
 &nbsp;![Minecraft](https://img.shields.io/badge/Minecraft%20Java-1.21%2B-brightgreen)
 &nbsp;![Python](https://img.shields.io/badge/Python-3.10%2B-yellow)
 &nbsp;![built on](https://img.shields.io/badge/built%20on-Arnis%20fork-orange)
 
-**Windows · macOS · Linux**
+**Windows · macOS · Linux** &nbsp;·&nbsp; Latest: **[1.7.0 Meld Compass](CHANGELOG.md)** &nbsp;·&nbsp; [Getting started](docs/getting-started.mdx)
 
 </div>
 

@@ -25,6 +25,7 @@ The result is one Minecraft world with no cliffs and no seams.
 
 Each page explains the why, the mechanism, and how to use it in the app.
 
+- [Getting started](./getting-started.mdx). Install and run Meld in one click on Windows, macOS or Linux, check what you have before you start, and build your first world.
 - [How it works](./how-it-works.mdx). The full pipeline: origin, the elevation lock, region aligned cells, map prefetch, parallel generation, the region perfect merge, and the drift guard. The core mental model.
 - [Elevation](./elevation.mdx). The whole elevation system: the global height lock, region data packs you download once, selectable detail with Auto, the no-data hole repair, and the height preview.
 - [Parallel generation](./parallel-generation.mdx). Cells and the worker pool, the CPU budget and staggered starts, stream to disk for huge cells, auto retry, spiral build order, and why small cells can finish faster.
@@ -36,6 +37,8 @@ Each page explains the why, the mechanism, and how to use it in the app.
 
 ## What changed between releases
 
+- [What's new in Meld 1.7.0, Meld Compass](./whats-new-1.7.0.mdx). A guided three-step rail, a settings search, one Generate button, project folders and a render queue that builds worlds one after another with pause/stop/kill and size estimates, borders from any drawn rectangle or polygon, an in-place server setup, and one-click startup on Windows, macOS and Linux.
+- Releases 1.4.0 through 1.6.2 (region trees, terrain height and snow, borders and zones, the cave system, export and compression, one-click server setup, and the water/cave rendering fixes) are summarised in the [CHANGELOG](../CHANGELOG.md).
 - [What's new in Meld 1.3.0](./whats-new-1.3.0.mdx). A benchmark report for every run, live mid-run tuning of workers/threads/CPU budget, one guided rail, fast first-build defaults, a free 1 to 64 cell size, and accurate CPU/RAM gauges.
 - [What's new in Meld 1.2.0](./whats-new-1.2.0.mdx). Offline OSM packs, an OSM cache that reuses tiles, much faster cells, the water-wedge fix, and a remembered selection.
 - [What's new in Meld 1.1.0](./whats-new-1.1.0.mdx). The changelog-style summary of what 1.1.0 added and why.
