@@ -3570,13 +3570,36 @@ function syncCardMapLayers(slug, collapsed) {
     syncCardMapLayers(slug, card.classList.contains('collapsed'));
     h2.addEventListener('click', e => {
       if (e.target.closest('button, a, input, select')) return;   // header controls keep working
+      const opening = card.classList.contains('collapsed');       // collapsed now -> we're opening it
+      // Accordion: opening a section collapses every OTHER open section (one dropdown at a time).
+      if (opening) {
+        document.querySelectorAll('#side > .card').forEach(other => {
+          if (other === card || other.classList.contains('collapsed')) return;
+          _collapseCard(other, true);
+        });
+      }
       card.classList.toggle('collapsed');
       const collapsed = card.classList.contains('collapsed');
       localStorage.setItem(key, collapsed ? 'collapsed' : 'open');
       syncCardMapLayers(slug, collapsed);
     });
   });
+  // One-open-at-a-time on load too: keep only the FIRST open section open, collapse the rest.
+  let _openSeen = false;
+  document.querySelectorAll('#side > .card').forEach(card => {
+    if (card.classList.contains('collapsed')) return;
+    if (_openSeen) _collapseCard(card, true); else _openSeen = true;
+  });
 })();
+// Collapse (or open) a #side card + persist it + sync its map layer. Used by the accordion.
+function _collapseCard(card, collapsed) {
+  card.classList.toggle('collapsed', collapsed);
+  const h2 = card.querySelector(':scope > h2');
+  const label = h2 ? ((h2.firstChild && h2.firstChild.textContent) || h2.textContent).trim() : '';
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (slug) localStorage.setItem('meld.sec.' + slug, collapsed ? 'collapsed' : 'open');
+  if (typeof syncCardMapLayers === 'function') syncCardMapLayers(slug, collapsed);
+}
 
 // Simplified / Advanced drawer mode. Simplified (default) shows only the numbered step cards in
 // guided order; Advanced shows the full rail unchanged. CSS does the reorder + hide; here we only
