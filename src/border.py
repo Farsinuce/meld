@@ -22,7 +22,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from shapely.geometry import shape, Polygon, MultiPolygon, LineString, MultiLineString
+from shapely.geometry import shape, Polygon, MultiPolygon, LineString, MultiLineString, box
 from shapely.ops import unary_union, linemerge
 
 from .constants import METERS_PER_DEG_LAT
@@ -143,6 +143,29 @@ def _zone_lonlat(country_names: list[str], source: str = "osm", coast_margin_km:
     return unary_union(geoms)
 
 
+def _zone_geom_lonlat(z: dict, source: str = "osm", coast_margin_km: float = _COAST_MARGIN_KM):
+    """A zone's boundary as one lon/lat geometry. A CUSTOM drawn shape - polygons of (lat, lon)
+    vertices, or a bbox rectangle - takes precedence over named countries, so any rectangle or drawn
+    area becomes border rings + zones exactly like a country would."""
+    polys = z.get("polygons") or z.get("polygon")
+    if polys:
+        rings = polys
+        if rings and isinstance(rings[0][0], (int, float)):   # a single ring -> wrap as [ring]
+            rings = [rings]
+        shells = []
+        for ring in rings:
+            pts = [(float(lon), float(lat)) for lat, lon in ring if lat is not None and lon is not None]
+            if len(pts) >= 3:
+                shells.append(Polygon(pts).buffer(0))         # buffer(0) repairs self-touching rings
+        shells = [s for s in shells if not s.is_empty]
+        if shells:
+            return unary_union(shells)
+    bb = z.get("bbox")
+    if isinstance(bb, dict) and all(k in bb for k in ("south", "west", "north", "east")):
+        return box(float(bb["west"]), float(bb["south"]), float(bb["east"]), float(bb["north"]))
+    return _zone_lonlat(z.get("countries", []), source, coast_margin_km)
+
+
 # ------------------------------------------------------- coordinate transforms
 def _fwd(lon: float, lat: float, o_lat: float, o_lon: float, scale: float) -> tuple[float, float]:
     """lon/lat -> absolute world block (x, z) as floats (origin-anchored, +Z = south)."""
@@ -248,7 +271,7 @@ def build(spec: dict, origin: dict, scale: float) -> dict:
 
     zones, geoms = [], []
     for z in spec.get("zones", []):
-        geom = _to_blocks(_zone_lonlat(z.get("countries", []), source, coast_km), o_lat, o_lon, scale)
+        geom = _to_blocks(_zone_geom_lonlat(z, source, coast_km), o_lat, o_lon, scale)
         geoms.append(geom)
         xz = _ring_xz(geom, p_actual)
         zones.append({"spec": z, "geom_block": geom, "xz": xz,

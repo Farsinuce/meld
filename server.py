@@ -4367,6 +4367,19 @@ def _border_inputs():
         "shared_lines": d.get("shared_lines", []),
         "shared_points": int(d.get("shared_points", 20)),
     }
+    # A zone flagged use_selection (or one with no countries and no shape of its own) borrows the
+    # project's drawn area, so borders/zones can be built for a rectangle or drawn polygon, not just
+    # a country. Injected here so border.build stays source-agnostic.
+    sel = PROJECT.load_selection() or {}
+    for z in spec.get("zones", []):
+        if not isinstance(z, dict):
+            continue
+        wants = z.get("use_selection") or (not z.get("countries") and not z.get("polygons") and not z.get("bbox"))
+        if wants and (sel.get("polygons") or sel.get("bbox")):
+            if sel.get("polygons"):
+                z["polygons"] = sel["polygons"]
+            if sel.get("bbox"):
+                z["bbox"] = sel["bbox"]
     return d, spec, origin, scale, None
 
 
