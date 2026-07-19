@@ -637,13 +637,13 @@
       <h2>Border &amp; zones <span class="chip" style="color:#00e5ff">servers</span>
         <span class="i" title="Country/zone borders for a server. Builds concentric rings, exports WorldGuard regions.yml + per-ring point files + a ready border.sk Skript, previews them on the map, and trims the world to the outer ring. Independent of the render settings above.">i</span></h2>
       <div class="stat" style="margin-bottom:6px">Rings: <b style="color:#00e5ff">actual</b> border, <b style="color:#ff9800">soft</b> (+km safe edge), <b style="color:#ffeb3b">hard</b> (+km wall / trim), <b style="color:#76ff03">lime</b> internal line. Exports <code>regions.yml</code> + point files + <code>border.sk</code> to <code>&lt;project&gt;/border/</code>.</div>
-      <!-- Flat content: the card header itself is the only collapse — no dropdown-in-dropdown. -->
-      <div style="margin:4px 0;border-top:1px solid var(--line);padding-top:5px">
-        <div id="zoneList"></div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0">
-          <button id="zoneAdd" class="sec" type="button" style="width:auto;padding:5px 9px">+ Add zone</button>
-        </div>
-        <div style="font-weight:600;color:#00e5ff;margin-top:8px;border-top:1px solid var(--line);padding-top:6px">Ring &amp; margin settings</div>
+      <!-- Zones flow directly under the header; all the numeric settings live in one closed drawer. -->
+      <div id="zoneList"></div>
+      <button id="zoneAdd" class="sec" type="button" style="width:auto;padding:5px 9px;margin-top:6px">+ Add zone</button>
+
+      <details class="drawer" style="margin-top:8px">
+        <summary>⚙ Ring, margin &amp; script settings</summary>
+        <div style="font-weight:600;color:#00e5ff;margin-top:2px">Ring &amp; margin</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px">
           <label style="font-weight:normal" title="The damage band: from the country line out to here — no building, periodic damage. 32 = 2 chunks.">soft band <input id="bSoftB" type="number" min="8" step="8" value="32" style="width:50px">blocks</label>
           <label style="font-weight:normal" title="The wall: players are bounced back when they try to cross this line.">hard wall <input id="bHardB" type="number" min="16" step="8" value="64" style="width:50px">blocks</label>
@@ -653,7 +653,7 @@
           <label style="font-weight:normal" title="Points along the internal line between two zones (e.g. the RO/MD Prut). ~400 follows the river closely.">internal line pts <input id="bShared" type="number" min="0" max="6000" value="2000" style="width:52px"></label>
           <label style="font-weight:normal"><input id="bAutoShared" type="checkbox" checked> auto internal line</label>
         </div>
-        <div style="font-weight:600;color:#00e5ff;margin-top:8px;border-top:1px solid var(--line);padding-top:6px">Server script (border.sk)</div>
+        <div style="font-weight:600;color:#00e5ff;margin-top:10px">Server script (border.sk)</div>
         <label style="font-weight:normal;margin-top:4px"><input id="skGen" type="checkbox" checked> export <code>border.sk</code> (packet-particle walls; enforcement + titles are native WorldGuard flags in regions.yml)</label>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px">
           <label style="font-weight:normal" title="How far away the walls are visible (blocks). Max 120.">render radius <input id="skRadius" type="number" min="16" max="120" value="120" style="width:50px"></label>
@@ -661,14 +661,15 @@
           <label style="font-weight:normal">update ticks <input id="skTicks" type="number" value="8" style="width:44px"></label>
         </div>
         <div class="stat">border.sk needs only Skript + SkBee. The bounce at the soft ring (<code>exit: deny</code>) and the Entering/Leaving titles are WorldGuard region flags — no Skript addon involved.</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
-          <button id="bPreview" class="sec" type="button" style="width:auto;padding:6px 10px">Preview on map</button>
-          <button id="bExport" class="sec" type="button" style="width:auto;padding:6px 10px" title="Write regions.yml + per-ring point files + border.sk to <project>/border/. Unrelated to the world Export &amp; compression dropdown in Project &amp; world.">📝 Export border files</button>
-          <button id="bTrim" class="sec" type="button" title="Restrict generation to cells touching the outer (hard) ring of the first zone" style="width:auto;padding:6px 10px">Trim to ring</button>
-          <button id="bClear" class="sec" type="button" style="width:auto;padding:6px 10px">Clear</button>
-        </div>
-        <div id="bStatus" class="stat" style="margin-top:4px"></div>
+      </details>
+
+      <button id="bExport" class="sec" type="button" style="width:100%;margin-top:8px" title="Write regions.yml + per-ring point files + border.sk to <project>/border/. Unrelated to the world Export &amp; compression dropdown in Project &amp; world.">📝 Export border files</button>
+      <div class="row" style="margin-top:6px">
+        <button id="bPreview" class="sec" type="button" style="flex:1;padding:5px 9px">👁 Preview on map</button>
+        <button id="bTrim" class="sec" type="button" title="Restrict generation to cells touching the outer (hard) ring of the first zone" style="flex:1;padding:5px 9px">✂ Trim to ring</button>
+        <button id="bClear" class="sec xbtn" type="button" style="width:auto;flex:0 0 auto;padding:5px 9px">Clear</button>
       </div>
+      <div id="bStatus" class="stat" style="margin-top:4px"></div>
       <datalist id="countryList"></datalist>
     </div>
 
