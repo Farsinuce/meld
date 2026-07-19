@@ -1,0 +1,5 @@
+# Shell launchers MUST be LF so the shebang works on macOS/Linux (CRLF -> "bad interpreter").
+*.sh        text eol=lf
+*.command   text eol=lf
+# Windows launcher stays CRLF.
+*.bat       text eol=crlf

@@ -101,9 +101,31 @@ has the highlights of each release.
 
 ## Quickstart
 
+### One click (Windows, macOS, Linux)
+
 ```bash
 git clone https://github.com/Teddy563/meld
 cd meld
+```
+
+Then start it, no manual setup:
+
+- **Windows:** double-click **`meld.bat`**
+- **macOS:** double-click **`meld.command`** in Finder (first time: right-click > Open to get past Gatekeeper)
+- **Linux:** run **`./meld.sh`**
+
+The launcher (`meld_launch.py`) does everything the first time: creates a private `.venv`, installs
+the Python dependencies, fetches the matching **`arnis`** generator binary for your OS and CPU
+(downloads the prebuilt from the [Teddy563/arnis releases](https://github.com/Teddy563/arnis/releases),
+and if none is published it builds it from the bundled Rust source with `cargo`), then starts Meld
+and opens `http://127.0.0.1:5630` in your browser. Re-running is instant, everything is cached.
+
+The only prerequisite is **Python 3.9+** (the launcher tells you the one command to install it if
+it's missing). Set `PORT` to override the port.
+
+### Manual (if you prefer)
+
+```bash
 pip install -r requirements.txt
 python server.py        # then open http://127.0.0.1:5630
 ```

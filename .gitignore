@@ -20,6 +20,15 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# One-click launcher: per-machine virtualenv + the platform-specific arnis binary it
+# downloads/builds (only the Windows arnis.exe is committed; mac/linux fetch their own).
+.venv/
+/arnis
+/arnis-linux
+/arnis-mac-intel
+/arnis-mac-arm64
+/arnis-*.tar.gz
+
 # Note: arnis.exe (the custom Arnis fork binary) is intentionally committed to this repo.
 
 # Local benchmark scratch (not shipped)
