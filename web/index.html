@@ -359,13 +359,16 @@
     <div style="font-size:11px;color:var(--mut,#9a917f);padding:5px 12px;border-bottom:1px solid var(--line)">Every project's area is drawn on the map. Clone copies the selection and all settings into a fresh workspace so you just re-select or generate.</div>
     <div id="projCards" style="flex:1;overflow:auto;padding:8px 10px;display:flex;flex-direction:column;gap:8px"></div>
     <div style="border-top:1px solid var(--line);display:flex;flex-direction:column;max-height:42%">
-      <div style="display:flex;align-items:center;gap:6px;padding:7px 12px;font-weight:600;color:var(--acc2,#d6ba58);font-size:12px">
+      <div style="display:flex;align-items:center;gap:6px;padding:7px 12px 3px;font-weight:600;color:var(--acc2,#d6ba58);font-size:12px">
         ▶ Render queue <span id="projQueueNote" style="font-weight:400;color:var(--mut,#9a917f);font-size:11px"></span>
       </div>
+      <div id="projQueueEst" class="stat" style="padding:0 12px 3px;color:var(--mut,#9a917f);font-size:11px"></div>
       <div id="projQueueList" style="overflow:auto;padding:0 12px 6px;font-size:12px"></div>
-      <div style="display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--line)">
-        <button class="sec" id="projQueueStart" style="flex:1;padding:6px;font-size:12px" title="Render every checked project one after another, in order. Meld switches to each, plans its cells from the saved selection, generates, then moves on.">▶ Render checked in order</button>
-        <button class="sec xbtn" id="projQueueStop" style="width:auto;padding:6px 10px;font-size:12px;display:none" title="Stop after the current project finishes.">⏹ Stop</button>
+      <div style="display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--line);flex-wrap:wrap">
+        <button class="sec" id="projQueueStart" style="flex:1;min-width:130px;padding:6px;font-size:12px" title="Render every checked project one after another, in order. Meld switches to each, plans its cells from the saved selection, generates, then moves on.">▶ Render checked in order</button>
+        <button class="sec" id="projQueuePause" style="width:auto;padding:6px 10px;font-size:12px;display:none" title="Pause before the next project. Resume any time; the current render is never interrupted.">⏸ Pause</button>
+        <button class="sec" id="projQueueStop" style="width:auto;padding:6px 10px;font-size:12px;display:none" title="Stop the queue after the current project finishes.">⏹ Stop</button>
+        <button class="sec xbtn" id="projQueueKill" style="width:auto;padding:6px 10px;font-size:12px;display:none" title="Kill now: abort the current render and halt the whole queue.">✖ Kill</button>
       </div>
     </div>
   </div>
@@ -2184,15 +2187,39 @@ function projGalRename(p, card) {
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.value = p.name; inp.blur(); } });
   inp.addEventListener('blur', commit);
 }
+// ── output-size estimate (mirror of server _estimate_world_mb) ──
+const _FMT_RATIO = { none: 1.0, zip: 1.85, tarzst: 1.85, linear: 4.8, blinear: 4.3 };
+function estWorldMb(areaKm2, scale, fmt) {
+  areaKm2 = +areaKm2 || 0; scale = (+scale) || 1;
+  if (areaKm2 <= 0) return 0;
+  const regionKm2 = Math.pow(512 / scale, 2) / 1e6;
+  const regions = Math.max(1, areaKm2 / regionKm2);
+  return regions * 3.5 / (_FMT_RATIO[fmt] || 1.0);
+}
+function fmtSize(mb) {
+  if (!mb) return '?';
+  return mb >= 1024 ? (mb / 1024).toFixed(mb >= 10240 ? 0 : 1) + ' GB' : Math.round(mb) + ' MB';
+}
 function projGalRenderQueue() {
   const host = $('projQueueList'); if (!host) return;
-  if (!_projQueue.length) { host.innerHTML = '<div class="stat" style="color:var(--mut,#9a917f)">Check projects above to queue them. They render top to bottom.</div>'; return; }
+  const estEl = $('projQueueEst');
+  if (!_projQueue.length) {
+    host.innerHTML = '<div class="stat" style="color:var(--mut,#9a917f)">Check projects above to queue them. They render top to bottom.</div>';
+    if (estEl) estEl.textContent = '';
+    return;
+  }
   host.innerHTML = '';
+  let total = 0;
   _projQueue.forEach((slug, i) => {
     const p = _projData.find(x => x.slug === slug); if (!p) return;
+    const mb = (p.est_mb != null ? p.est_mb : estWorldMb(p.area_km2, p.scale, p.export_format));
+    total += mb || 0;
+    const area = p.area_km2 ? p.area_km2 + ' km²' : 'no selection';
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 0';
-    row.innerHTML = `<span style="width:16px;color:var(--mut,#9a917f)">${i + 1}.</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>`;
+    row.innerHTML = `<span style="width:16px;color:var(--mut,#9a917f)">${i + 1}.</span>`
+      + `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}`
+      + `<span style="color:var(--mut,#9a917f);font-size:10px"> · ${area} · ~${fmtSize(mb)}</span></span>`;
     const up = document.createElement('button'); up.className = 'sec'; up.textContent = '↑'; up.style.cssText = 'width:auto;padding:0 6px;font-size:11px';
     const dn = document.createElement('button'); dn.className = 'sec'; dn.textContent = '↓'; dn.style.cssText = 'width:auto;padding:0 6px;font-size:11px';
     const rm = document.createElement('button'); rm.className = 'sec xbtn'; rm.textContent = '✕'; rm.style.cssText = 'width:auto;padding:0 6px;font-size:11px';
@@ -2201,13 +2228,22 @@ function projGalRenderQueue() {
     rm.onclick = () => { _projQueue = _projQueue.filter(s => s !== slug); projGalRenderCards(); projGalRenderQueue(); };
     row.append(up, dn, rm); host.appendChild(row);
   });
+  if (estEl) estEl.textContent = `${_projQueue.length} queued · ~${fmtSize(total)} combined (estimated, after export format)`;
 }
 let _rqCurrent = null;
 function renderQueueStatus(rq) {
   rq = rq || {};
   const start = $('projQueueStart'), stop = $('projQueueStop'), note = $('projQueueNote');
-  if (stop) stop.style.display = rq.active ? '' : 'none';
-  if (start) start.style.display = rq.active ? 'none' : '';
+  const pause = $('projQueuePause'), kill = $('projQueueKill');
+  const active = !!rq.active;
+  if (start) start.style.display = active ? 'none' : '';
+  if (stop) stop.style.display = active ? '' : 'none';
+  if (kill) kill.style.display = active ? '' : 'none';
+  if (pause) {
+    pause.style.display = active ? '' : 'none';
+    pause.textContent = rq.pause ? '▶ Resume' : '⏸ Pause';
+    pause.classList.toggle('active', !!rq.pause);
+  }
   if (note) {
     if (rq.active) {
       const cur = _projData.find(p => p.slug === rq.current);
@@ -2239,6 +2275,14 @@ if ($('projQueueStart')) $('projQueueStart').onclick = async () => {
   if (!rr.ok) { modalInfo('Meld', rr.error || 'failed'); return; }
 };
 if ($('projQueueStop')) $('projQueueStop').onclick = () => api('/api/projects/render-queue/stop', {});
+if ($('projQueuePause')) $('projQueuePause').onclick = () => {
+  const currentlyPaused = $('projQueuePause').textContent.includes('Resume');
+  api('/api/projects/render-queue/pause', { paused: !currentlyPaused });
+};
+if ($('projQueueKill')) $('projQueueKill').onclick = async () => {
+  if (!(await modalConfirm('Kill render queue', 'Abort the current render and halt the whole queue now? The project rendering right now stops mid-way (already-merged cells are kept).', 'Kill'))) return;
+  api('/api/projects/render-queue/kill', {});
+};
 $('btnBrowse').onclick = async () => {
   $('btnBrowse').textContent = 'Opening…'; $('btnBrowse').disabled = true;
   try {

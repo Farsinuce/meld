@@ -171,8 +171,27 @@ MB_PER_REGION = 4   # rough estimate for the size report
 # Each entry is a project slug; the driver switches to it, plans its cells from the
 # saved selection, generates, waits for the run (+ export) to finish, then advances.
 _RQ_LOCK = threading.Lock()
-_RQ = {"active": False, "stop": False, "slugs": [], "idx": 0, "current": None,
+_RQ = {"active": False, "stop": False, "pause": False, "slugs": [], "idx": 0, "current": None,
        "results": [], "note": ""}
+
+# Rough output-size estimate (queue + build). Built-world .mca is ~this per 512-block region;
+# the export formats divide it by their measured ratio (from MELD_EXPORT_PLAN.md).
+_MB_PER_REGION = 3.5
+_FMT_RATIO = {"none": 1.0, "zip": 1.85, "tarzst": 1.85, "linear": 4.8, "blinear": 4.3}
+
+
+def _estimate_world_mb(area_km2, scale, fmt: str = "none") -> float:
+    """Rough finished-size estimate in MB for an area at a scale, after the export format's ratio."""
+    try:
+        area_km2 = float(area_km2 or 0.0)
+        scale = float(scale or 1.0) or 1.0
+    except (TypeError, ValueError):
+        return 0.0
+    if area_km2 <= 0:
+        return 0.0
+    region_km2 = (512.0 / scale) ** 2 / 1_000_000.0     # km2 one region covers at this scale
+    regions = max(1.0, area_km2 / region_km2)
+    return regions * _MB_PER_REGION / _FMT_RATIO.get(fmt, 1.0)
 
 # ── post-generation export/compression status (drives the progress view) ──────
 # Populated by the export post-pass that runs once all cells are merged. See
@@ -3398,6 +3417,8 @@ def _project_info(slug: str) -> dict:
         "cells": len(grid), "merged": sum(1 for v in grid.values() if v == "merged"),
         "scale": s.get("scale"), "active": slug == ACTIVE_SLUG,
         "bbox": bbox, "center": center, "area_km2": area_km2,
+        "export_format": s.get("export_format", "none"),
+        "est_mb": round(_estimate_world_mb(area_km2, s.get("scale"), s.get("export_format", "none")), 1),
         "has_origin": origin.get("lat") is not None,
     }
 
@@ -3558,6 +3579,14 @@ def _render_queue_worker() -> None:
                 _RQ.update(active=False, current=None,
                            note=("stopped" if _RQ["stop"] else "queue complete"))
                 return
+            paused = _RQ["pause"]
+            nxt = _RQ["slugs"][_RQ["idx"]]
+        if paused:                                  # hold BETWEEN projects; never interrupts a running one
+            with _RQ_LOCK:
+                _RQ.update(current=None, note=f"paused (next: {nxt})")
+            time.sleep(1.0)
+            continue
+        with _RQ_LOCK:
             slug = _RQ["slugs"][_RQ["idx"]]
             _RQ["current"] = slug
             _RQ["note"] = f"preparing {slug}"
@@ -3607,6 +3636,9 @@ def _render_queue_worker() -> None:
                         # wait until it has both STARTED and fully FINISHED (run + export settled).
                         saw, settle, tw = False, 0, time.time()
                         while time.time() - tw < 48 * 3600:
+                            with _RQ_LOCK:
+                                if _RQ["stop"]:      # Kill sets stop + clears the pool -> break out now
+                                    break
                             busy = _run_active() or not _rq_export_idle()
                             if busy:
                                 saw, settle = True, 0
@@ -3642,7 +3674,7 @@ def api_render_queue():
     with _RQ_LOCK:
         if _RQ["active"]:
             return jsonify({"ok": False, "error": "the render queue is already running"}), 409
-        _RQ.update(active=True, stop=False, slugs=ordered, idx=0, current=None,
+        _RQ.update(active=True, stop=False, pause=False, slugs=ordered, idx=0, current=None,
                    results=[], note="starting…")
     threading.Thread(target=_render_queue_worker, daemon=True, name="render-queue").start()
     return jsonify({"ok": True, "count": len(ordered)})
@@ -3655,8 +3687,33 @@ def api_render_queue_stop():
         if not _RQ["active"]:
             return jsonify({"ok": True, "note": "queue not running"})
         _RQ["stop"] = True
+        _RQ["pause"] = False
         _RQ["note"] = "stopping after the current project…"
     return jsonify({"ok": True})
+
+
+@app.route("/api/projects/render-queue/pause", methods=["POST"])
+def api_render_queue_pause():
+    """Pause/resume the queue BETWEEN projects (never interrupts a project that is mid-render)."""
+    paused = bool((request.get_json(silent=True) or {}).get("paused", True))
+    with _RQ_LOCK:
+        if not _RQ["active"]:
+            return jsonify({"ok": True, "note": "queue not running"})
+        _RQ["pause"] = paused
+        _RQ["note"] = "paused" if paused else "resuming…"
+    return jsonify({"ok": True, "paused": paused})
+
+
+@app.route("/api/projects/render-queue/kill", methods=["POST"])
+def api_render_queue_kill():
+    """Kill NOW: abort the current render and halt the queue (harder than Stop)."""
+    with _RQ_LOCK:
+        running = _RQ["active"]
+        _RQ["stop"] = True
+        _RQ["pause"] = False
+        _RQ["note"] = "killed — aborting the current render"
+    POOL.clear()      # abort the in-flight generation immediately
+    return jsonify({"ok": True, "was_running": running})
 
 
 @app.route("/api/new-world", methods=["POST"])
@@ -3750,7 +3807,8 @@ def api_status():
     with _RQ_LOCK:
         render_queue = {"active": _RQ["active"], "current": _RQ["current"],
                         "idx": _RQ["idx"], "total": len(_RQ["slugs"]), "slugs": list(_RQ["slugs"]),
-                        "results": list(_RQ["results"]), "note": _RQ["note"], "stop": _RQ["stop"]}
+                        "results": list(_RQ["results"]), "note": _RQ["note"], "stop": _RQ["stop"],
+                        "pause": _RQ["pause"]}
     with _EXPORT_LOCK:
         export = dict(_EXPORT)
     with _MCSERVER_LOCK:
