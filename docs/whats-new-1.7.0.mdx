@@ -1,0 +1,67 @@
+# What's new in 1.7.0 - Meld Compass
+
+Meld Compass is a big usability pass. The theme is guiding people to run and build everything
+easily: one clear flow, projects you can organize, a queue that builds worlds one after another,
+borders from any shape, and true one-click startup on Windows, macOS and Linux.
+
+## One guided flow
+
+The right rail is now **three numbered steps**: **1 Settings**, **2 Prepare data**, **3 Generate**.
+Project & world, Selection / search, and Edit & retry all live inside the Generate step. Every
+section starts collapsed and opens one at a time.
+
+A **settings search** sits at the top of the rail: type any setting, toggle, or button name and
+press Enter to jump to it (Shift+Enter for the previous match). The section opens and scrolls into
+view, and every match is tinted.
+
+The three build buttons collapse into a single **▶ Generate world**. It does the right thing for the
+current stage: it bakes your local data if set, pre-warms buildings if they are on, then generates
+only the cells that are not merged yet, so it also **resumes** cleanly after a stop or crash.
+
+## Projects, folders, and a render queue
+
+The **Projects gallery** is where you keep many worlds side by side. Clone, rename, locate on the
+map, and now **drag to reorder** with the handle, or drop a project onto a **folder** to group it.
+Folders collapse, rename, delete, and show a count.
+
+Folders do real work:
+
+- Click a folder to **focus the map** on only its project areas.
+- Press a folder's play button to **queue** just its projects.
+
+The **render queue** builds several projects one after another, unattended. **Pause** holds between
+projects, **Stop** halts after the current one, and **Kill** aborts the running render immediately.
+Each row shows its area and an **estimated output size**, with a combined total that reacts to the
+export format (Raw, Zip, Linear, or B_Linear). While a queue runs, every queued project's area stays
+drawn on the map, with the current one highlighted.
+
+Cloning a project now copies its settings **and** pre-plans its cells, so the cell preview shows the
+moment you open the copy - and the copy lands right next to the project it came from.
+
+## Borders and zones from any drawn shape
+
+Border & zones no longer needs a country. Toggle **📐** on a zone and it uses the **rectangle or
+polygon you drew on the map** as its boundary. The concentric rings, WorldGuard `regions.yml`, and
+the `border.sk` Skript build for that custom shape exactly like an admin boundary.
+
+## One-click on every OS
+
+Double-click **`meld.bat`** on Windows, **`meld.command`** on macOS, or run **`./meld.sh`** on Linux.
+The launcher makes a private environment, installs the dependencies, fetches or builds the `arnis`
+generator for your machine, and starts Meld in your browser. New `python meld_launch.py --check`
+reports what is installed or missing without changing anything. See
+[Getting started](./getting-started.mdx).
+
+## Server on the world in place
+
+Server setup can now **link the world's real files** into the server instead of copying them, so
+there is no doubled disk and the server runs the actual world. Copying is still available when you
+want an isolated copy, and the automatic first-start backup is off by default.
+
+## Also
+
+A darker glass skin so panels read as solid, drawers that look like a button when closed and open
+flush, a much stronger hillshade in the height preview, confirmation dialogs that open above the
+projects window, and the page is served no-store so UI updates always appear on a plain refresh.
+
+Meld Compass bundles the arnis fork 3.0.3 generator, unchanged since 1.6.2.

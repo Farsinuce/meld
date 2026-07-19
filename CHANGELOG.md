@@ -6,23 +6,27 @@ All notable changes to Meld are documented here. The format is based on
 
 ## [1.7.0] - 2026-07-19 - "Meld Compass"
 
-A big usability pass: a guided three-step rail, a settings search, a darker glass skin, a single Generate button, a slimmer server setup, and a one-click cross-platform launcher. The theme is guiding people to run and build everything easily.
+A big usability pass focused on guiding people to run and build everything easily: a guided three-step rail, a settings search, a darker glass skin, one Generate button, project folders and a render queue that builds worlds one after another, borders from any drawn shape, a slimmer in-place server setup, and a one-click cross-platform launcher. Bundles arnis fork 3.0.3 (generator unchanged).
 
 ### Added
 
-- **Settings search.** A search bar at the top of the right rail finds any setting, toggle, or button. Press Enter to cycle through matches (Shift+Enter for previous); the first match opens its section and scrolls into view, and every match is tinted. Esc or the gold clear button resets it.
-- **One-click cross-platform launcher polish.** `meld.bat` / `meld.command` / `meld.sh` plus `meld_launch.py` create a private venv, install the dependencies, fetch or build the matching `arnis` binary, and start the app in one double-click on Windows, macOS, and Linux. New `python meld_launch.py --check` reports what is installed or missing without changing anything.
-- **Run the server against the world in place.** Server setup can now link the world's real files into the server (no copy, no doubled disk) instead of copying them. This is the default; a "Copy world into the server" option keeps the isolated behaviour when you want it.
+- **Settings search.** A search bar at the top of the right rail finds any setting, toggle, or button. Enter cycles through matches (Shift+Enter for previous); the first match opens its section and scrolls into view, and every match is tinted. Esc or the gold clear button resets it.
+- **Project folders and drag reorder.** In the Projects gallery, drag any project card (its ⠿ handle) to reorder it, or drop it on a folder to group it. 📁 creates a folder; each folder collapses, renames, deletes (its projects fall back to Ungrouped), and shows a count. Click a folder to FOCUS the map on only its areas; press its ▶️ to QUEUE only its projects. Saved in `projects/_org.json` (presentation only, never touches project files).
+- **Render queue: pause, kill, and size estimates.** Queue several projects to render one after another. Pause holds between projects, Stop halts after the current one, and Kill aborts the running render immediately. Each queue row shows its area and estimated output size, with a combined total that reacts to each project's export format (Raw / Zip / Linear / B_Linear). While a queue runs, every queued project's area stays drawn on the map with the current one highlighted.
+- **Borders and zones from a drawn rectangle or polygon.** A zone can use the area you drew on the map (the 📐 toggle) as its boundary instead of a country, so the concentric rings, `regions.yml` and `border.sk` build for any custom shape, not just admin boundaries.
+- **One-click cross-platform launcher.** `meld.bat` / `meld.command` / `meld.sh` plus `meld_launch.py` create a private venv, install the dependencies, fetch or build the matching `arnis` binary, and start the app in one double-click on Windows, macOS, and Linux. New `python meld_launch.py --check` reports what is installed or missing without changing anything.
+- **Run the server against the world in place.** Server setup links the world's real files into the server (no copy, no doubled disk) by default; a "Copy world into the server" option keeps the isolated behaviour.
+- **Build-size estimate.** The Export drawer shows an estimated output size that changes with the chosen format.
 
 ### Changed
 
 - **Three numbered steps.** The rail is now 1 Settings, 2 Prepare data, 3 Generate. Project & world, Selection / search, and Edit & retry live inside the Generate step. Every section starts collapsed and opens one at a time.
-- **One Generate button.** Prepare & build, Generate & merge, and Resume unfinished collapse into a single **▶ Generate world** that runs the right thing for the current stage, including resuming after a stop or crash.
-- **Projects everywhere.** A Projects gallery button sits in the left rail and directly under the Generate controls. The project switcher, New project, New world, and "show all project areas" controls are folded into the gallery.
-- **Darker glass skin.** Every semi-transparent surface is more opaque, so cards, rails, the projects overlay, and dialogs read as solid glass. Confirmation dialogs now open above the projects window instead of behind it.
-- **Tidier drawers.** Chest loot, tree sizes, cave biomes, climate, and export are collapsible drawers that look like a button closed and open flush (no boxed panel), with a smoother open animation.
-- **Cleaner Data pack and Border sections.** Elevation previews are hillshade-only with one Height preview button and a clear ✕; the elevation Preview no longer needs a locked origin and the hillshade relief is much stronger. Border & zones flows without boxed rows, its ring / margin / script settings fold into one drawer, and Export border files is a full-width button.
-- **Server setup does not back up on first start by default.** The automatic pre-start backup is off; the manual Backup button and the opt-in toggle remain.
+- **One Generate button.** Prepare & build, Generate & merge, and Resume unfinished collapse into a single ▶ Generate world that does the right thing for the current stage, including resuming after a stop or crash.
+- **Projects everywhere.** A Projects gallery button sits in the left rail and directly under the Generate controls; the old project switcher, New project, New world and "show all project areas" controls fold into the gallery. Cloning a project now copies its settings AND pre-plans its cells (so the preview shows on open) and drops the copy right next to its source.
+- **Darker glass skin.** Every semi-transparent surface is more opaque, so cards, rails, the projects overlay, and dialogs read as solid glass. Confirmation dialogs open above the projects window instead of behind it.
+- **Tidier drawers.** Chest loot, tree sizes, cave biomes, climate, and export are collapsible drawers that look like a button when closed and open flush (no boxed panel), with a smoother open animation.
+- **Cleaner Data pack and Border sections.** The height preview is hillshade-only with one button and a clear ✕, and the hillshade relief is much stronger. Border & zones flows without boxed rows, its ring / margin / script settings fold into one drawer, and Export border files is a full-width button.
+- **Server setup does not back up on first start by default.** The manual Backup button and the opt-in toggle remain.
 - **The page is served no-store**, so UI updates always appear on a plain refresh.
 
 ### Removed

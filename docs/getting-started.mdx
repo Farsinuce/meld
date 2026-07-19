@@ -1,0 +1,76 @@
+# Getting started
+
+Meld runs as a small local web app in your browser. There is one prerequisite, **Python 3.9 or
+newer**, and a one-click launcher does the rest: it builds a private environment, installs the
+dependencies, fetches the `arnis` generator for your machine, and starts Meld.
+
+## One click (Windows, macOS, Linux)
+
+Get the code, then start it. No manual setup.
+
+```bash
+git clone https://github.com/Teddy563/meld
+cd meld
+```
+
+Then launch it for your operating system:
+
+- **Windows** - double-click **`meld.bat`**.
+- **macOS** - double-click **`meld.command`** in Finder. The first time, right-click it and choose
+  **Open** once to get past Gatekeeper (it is unsigned).
+- **Linux** - run **`./meld.sh`** (or double-click it if your file manager allows).
+
+The launcher (`meld_launch.py`) does everything on the first run:
+
+1. creates a private virtual environment (`.venv`) and installs Meld's Python dependencies,
+2. makes sure a native `arnis` generator binary is present for your OS and CPU - it downloads the
+   matching prebuilt from the [arnis releases](https://github.com/Teddy563/arnis/releases), and if
+   none is published it builds it from the bundled Rust source with `cargo`,
+3. starts Meld and opens `http://127.0.0.1:5630` in your browser.
+
+Re-running is instant: the environment, dependencies and binary are all cached.
+
+To change the port, set `PORT` (for example `PORT=8080`).
+
+## Check what you have first
+
+To see what is already installed and what is missing, without creating anything, downloading, or
+starting the server:
+
+```bash
+python meld_launch.py --check
+```
+
+It reports your Python version, whether the environment exists, whether the core dependencies import,
+whether the `arnis` binary is present, and whether the port is free.
+
+## macOS and Linux notes
+
+- The shell launchers (`meld.command`, `meld.sh`) ship with Unix line endings and the executable
+  bit set, so they run straight from a fresh clone.
+- The generator binary must be named **`arnis`** (no `.exe`) and match your OS. Meld runs whatever it
+  finds next to `server.py`; a Windows `.exe` on macOS or Linux fails with `Exec format error`.
+- If no prebuilt binary is published for your platform, install [Rust](https://rustup.rs) and re-run
+  the launcher. It builds the fork headless with `cargo build --release --no-default-features` (the
+  default desktop feature pulls in GTK/Tauri libraries Meld does not need).
+
+## If you prefer to do it by hand
+
+```bash
+pip install -r requirements.txt
+python server.py        # then open http://127.0.0.1:5630
+```
+
+Put a matching `arnis` binary next to `server.py`, or download it from the
+[arnis releases](https://github.com/Teddy563/arnis/releases).
+
+## Your first world
+
+1. Draw a rectangle on the map (or search a place).
+2. Open **Settings** and pick a cell size; **1 Settings** is the first step in the rail.
+3. Hit **▶ Generate world**. One button runs the prepare step, builds every cell, and resumes
+   safely if you stop or the machine sleeps.
+4. When it finishes, open the world folder and drop it into your Minecraft saves, or turn it into a
+   running server from the **Server setup** section.
+
+That is the whole loop: draw, set the size, generate.

@@ -2,6 +2,19 @@
 
 Short, human highlights for each Meld release. Full detail lives in [CHANGELOG.md](CHANGELOG.md).
 
+## v1.7.0 - Meld Compass
+
+**Run and build everything more easily: one guided flow, projects and folders, a queue that builds worlds one after another, and one-click startup on any OS.**
+
+- **Guided three-step rail** (Settings, Prepare data, Generate) with a settings **search** to jump to any control, and a single **Generate world** button that also resumes after a stop or crash.
+- **Projects gallery with folders.** Keep many worlds side by side: clone, rename, locate on the map, **drag to reorder**, and group into **folders**. Focus the map on one folder, or **queue** a folder to render one project after another, with pause / stop / kill and per-project + combined size estimates.
+- **Borders from any drawn shape.** Build the rings, WorldGuard regions and `border.sk` for a **rectangle or polygon** you draw, not only a country.
+- **One-click on Windows, macOS and Linux.** Double-click `meld.bat` / `meld.command` / `meld.sh` and it makes a private environment, installs everything, fetches the generator, and starts. `python meld_launch.py --check` shows what is missing without changing anything. See the [Getting started](./docs/getting-started.mdx) guide.
+- **In-place server setup.** Run a Leaf server directly on the world's real files, with no copy and no doubled disk.
+- Darker glass skin, tidier drawers, a stronger hillshade preview, and the page is served no-store so UI updates always show on a plain refresh.
+
+Bundles the arnis fork 3.0.3 generator (unchanged since 1.6.2).
+
 ## v1.4.0
 
 **Real trees, shape the land, and bound a world to a country.**

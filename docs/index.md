@@ -2,7 +2,10 @@
 
 Meld turns one map selection into one seamless Minecraft world. It tiles a big area into a grid, builds the tiles with many generator runs at once, and melds them into a single world with the same terrain height and building style everywhere.
 
-This hub links to the how-it-works guides. For what changed in the latest release, see [What's new in 1.3.0](./whats-new-1.3.0.mdx); the full per-release history lives in [CHANGELOG.md](../CHANGELOG.md).
+New here? Start with [Getting started](./getting-started.mdx) to install and run Meld in one click on
+Windows, macOS or Linux. For what changed in the latest release, see
+[What's new in 1.7.0](./whats-new-1.7.0.mdx); the full per-release history lives in
+[CHANGELOG.md](../CHANGELOG.md).
 
 ## How a build flows, end to end
 
