@@ -914,10 +914,12 @@
       <button class="sec" id="btnDpRepairAll" style="margin-top:4px" title="Same overzoom repair, but scans your ENTIRE elevation cache in one pass and fixes every no-data hole everywhere — no need to draw an area or click holes one by one. Only decodes the tiny uniform tiles (a hole is always tiny), so it's fast even over a whole country. Good tiles are untouched.">✦ Fix ALL holes (whole cache)</button>
       <div class="stat" style="margin-top:8px">Preview elevation on the map (hillshade):</div>
       <div class="row" style="margin-top:4px">
-        <button class="sec" id="btnMaptPreview" type="button" style="flex:1;padding:5px 8px;font-size:11px" title="Render the NEW Mapterhorn heightmap for your drawn selection (or planned cells) using the exact provider generation uses, and overlay it on the map — what the world's terrain will actually be.">⛰ Preview site</button>
-        <button class="sec" id="btnHeightPreview" type="button" style="flex:1;padding:5px 8px;font-size:11px" title="Toggle the cached-tile elevation overlay (legacy AWS terrarium, hillshade). Red tiles = elevation NOT cached yet — exactly where a gap would be.">▦ Height</button>
+        <button class="sec" id="btnHeightPreview" type="button" style="flex:1;padding:5px 8px;font-size:11px" title="Toggle the cached elevation overlay (hillshade). Red tiles = elevation NOT cached yet — exactly where a gap would be.">▦ Height preview</button>
+        <button class="sec" id="btnMaptClear" type="button" style="width:auto;flex:0 0 auto;padding:5px 10px;font-size:11px" title="Clear the elevation overlay">✕</button>
       </div>
-      <button class="sec" id="btnMaptClear" type="button" style="width:auto;padding:4px 10px;font-size:11px;margin-top:5px" title="Clear both elevation overlays">✕ Clear preview</button>
+      <!-- Mapterhorn site preview hidden for now (needs a server restart + an arnis build with
+           --elevation-map). Kept wired so it can be re-enabled without touching the handlers. -->
+      <button class="sec" id="btnMaptPreview" type="button" style="display:none">⛰ Preview site</button>
       <input id="dpPreview" type="checkbox" style="display:none">
       <div style="border-top:1px solid var(--line);margin:9px 0 0;padding-top:8px"></div>
       <div class="stat" style="margin-bottom:3px">Downloaded packs <button id="btnDpList" class="sec" style="width:auto;margin:0;padding:1px 7px;font-size:11px;float:right">↻</button></div>
