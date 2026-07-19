@@ -2167,7 +2167,7 @@ function buildProjCard(p) {
        <button class="sec pLoc" style="width:auto;padding:3px 8px;font-size:11px"${p.bbox ? '' : ' disabled'}>📍 Locate</button>
        <button class="sec pClone" style="width:auto;padding:3px 8px;font-size:11px">⧉ Clone</button>
        <button class="sec pRen" style="width:auto;padding:3px 8px;font-size:11px">✎ Rename</button>
-       <button class="sec xbtn pDel" style="width:auto;padding:3px 8px;font-size:11px"${p.active ? ' disabled' : ''}>🗑</button>
+       <button class="sec xbtn pDel" style="width:auto;padding:3px 8px;font-size:11px"${p.active ? ' disabled' : ''}>🗑️</button>
      </div>`;
   card.querySelector('.pqchk').onchange = (e) => {
     if (e.target.checked) { if (!_projQueue.includes(p.slug)) _projQueue.push(p.slug); }
@@ -2212,11 +2212,11 @@ function projGalRenderCards() {
     nm.title = "Show only this folder's areas on the map (click again for all)";
     nm.onclick = () => { _focusFolder = focused ? null : folder; projGalDrawBoxes(); projGalRenderCards(); };
     const cnt = document.createElement('span'); cnt.textContent = projs.length; cnt.style.cssText = 'color:var(--mut,#9a917f);font-weight:400;font-size:11px';
-    const qbtn = document.createElement('button'); qbtn.className = 'sec'; qbtn.textContent = '▶'; qbtn.title = "Queue this folder's projects, in order"; qbtn.style.cssText = 'width:auto;padding:1px 6px;font-size:11px';
+    const qbtn = document.createElement('button'); qbtn.className = 'sec'; qbtn.textContent = '▶️'; qbtn.title = "Queue this folder's projects, in order"; qbtn.style.cssText = 'width:auto;padding:1px 6px;font-size:11px';
     qbtn.onclick = () => { _projQueue = projs.map(p => p.slug); projGalRenderCards(); projGalRenderQueue(); };
     const ren = document.createElement('button'); ren.className = 'sec'; ren.textContent = '✎'; ren.style.cssText = 'width:auto;padding:1px 6px;font-size:11px';
     ren.onclick = () => renameProjFolder(folder);
-    const del = document.createElement('button'); del.className = 'sec xbtn'; del.textContent = '🗑'; del.style.cssText = 'width:auto;padding:1px 6px;font-size:11px';
+    const del = document.createElement('button'); del.className = 'sec xbtn'; del.textContent = '🗑️'; del.style.cssText = 'width:auto;padding:1px 6px;font-size:11px';
     del.onclick = () => deleteProjFolder(folder);
     hdr.append(tog, nm, cnt, qbtn, ren, del);
     hdr.ondragover = (e) => { e.preventDefault(); hdr.style.borderColor = 'var(--acc)'; };
@@ -2250,7 +2250,16 @@ async function projGalClone(p) {
   if (!mode) return;
   const rr = await api('/api/projects/clone', { slug: p.slug, keep_selection: mode === 'same' });
   if (!rr.ok) { modalInfo('Meld', rr.error || 'clone failed'); return; }
-  projGalRefresh(); loadProjects();
+  await projGalRefresh();
+  // Place the copy directly ABOVE the project it was copied from, in the same folder.
+  const clone = _projData.find(x => x.slug === rr.slug), src = _projData.find(x => x.slug === p.slug);
+  if (clone && src) {
+    clone.folder = src.folder || '';
+    _projData.splice(_projData.indexOf(clone), 1);
+    _projData.splice(_projData.indexOf(src), 0, clone);
+    projGalRenderCards(); saveProjOrg();
+  }
+  loadProjects();
 }
 function projGalRename(p, card) {
   const nameEl = card.querySelector('.pname');
