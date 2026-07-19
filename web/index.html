@@ -179,9 +179,13 @@
   details.drawer[open] > summary::before { transform:rotate(90deg); }
   details.drawer > .dbody { padding:2px 0 6px; }
   details.drawer > :not(summary):not(.dbody):last-child { padding-bottom:6px; }
-  /* settings search: ring the matching control(s), scroll the first into view */
-  .search-hit { box-shadow:0 0 0 2px var(--acc), 0 0 9px rgba(227,164,23,.55) !important;
-    border-radius:4px; scroll-margin:80px; }
+  /* settings search: tint the match like the drawer hover (gold box + left bar), no glow.
+     The one you're cycled to (.search-cur) tints stronger with a full outline. */
+  .search-hit { background:rgba(227,164,23,.13) !important; box-shadow:inset 3px 0 0 var(--acc) !important;
+    border-radius:4px; scroll-margin:90px; transition:background .15s, box-shadow .15s; }
+  .search-hit.search-cur { background:rgba(227,164,23,.30) !important;
+    box-shadow:inset 3px 0 0 var(--acc), 0 0 0 1px var(--acc) !important; }
+  #railSearchClear:hover { color:#ffd86b; }
   .lk { color:var(--ok); } .un { color:var(--mut); }
   /* segmented multi-toggle (tree sizes): connected chips, no wrap, multi-select */
   .szgroup { display:inline-flex; vertical-align:middle; }
@@ -369,10 +373,14 @@
   <div id="credit">Arnis by <a href="https://github.com/louis-e/arnis" target="_blank" rel="noopener">louis-e</a> · Meld by <a href="https://github.com/Teddy563/meld" target="_blank" rel="noopener">Teddy563</a></div>
   <div id="side">
     <div id="railSearchWrap" style="order:-1;position:relative;margin-bottom:10px">
-      <input id="railSearch" type="search" placeholder="🔍 Search settings…" autocomplete="off"
-        title="Type to find any setting, toggle or button on the right. The first match opens its section and scrolls into view; all matches are highlighted."
-        style="width:100%;box-sizing:border-box;padding:7px 9px;font-size:12px">
-      <div id="railSearchCount" class="stat" style="display:none;margin-top:2px"></div>
+      <input id="railSearch" type="text" placeholder="🔍 Search settings…" autocomplete="off"
+        title="Type to find any setting, toggle or button on the right. Enter jumps to the next match (Shift+Enter previous) and scrolls it into view; every match is highlighted. Esc clears."
+        style="width:100%;box-sizing:border-box;padding:7px 30px 7px 9px;font-size:12px">
+      <button id="railSearchClear" type="button" title="Clear (Esc)"
+        style="display:none;position:absolute;top:50%;right:5px;transform:translateY(-50%);width:auto;
+        padding:1px 7px;font-size:13px;line-height:1;background:transparent;border:none;
+        color:var(--acc);font-weight:800;cursor:pointer">✕</button>
+      <div id="railSearchCount" class="stat" style="display:none;margin-top:3px"></div>
     </div>
     <div class="card">
       <h2>Generate</h2>
@@ -3671,8 +3679,10 @@ function _collapseCard(card, collapsed) {
 (function railSearch(){
   const inp = document.getElementById('railSearch');
   const cnt = document.getElementById('railSearchCount');
+  const clrBtn = document.getElementById('railSearchClear');
   if (!inp) return;
-  const clear = () => document.querySelectorAll('#side .search-hit').forEach(e => e.classList.remove('search-hit'));
+  let hits = [], idx = -1;
+  const wipe = () => document.querySelectorAll('#side .search-hit').forEach(e => e.classList.remove('search-hit', 'search-cur'));
   const openAncestors = (el) => {
     for (let n = el; n && n.id !== 'side'; n = n.parentElement) {
       if (n.tagName === 'DETAILS') n.open = true;
@@ -3680,27 +3690,40 @@ function _collapseCard(card, collapsed) {
           && typeof _collapseCard === 'function') _collapseCard(n, false);
     }
   };
-  let t;
-  const run = () => {
-    const q = inp.value.trim().toLowerCase();
-    clear();
-    if (!q) { if (cnt) cnt.style.display = 'none'; return; }
-    // Match the actual controls: toggle rows (label wraps its input), option labels, section
-    // titles (h2), drawer summaries, and buttons - INCLUDING ones inside collapsed sections.
-    const els = document.querySelectorAll('#side label, #side summary, #side h2, #side button');
-    let first = null, hits = 0;
-    els.forEach(el => {
-      if (el.closest('#railSearchWrap')) return;
-      // don't double-ring: skip a wrapper that itself contains another candidate we also test
-      if (el.querySelector('label, summary, button')) return;
-      const txt = (el.textContent || '').toLowerCase();
-      if (txt.includes(q)) { el.classList.add('search-hit'); hits++; if (!first) first = el; }
-    });
-    if (first) { openAncestors(first); first.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
-    if (cnt) { cnt.style.display = ''; cnt.textContent = hits ? (hits + ' match' + (hits > 1 ? 'es' : '')) : 'no match'; }
+  // Cycle to hit i (wraps), mark it current, open its section, scroll it into view for you.
+  const goto = (i) => {
+    if (!hits.length) return;
+    idx = (i + hits.length) % hits.length;
+    hits.forEach(h => h.classList.remove('search-cur'));
+    const el = hits[idx];
+    el.classList.add('search-cur');
+    openAncestors(el);
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (cnt) cnt.textContent = (idx + 1) + ' / ' + hits.length + ' — Enter for next';
   };
-  inp.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 120); });
-  inp.addEventListener('keydown', e => { if (e.key === 'Escape') { inp.value = ''; run(); } });
+  let t;
+  const run = (jump) => {
+    const q = inp.value.trim().toLowerCase();
+    wipe(); hits = []; idx = -1;
+    if (clrBtn) clrBtn.style.display = q ? '' : 'none';
+    if (!q) { if (cnt) cnt.style.display = 'none'; return; }
+    // Match real controls: toggle rows (label wraps its input), option labels, section titles
+    // (h2), drawer summaries, buttons - INCLUDING ones inside collapsed sections.
+    document.querySelectorAll('#side label, #side summary, #side h2, #side button').forEach(el => {
+      if (el.closest('#railSearchWrap')) return;
+      if (el.querySelector('label, summary, button')) return;   // don't double-mark a wrapper
+      if ((el.textContent || '').toLowerCase().includes(q)) { el.classList.add('search-hit'); hits.push(el); }
+    });
+    if (cnt) { cnt.style.display = ''; cnt.textContent = hits.length
+      ? (hits.length + ' match' + (hits.length > 1 ? 'es' : '') + ' — Enter to cycle') : 'no match'; }
+    if (jump && hits.length) goto(0);
+  };
+  inp.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => run(true), 130); });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); if (!hits.length) run(true); else goto(idx + (e.shiftKey ? -1 : 1)); }
+    else if (e.key === 'Escape') { inp.value = ''; run(false); inp.blur(); }
+  });
+  if (clrBtn) clrBtn.addEventListener('click', () => { inp.value = ''; run(false); inp.focus(); });
 })();
 
 (function initRailOrder(){
