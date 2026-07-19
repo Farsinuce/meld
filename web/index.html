@@ -368,7 +368,7 @@
   <div id="coordbox">move the mouse over the map</div>
   <div id="credit">Arnis by <a href="https://github.com/louis-e/arnis" target="_blank" rel="noopener">louis-e</a> · Meld by <a href="https://github.com/Teddy563/meld" target="_blank" rel="noopener">Teddy563</a></div>
   <div id="side">
-    <div id="railSearchWrap" style="order:-1;position:relative;margin-bottom:2px">
+    <div id="railSearchWrap" style="order:-1;position:relative;margin-bottom:10px">
       <input id="railSearch" type="search" placeholder="🔍 Search settings…" autocomplete="off"
         title="Type to find any setting, toggle or button on the right. The first match opens its section and scrolls into view; all matches are highlighted."
         style="width:100%;box-sizing:border-box;padding:7px 9px;font-size:12px">
@@ -3685,13 +3685,14 @@ function _collapseCard(card, collapsed) {
     const q = inp.value.trim().toLowerCase();
     clear();
     if (!q) { if (cnt) cnt.style.display = 'none'; return; }
-    // Only leaf-ish controls, so a card doesn't match just because a child does.
+    // Match the actual controls: toggle rows (label wraps its input), option labels, section
+    // titles (h2), drawer summaries, and buttons - INCLUDING ones inside collapsed sections.
     const els = document.querySelectorAll('#side label, #side summary, #side h2, #side button');
     let first = null, hits = 0;
     els.forEach(el => {
       if (el.closest('#railSearchWrap')) return;
-      // skip a container whose match comes only from a nested control we'll also hit
-      if (el.querySelector('label, summary, button, select, input')) return;
+      // don't double-ring: skip a wrapper that itself contains another candidate we also test
+      if (el.querySelector('label, summary, button')) return;
       const txt = (el.textContent || '').toLowerCase();
       if (txt.includes(q)) { el.classList.add('search-hit'); hits++; if (!first) first = el; }
     });
