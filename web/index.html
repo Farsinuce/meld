@@ -324,6 +324,26 @@
     </div>
   </div>
   <div id="map"></div>
+  <div id="projOverlay" style="display:none;position:fixed;top:12px;left:12px;bottom:12px;width:460px;max-width:calc(100vw - 24px);z-index:6000;background:var(--panel,#161310);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.55);display:flex;flex-direction:column;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)">
+      <div style="font-weight:700;font-size:14px;color:var(--acc2,#d6ba58)">🗂 Projects</div>
+      <input id="projSearch" placeholder="filter…" style="flex:1;min-width:0;padding:4px 8px;font-size:12px">
+      <button class="sec" id="projGalNew" style="width:auto;padding:5px 9px;font-size:12px" title="Create a new empty project.">＋ New</button>
+      <button class="sec xbtn" id="projGalClose" style="width:auto;padding:5px 10px;font-size:12px">✕</button>
+    </div>
+    <div style="font-size:11px;color:var(--mut,#9a917f);padding:5px 12px;border-bottom:1px solid var(--line)">Every project's area is drawn on the map. Clone copies the selection and all settings into a fresh workspace so you just re-select or generate.</div>
+    <div id="projCards" style="flex:1;overflow:auto;padding:8px 10px;display:flex;flex-direction:column;gap:8px"></div>
+    <div style="border-top:1px solid var(--line);display:flex;flex-direction:column;max-height:42%">
+      <div style="display:flex;align-items:center;gap:6px;padding:7px 12px;font-weight:600;color:var(--acc2,#d6ba58);font-size:12px">
+        ▶ Render queue <span id="projQueueNote" style="font-weight:400;color:var(--mut,#9a917f);font-size:11px"></span>
+      </div>
+      <div id="projQueueList" style="overflow:auto;padding:0 12px 6px;font-size:12px"></div>
+      <div style="display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--line)">
+        <button class="sec" id="projQueueStart" style="flex:1;padding:6px;font-size:12px" title="Render every checked project one after another, in order. Meld switches to each, plans its cells from the saved selection, generates, then moves on.">▶ Render checked in order</button>
+        <button class="sec xbtn" id="projQueueStop" style="width:auto;padding:6px 10px;font-size:12px;display:none" title="Stop after the current project finishes.">⏹ Stop</button>
+      </div>
+    </div>
+  </div>
   <div id="exploreSearch">
     <form id="exploreSearchForm">
       <input id="exploreQ" placeholder="Search a place to zoom to…" autocomplete="off"/>
@@ -693,7 +713,8 @@
       <h2>Project &amp; world <span class="i" title="Switch project workspaces (each = one world's settings, origin, grid). Below: the name and save location of the world this project builds.">i</span></h2>
       <select id="projectSel" style="width:100%"></select>
       <div class="row" style="margin-top:6px">
-        <button class="sec" id="btnProjectNew" style="padding:6px" title="Create a new project (a fresh world workspace). The current one stays intact.">＋ New project</button>
+        <button class="sec" id="btnProjectGallery" style="padding:6px;flex:1" title="Open the projects gallery: clone, rename, locate every project on the map, and queue several to render one after another.">🗂 Projects gallery</button>
+        <button class="sec" id="btnProjectNew" style="padding:6px" title="Create a new project (a fresh world workspace). The current one stays intact.">＋ New</button>
         <button class="sec xbtn" id="btnProjectDelete" title="Delete this project's workspace (the saved Minecraft world on disk is kept)" style="width:auto;flex:0 0 auto;padding:6px 10px">🗑️</button>
       </div>
       <div style="border-top:1px solid var(--line);margin:10px 0 0;padding-top:9px"></div>
@@ -1967,6 +1988,183 @@ $('btnProjectDelete').onclick = async () => {
   if (!r.ok) { modalInfo('Meld', r.error || 'failed'); return; }
   loadProjects();
 };
+
+// ── projects gallery overlay: cards + map bboxes + clone/rename + render queue ──
+const projGalGroup = L.layerGroup();
+let _projData = [];            // last /api/projects payload
+let _projQueue = [];           // ordered slugs checked for the render queue
+let _projRects = {};           // slug -> L.rectangle
+function projGalOpen() {
+  $('projOverlay').style.display = 'flex';
+  if (!map.hasLayer(projGalGroup)) projGalGroup.addTo(map);
+  projGalRefresh();
+}
+function projGalClose() {
+  $('projOverlay').style.display = 'none';
+  projGalGroup.clearLayers(); _projRects = {};
+}
+async function projGalRefresh() {
+  let r; try { r = await api('/api/projects'); } catch (e) { return; }
+  _projData = r.projects || [];
+  // drop queued slugs that no longer exist
+  const have = new Set(_projData.map(p => p.slug));
+  _projQueue = _projQueue.filter(s => have.has(s));
+  projGalDrawBoxes();
+  projGalRenderCards();
+  projGalRenderQueue();
+}
+function projGalDrawBoxes() {
+  projGalGroup.clearLayers(); _projRects = {};
+  for (const p of _projData) {
+    if (!p.bbox) continue;
+    const b = p.bbox;
+    const rect = L.rectangle([[b.south, b.west], [b.north, b.east]], {
+      color: p.active ? '#d6ba58' : '#6c86b0', weight: p.active ? 2.5 : 1.5,
+      fillColor: p.active ? '#d6ba58' : '#6c86b0', fillOpacity: 0.06, interactive: true,
+    }).bindTooltip(p.name, { sticky: true });
+    rect.on('click', () => projGalLocate(p.slug));
+    rect.addTo(projGalGroup); _projRects[p.slug] = rect;
+  }
+}
+function projGalLocate(slug) {
+  const p = _projData.find(x => x.slug === slug); if (!p || !p.bbox) return;
+  const b = p.bbox;
+  map.fitBounds([[b.south, b.west], [b.north, b.east]], { padding: [40, 40], maxZoom: 12 });
+  const rect = _projRects[slug];
+  if (rect) { rect.setStyle({ weight: 3.5, fillOpacity: 0.18 }); setTimeout(() => rect.setStyle({ weight: p.active ? 2.5 : 1.5, fillOpacity: 0.06 }), 1200); }
+}
+function projGalRenderCards() {
+  const host = $('projCards'); if (!host) return;
+  const q = ($('projSearch').value || '').toLowerCase();
+  const list = _projData.filter(p => !q || p.name.toLowerCase().includes(q) || p.slug.includes(q));
+  host.innerHTML = '';
+  for (const p of list) {
+    const inQ = _projQueue.includes(p.slug);
+    const loc = p.center ? `${p.center.lat.toFixed(3)}, ${p.center.lon.toFixed(3)}` : 'no area yet';
+    const area = p.area_km2 != null ? ` · ${p.area_km2} km²` : '';
+    const prog = p.merged ? `${p.merged}/${p.cells} merged` : (p.cells ? `${p.cells} planned` : 'not planned');
+    const card = document.createElement('div');
+    card.style.cssText = 'border:1px solid ' + (p.active ? 'var(--acc2,#d6ba58)' : 'var(--line)') + ';border-radius:6px;padding:8px 9px;background:' + (p.active ? 'rgba(214,186,88,.06)' : 'transparent');
+    card.innerHTML =
+      `<div style="display:flex;align-items:center;gap:6px">
+         <input type="checkbox" class="pqchk" ${inQ ? 'checked' : ''} title="Add to the render queue">
+         <span class="pname" style="font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>
+         ${p.active ? '<span style="font-size:10px;color:var(--acc2,#d6ba58);border:1px solid var(--acc2,#d6ba58);border-radius:3px;padding:0 4px">ACTIVE</span>' : ''}
+       </div>
+       <div class="stat" style="margin-top:3px;color:var(--mut,#9a917f);font-size:11px">📍 ${loc}${area} · 1:${p.scale ? Math.round(1 / p.scale) : '?'} · ${prog}</div>
+       <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">
+         <button class="sec pOpen" style="width:auto;padding:3px 8px;font-size:11px"${p.active ? ' disabled' : ''}>Open</button>
+         <button class="sec pLoc" style="width:auto;padding:3px 8px;font-size:11px"${p.bbox ? '' : ' disabled'}>📍 Locate</button>
+         <button class="sec pClone" style="width:auto;padding:3px 8px;font-size:11px">⧉ Clone</button>
+         <button class="sec pRen" style="width:auto;padding:3px 8px;font-size:11px">✎ Rename</button>
+         <button class="sec xbtn pDel" style="width:auto;padding:3px 8px;font-size:11px"${p.active ? ' disabled' : ''}>🗑</button>
+       </div>`;
+    card.querySelector('.pqchk').onchange = (e) => {
+      if (e.target.checked) { if (!_projQueue.includes(p.slug)) _projQueue.push(p.slug); }
+      else { _projQueue = _projQueue.filter(s => s !== p.slug); }
+      projGalRenderQueue();
+    };
+    card.querySelector('.pLoc').onclick = () => projGalLocate(p.slug);
+    card.querySelector('.pOpen').onclick = async () => {
+      if (!(await modalConfirm('Open project', `Switch to "${p.name}"? The page reloads into its workspace.`, 'Open'))) return;
+      const rr = await api('/api/projects/switch', { slug: p.slug });
+      if (!rr.ok) { modalInfo('Meld', rr.error || 'cannot switch'); return; }
+      location.reload();
+    };
+    card.querySelector('.pClone').onclick = () => projGalClone(p);
+    card.querySelector('.pRen').onclick = () => projGalRename(p, card);
+    card.querySelector('.pDel').onclick = async () => {
+      if (!(await modalConfirm('Delete project', `Delete the workspace for "${p.name}"? The saved Minecraft world on disk is KEPT.`, 'Delete'))) return;
+      const rr = await api('/api/projects/delete', { slug: p.slug });
+      if (!rr.ok) { modalInfo('Meld', rr.error || 'failed'); return; }
+      projGalRefresh(); loadProjects();
+    };
+    host.appendChild(card);
+  }
+  if (!list.length) host.innerHTML = '<div class="stat" style="color:var(--mut,#9a917f);padding:8px">no projects match.</div>';
+}
+async function projGalClone(p) {
+  const mode = await _meldModal({ title: 'Clone "' + p.name + '"', html: _nl2br(
+    'Copy all settings into a new project.\n\nSame area: also copies the selection and origin, ready to generate as-is.\nNew area: settings only, draw a fresh selection.'), buttons: [
+      { label: 'Cancel', value: null, kind: 'ghost' },
+      { label: 'New area', value: 'new', kind: 'ghost' },
+      { label: 'Same area', value: 'same', kind: 'gold' }] });
+  if (!mode) return;
+  const rr = await api('/api/projects/clone', { slug: p.slug, keep_selection: mode === 'same' });
+  if (!rr.ok) { modalInfo('Meld', rr.error || 'clone failed'); return; }
+  projGalRefresh(); loadProjects();
+}
+function projGalRename(p, card) {
+  const nameEl = card.querySelector('.pname');
+  if (card.querySelector('.preninput')) return;
+  const inp = document.createElement('input');
+  inp.className = 'preninput'; inp.value = p.name;
+  inp.style.cssText = 'flex:1;min-width:0;padding:2px 5px;font-size:12px';
+  nameEl.replaceWith(inp); inp.focus(); inp.select();
+  const commit = async () => {
+    const name = inp.value.trim();
+    if (name && name !== p.name) {
+      const rr = await api('/api/projects/rename', { slug: p.slug, name });
+      if (!rr.ok) { modalInfo('Meld', rr.error || 'rename failed'); }
+    }
+    projGalRefresh(); loadProjects();
+  };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.value = p.name; inp.blur(); } });
+  inp.addEventListener('blur', commit);
+}
+function projGalRenderQueue() {
+  const host = $('projQueueList'); if (!host) return;
+  if (!_projQueue.length) { host.innerHTML = '<div class="stat" style="color:var(--mut,#9a917f)">Check projects above to queue them. They render top to bottom.</div>'; return; }
+  host.innerHTML = '';
+  _projQueue.forEach((slug, i) => {
+    const p = _projData.find(x => x.slug === slug); if (!p) return;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 0';
+    row.innerHTML = `<span style="width:16px;color:var(--mut,#9a917f)">${i + 1}.</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>`;
+    const up = document.createElement('button'); up.className = 'sec'; up.textContent = '↑'; up.style.cssText = 'width:auto;padding:0 6px;font-size:11px';
+    const dn = document.createElement('button'); dn.className = 'sec'; dn.textContent = '↓'; dn.style.cssText = 'width:auto;padding:0 6px;font-size:11px';
+    const rm = document.createElement('button'); rm.className = 'sec xbtn'; rm.textContent = '✕'; rm.style.cssText = 'width:auto;padding:0 6px;font-size:11px';
+    up.onclick = () => { if (i > 0) { [_projQueue[i - 1], _projQueue[i]] = [_projQueue[i], _projQueue[i - 1]]; projGalRenderQueue(); } };
+    dn.onclick = () => { if (i < _projQueue.length - 1) { [_projQueue[i + 1], _projQueue[i]] = [_projQueue[i], _projQueue[i + 1]]; projGalRenderQueue(); } };
+    rm.onclick = () => { _projQueue = _projQueue.filter(s => s !== slug); projGalRenderCards(); projGalRenderQueue(); };
+    row.append(up, dn, rm); host.appendChild(row);
+  });
+}
+let _rqCurrent = null;
+function renderQueueStatus(rq) {
+  rq = rq || {};
+  const start = $('projQueueStart'), stop = $('projQueueStop'), note = $('projQueueNote');
+  if (stop) stop.style.display = rq.active ? '' : 'none';
+  if (start) start.style.display = rq.active ? 'none' : '';
+  if (note) {
+    if (rq.active) {
+      const cur = _projData.find(p => p.slug === rq.current);
+      note.textContent = `— ${rq.idx + 1}/${rq.total} · ${cur ? cur.name : (rq.current || '…')} · ${rq.note || ''}`;
+    } else if (rq.results && rq.results.length) {
+      note.textContent = `— ${rq.note || 'done'} (${rq.results.filter(r => /done/.test(r.status)).length}/${rq.results.length})`;
+    } else note.textContent = '';
+  }
+  // When the queue advances to a new project, refresh the gallery so ACTIVE + progress follow it.
+  if (rq.active && rq.current !== _rqCurrent && $('projOverlay').style.display !== 'none') {
+    _rqCurrent = rq.current; projGalRefresh();
+  }
+  if (!rq.active) _rqCurrent = null;
+}
+if ($('btnProjectGallery')) $('btnProjectGallery').onclick = projGalOpen;
+if ($('projGalClose')) $('projGalClose').onclick = projGalClose;
+if ($('projSearch')) $('projSearch').oninput = projGalRenderCards;
+if ($('projGalNew')) $('projGalNew').onclick = async () => {
+  const rr = await api('/api/projects/new', {});
+  if (!rr.ok) { modalInfo('Meld', rr.error || 'failed'); return; }
+  location.reload();
+};
+if ($('projQueueStart')) $('projQueueStart').onclick = async () => {
+  if (!_projQueue.length) { modalInfo('Meld', 'Check at least one project to queue.'); return; }
+  if (!(await modalConfirm('Render queue', `Render ${_projQueue.length} project(s) one after another, in order? Meld switches to each, plans its cells from the saved selection, generates, then moves on. This runs unattended.`, 'Render all'))) return;
+  const rr = await api('/api/projects/render-queue', { slugs: _projQueue });
+  if (!rr.ok) { modalInfo('Meld', rr.error || 'failed'); return; }
+};
+if ($('projQueueStop')) $('projQueueStop').onclick = () => api('/api/projects/render-queue/stop', {});
 $('btnBrowse').onclick = async () => {
   $('btnBrowse').textContent = 'Opening…'; $('btnBrowse').disabled = true;
   try {
@@ -3859,6 +4057,8 @@ async function poll() {
     // Missing-region final check: black squares + ⚠️ + the Retry-missing button.
     _missing = s.missing || [];
     renderMissing(_missing);
+    // Render queue: live note + Start/Stop toggle + refresh the gallery when it advances.
+    renderQueueStatus(s.render_queue);
     // Drop retry marks whose cell no longer exists (cleared / removed) so the blue ring + count
     // don't become ghosts that outlive the cell.
     for (const k of _retryQueue) if (!(s.grid && k in s.grid)) _retryQueue.delete(k);

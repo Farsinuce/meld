@@ -167,6 +167,13 @@ _RUN = {"started": None, "ended": None, "total": 0, "done": 0, "failed": 0,
         "est_regions": 0, "est_mb": 0, "actual_mb": None, "phase": "idle"}
 MB_PER_REGION = 4   # rough estimate for the size report
 
+# ── render queue: generate several projects one after another, unattended ──────
+# Each entry is a project slug; the driver switches to it, plans its cells from the
+# saved selection, generates, waits for the run (+ export) to finish, then advances.
+_RQ_LOCK = threading.Lock()
+_RQ = {"active": False, "stop": False, "slugs": [], "idx": 0, "current": None,
+       "results": [], "note": ""}
+
 # ── post-generation export/compression status (drives the progress view) ──────
 # Populated by the export post-pass that runs once all cells are merged. See
 # src/export.py + repo MELD_EXPORT_PLAN.md. Reset at the start of each run.
@@ -3369,11 +3376,25 @@ def _project_info(slug: str) -> dict:
     except Exception:
         pass
     s = data.get("settings") or {}
+    sel = data.get("selection") or {}
+    bbox = sel.get("bbox") if isinstance(sel, dict) else None
+    center = area_km2 = None
+    if isinstance(bbox, dict) and all(k in bbox for k in ("south", "west", "north", "east")):
+        clat = (float(bbox["south"]) + float(bbox["north"])) / 2.0
+        clon = (float(bbox["west"]) + float(bbox["east"])) / 2.0
+        center = {"lat": clat, "lon": clon}
+        mid = math.radians(clat)
+        w_m = (float(bbox["east"]) - float(bbox["west"])) * 111_320.0 * math.cos(mid)
+        h_m = (float(bbox["north"]) - float(bbox["south"])) * 111_320.0
+        area_km2 = round(abs(w_m * h_m) / 1_000_000.0, 1)
+    origin = data.get("origin") or {}
     return {
         "slug": slug, "name": data.get("name", slug),
         "save_location": (s.get("master_world_dir") or "").strip(),
         "cells": len(grid), "merged": sum(1 for v in grid.values() if v == "merged"),
         "scale": s.get("scale"), "active": slug == ACTIVE_SLUG,
+        "bbox": bbox, "center": center, "area_km2": area_km2,
+        "has_origin": origin.get("lat") is not None,
     }
 
 
@@ -3441,6 +3462,44 @@ def api_projects_new():
     return jsonify({"ok": True, "slug": slug, "name": name})
 
 
+@app.route("/api/projects/clone", methods=["POST"])
+def api_projects_clone():
+    """Duplicate a project's SELECTION + all SETTINGS (and, by default, its origin) into a NEW
+    project with a fresh workspace (no grid/cells/world copied), so you can immediately regenerate
+    the same area, or clear the selection and draw a new one. Does NOT switch to the clone."""
+    d = request.json or {}
+    src_slug = _slugify(d.get("slug") or ACTIVE_SLUG)
+    src_root = PROJECTS_ROOT / src_slug
+    if not (src_root / "project.json").exists():
+        return jsonify({"ok": False, "error": "source project not found"}), 404
+    keep_selection = bool(d.get("keep_selection", True))
+    try:
+        src = json.loads((src_root / "project.json").read_text(encoding="utf-8"))
+    except Exception:
+        src = {}
+    base_name = src.get("name") or src_slug
+    name = (d.get("name") or "").strip() or f"{base_name} (copy)"
+    base = _slugify(name)
+    slug, i = base, 2
+    while (PROJECTS_ROOT / slug / "project.json").exists():
+        slug = f"{base}-{i}"
+        i += 1
+    p = Project(PROJECTS_ROOT / slug)
+    data = p.load()                                   # defaults
+    data["name"] = name
+    data["settings"] = dict(src.get("settings") or {})  # copy ALL settings verbatim
+    if keep_selection and (src.get("selection") or {}).get("bbox"):
+        data["selection"] = src["selection"]
+        if (src.get("origin") or {}).get("lat") is not None:
+            data["origin"] = dict(src["origin"])       # same area -> keep locked origin, generate as-is
+    else:
+        data.pop("selection", None)                    # new-area clone: same settings, draw fresh
+        data["origin"] = {"lat": None, "lon": None, "locked": False}
+    # deliberately DO NOT copy grid.json / cells / world / subworlds -> a clean workspace to (re)generate.
+    p.save(data)
+    return jsonify({"ok": True, "slug": slug, "name": name, "keep_selection": keep_selection})
+
+
 @app.route("/api/projects/rename", methods=["POST"])
 def api_projects_rename():
     d = request.json or {}
@@ -3472,6 +3531,128 @@ def api_projects_delete():
     shutil.rmtree(root, ignore_errors=True)
     return jsonify({"ok": True, "removed": slug,
                     "note": "project workspace removed (the saved world on disk is kept)"})
+
+
+# ── render queue: generate several projects one after another (unattended) ─────
+def _rq_export_idle() -> bool:
+    with _EXPORT_LOCK:
+        return _EXPORT.get("phase", "idle") in ("idle", "done", "complete", "")
+
+
+def _render_queue_worker() -> None:
+    """Drive the render queue: for each project, switch to it, plan its cells from the saved
+    selection (or its unfinished grid), generate, wait for the run AND export to fully finish,
+    then advance. Stop finishes the current project, then halts before the next."""
+    def record(slug, status):
+        with _RQ_LOCK:
+            _RQ["results"].append({"slug": slug, "status": status})
+        log(f"[Queue] {slug}: {status}")
+
+    while True:
+        with _RQ_LOCK:
+            if _RQ["stop"] or _RQ["idx"] >= len(_RQ["slugs"]):
+                _RQ.update(active=False, current=None,
+                           note=("stopped" if _RQ["stop"] else "queue complete"))
+                return
+            slug = _RQ["slugs"][_RQ["idx"]]
+            _RQ["current"] = slug
+            _RQ["note"] = f"preparing {slug}"
+
+        # settle any in-flight run/export before switching projects
+        t0 = time.time()
+        while (_run_active() or not _rq_export_idle()) and time.time() - t0 < 3600:
+            with _RQ_LOCK:
+                if _RQ["stop"]:
+                    _RQ.update(active=False, current=None, note="stopped")
+                    return
+            time.sleep(2.0)
+
+        res = _switch_project(slug)
+        if not res.get("ok"):
+            record(slug, f"skipped ({res.get('error')})")
+        else:
+            origin = PROJECT.origin()
+            settings = PROJECT.settings()
+            scale = float(settings.get("scale", 1.0) or 1.0)
+            grid = PROJECT.load_grid()
+            plan_keys = [k for k, v in grid.items() if v != "merged"]
+            cells = None
+            if origin.get("lat") is None:
+                record(slug, "skipped (no origin — set a selection first)")
+            else:
+                if plan_keys:
+                    cells = [{"cell_key": k, "bbox": _bbox_from_cell_key(k, origin, scale)}
+                             for k in plan_keys]
+                else:
+                    sel = PROJECT.load_selection()
+                    if sel and sel.get("bbox"):
+                        size = int(settings.get("job_size_regions") or 4)
+                        cells = cells_for_bbox(sel["bbox"], origin, scale, size)
+                if cells is None:
+                    record(slug, "skipped (no plan or selection)")
+                else:
+                    cells = [c for c in cells if grid.get(c["cell_key"]) != "merged"]
+                    if not cells:
+                        record(slug, "already complete")
+                    else:
+                        POOL.set_max_workers(min(WorkerPool.MAX_WORKERS_HARD_CAP,
+                                                 int(settings.get("max_workers") or 4)))
+                        with _RQ_LOCK:
+                            _RQ["note"] = f"generating {slug} ({len(cells)} cells)"
+                        _start_generation(cells, reset_timing=True)
+                        # wait until it has both STARTED and fully FINISHED (run + export settled).
+                        saw, settle, tw = False, 0, time.time()
+                        while time.time() - tw < 48 * 3600:
+                            busy = _run_active() or not _rq_export_idle()
+                            if busy:
+                                saw, settle = True, 0
+                            elif saw:
+                                settle += 1
+                                if settle >= 3:      # 3 idle polls after being active = done
+                                    break
+                            elif time.time() - tw > 150:   # never got busy = nothing ran
+                                break
+                            time.sleep(2.0)
+                        record(slug, "done")
+
+        with _RQ_LOCK:
+            _RQ["idx"] += 1
+
+
+@app.route("/api/projects/render-queue", methods=["POST"])
+def api_render_queue():
+    """Start rendering an ORDERED list of projects one after another, unattended."""
+    d = request.json or {}
+    slugs = [_slugify(s) for s in (d.get("slugs") or []) if isinstance(s, str)]
+    slugs = [s for s in slugs if (PROJECTS_ROOT / s / "project.json").exists()]
+    # de-dup preserving order
+    seen, ordered = set(), []
+    for s in slugs:
+        if s not in seen:
+            seen.add(s)
+            ordered.append(s)
+    if not ordered:
+        return jsonify({"ok": False, "error": "no valid projects in the queue"}), 400
+    if _run_active():
+        return jsonify({"ok": False, "error": "a generation is already running — stop it first"}), 409
+    with _RQ_LOCK:
+        if _RQ["active"]:
+            return jsonify({"ok": False, "error": "the render queue is already running"}), 409
+        _RQ.update(active=True, stop=False, slugs=ordered, idx=0, current=None,
+                   results=[], note="starting…")
+    threading.Thread(target=_render_queue_worker, daemon=True, name="render-queue").start()
+    return jsonify({"ok": True, "count": len(ordered)})
+
+
+@app.route("/api/projects/render-queue/stop", methods=["POST"])
+def api_render_queue_stop():
+    """Stop the render queue AFTER the current project finishes (does not abort the running one)."""
+    with _RQ_LOCK:
+        if not _RQ["active"]:
+            return jsonify({"ok": True, "note": "queue not running"})
+        _RQ["stop"] = True
+        _RQ["note"] = "stopping after the current project…"
+    return jsonify({"ok": True})
 
 
 @app.route("/api/new-world", methods=["POST"])
@@ -3562,6 +3743,10 @@ def api_status():
         cell_fail = dict(_CELL_FAIL)
     with _MISSING_LOCK:
         missing = [dict(m) for m in _MISSING]
+    with _RQ_LOCK:
+        render_queue = {"active": _RQ["active"], "current": _RQ["current"],
+                        "idx": _RQ["idx"], "total": len(_RQ["slugs"]), "slugs": list(_RQ["slugs"]),
+                        "results": list(_RQ["results"]), "note": _RQ["note"], "stop": _RQ["stop"]}
     with _EXPORT_LOCK:
         export = dict(_EXPORT)
     with _MCSERVER_LOCK:
@@ -3586,6 +3771,7 @@ def api_status():
         "prefetch": prefetch,
         "cell_health": suspects,
         "missing": missing,
+        "render_queue": render_queue,
         "stats": stats,
         "export": export,
         "mcserver": mcstat,
