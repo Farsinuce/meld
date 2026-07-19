@@ -164,14 +164,16 @@
           background:rgba(0,0,0,.30); border:1px solid var(--hair); }
   /* Collapsible glass drawer for tucking loose toggle clusters (props/3D families, etc.) into a
      tidy dropdown instead of a wall of checkboxes. Native <details>, no JS needed. */
-  details.drawer { border:1px solid var(--hair); border-radius:var(--rsm); background:var(--raise);
+  /* Flat drawers: NO tinted background — they blend with the card like the content around them;
+     just a hairline outline + the summary row. (The gray box read as a second panel.) */
+  details.drawer { border:1px solid var(--hair2); border-radius:var(--rsm); background:transparent;
     margin:7px 0; overflow:hidden; }
   details.drawer > summary { cursor:pointer; list-style:none; padding:6px 9px; font-size:12px;
     color:var(--acc2); display:flex; align-items:center; gap:6px; user-select:none; }
   details.drawer > summary::-webkit-details-marker { display:none; }
   details.drawer > summary::before { content:'▸'; color:var(--acc); font-size:11px; transition:transform .12s; }
   details.drawer[open] > summary::before { transform:rotate(90deg); }
-  details.drawer > summary:hover { background:rgba(240,191,58,.08); }
+  details.drawer > summary:hover { color:#ffd86b; }
   details.drawer > .dbody { padding:2px 9px 9px; }
   /* also pad direct children (for drawers converted from plain divs, no .dbody wrapper) */
   details.drawer > :not(summary):not(.dbody) { padding-left:9px; padding-right:9px; }
@@ -793,9 +795,9 @@
         <label style="font-weight:normal;margin-top:4px"><input id="exportStreamFree" type="checkbox"> Stream &amp; free: delete each raw right after its compressed copy verifies (linear, low-disk — same as Delete raw)</label>
       </details>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
-        <button class="sec" id="btnExportRun" type="button" style="width:auto;padding:5px 9px" title="Compress (or RESUME compressing) the current world now with the selected format. Resumable after a stop — already-compressed regions are skipped.">⚙ Compress now</button>
-        <button class="sec" id="btnExportConvert" type="button" style="width:auto;padding:5px 9px" title="Convert this world's .linear region files back to vanilla .mca so it opens in single-player. Round-trip verified per region.">↩ .linear → .mca</button>
-        <button class="sec" id="btnExportReveal" type="button" style="width:auto;padding:5px 9px" title="Open the folder holding the world and its archive (.zip / .tar.zst) so you can grab it to share.">📦 Reveal archive</button>
+        <button class="sec" id="btnExportRun" type="button" style="flex:1;min-width:120px;padding:5px 9px;margin-top:0" title="Compress (or RESUME compressing) the current world now with the selected format. Resumable after a stop — already-compressed regions are skipped.">⚙ Compress now</button>
+        <button class="sec" id="btnExportConvert" type="button" style="flex:1;min-width:120px;padding:5px 9px;margin-top:0" title="Convert this world's .linear region files back to vanilla .mca so it opens in single-player. Round-trip verified per region.">↩ .linear → .mca</button>
+        <button class="sec" id="btnExportReveal" type="button" style="flex:1;min-width:120px;padding:5px 9px;margin-top:0" title="Open the folder holding the world and its archive (.zip / .tar.zst) so you can grab it to share.">📦 Reveal archive</button>
       </div>
       <div id="exportProgress" class="stat" style="margin-top:3px;display:none"></div>
       </details>
@@ -3596,6 +3598,11 @@ function syncCardMapLayers(slug, collapsed) {
     gen.card.appendChild(det);
     it.card.remove();
   }
+  // 3) Import world settings (.json) goes LAST in Generate, after the Edit & retry drawer.
+  ['btnImport', 'importFile', 'importMsg'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) gen.card.appendChild(el);
+  });
 })();
 
 (function initSections(){
