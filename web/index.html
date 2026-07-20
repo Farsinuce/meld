@@ -2355,17 +2355,25 @@ function renderQueueStatus(rq) {
       note.textContent = `— ${rq.note || 'done'} (${rq.results.filter(r => /done/.test(r.status)).length}/${rq.results.length})`;
     } else note.textContent = '';
   }
-  // When the queue advances to a new project, refresh so ACTIVE + progress follow it, and keep
-  // every queued project's area visible on the map (even with the gallery closed) so you can see
-  // them all at once — the currently-rendering one is highlighted by projGalDrawBoxes.
+  // When the queue advances to a new project, FOLLOW THE RENDER: re-anchor the map to the project
+  // the queue is rendering now. Without this the cell overlay stays anchored to the last-opened
+  // world's origin (its cells/area), because ensureCells() uses the page-load projOrigin/projScale.
+  // refreshState() re-reads /api/state (which is the active = current queue project server-side),
+  // resets projOrigin/projScale, rebuilds the cells at the right place, and restores the drawn area.
+  // Keep every queued project's area boxed on the map too, current one highlighted.
   if (rq.active && rq.current !== _rqCurrent) {
     _rqCurrent = rq.current;
+    _userDrew = false;                                  // let the queue project's saved area outline load
+    if (typeof refreshState === 'function') refreshState().catch(() => {});
+    const _recenter = () => { const p = _projData.find(x => x.slug === rq.current);
+      if (p && p.bbox) { try { map.fitBounds([[p.bbox.south, p.bbox.west], [p.bbox.north, p.bbox.east]],
+        { padding: [40, 40], maxZoom: 12 }); } catch (_) {} } };
     if ($('projOverlay').style.display !== 'none') {
-      projGalRefresh();
+      projGalRefresh(); _recenter();
     } else {
       if (!map.hasLayer(projGalGroup)) projGalGroup.addTo(map);
-      if (_projData.length) projGalDrawBoxes();
-      else api('/api/projects').then(r => { _projData = (r && r.projects) || []; projGalDrawBoxes(); }).catch(() => {});
+      if (_projData.length) { projGalDrawBoxes(); _recenter(); }
+      else api('/api/projects').then(r => { _projData = (r && r.projects) || []; projGalDrawBoxes(); _recenter(); }).catch(() => {});
     }
   }
   if (!rq.active) {
