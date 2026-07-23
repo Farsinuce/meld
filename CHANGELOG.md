@@ -31,7 +31,10 @@ preview of the pattern before you build. Bundles arnis fork 3.0.4.
 - **Texture more than farmland.** Two toggles in the Farmland drawer — "Also texture open
   grassland" (OSM meadow/grass/orchard) and "Also texture untagged land" (satellite
   cropland/grassland) — extend the field pattern to the large green areas that OSM leaves
-  blank, so they stop rendering as flat land.
+  blank, so they stop rendering as flat land. **Both are on by default** (most of a rural
+  plain is untagged cropland, which otherwise renders as endless stock wheat), villages
+  (residential areas) get grassy ground instead of crops, and a `land_mix` setting lets
+  untagged cropland use its own shares separate from real farmland.
 - **Sparser, better-placed rocks/bushes.** Scatter is now budgeted per 512×512 region
   (defaults 4 rocks / 8 bushes per region) instead of per cell, so they stay rare and
   evenly spread even on huge fields.
