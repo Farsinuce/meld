@@ -319,6 +319,12 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
         except (TypeError, ValueError):
             bd = 0
         cmd += ["--bushes", "--bush-density", str(bd)]
+    # Extend the field pattern beyond OSM farmland: OSM grassland, and untagged
+    # satellite land. Only sent when toggled on (default off => unchanged).
+    if settings.get("grass_texture"):
+        cmd.append("--grass-texture")
+    if settings.get("land_texture"):
+        cmd.append("--land-texture")
     return cmd
 
 

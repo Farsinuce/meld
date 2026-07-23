@@ -28,6 +28,13 @@ preview of the pattern before you build. Bundles arnis fork 3.0.4.
   clicked to enter an exact value, not just dragged.
 - **No stray snow on lowland farmland.** The bundled generator no longer speckles flat
   farmland with snow (snow now needs real mountain relief); genuine peaks still cap.
+- **Texture more than farmland.** Two toggles in the Farmland drawer — "Also texture open
+  grassland" (OSM meadow/grass/orchard) and "Also texture untagged land" (satellite
+  cropland/grassland) — extend the field pattern to the large green areas that OSM leaves
+  blank, so they stop rendering as flat land.
+- **Sparser, better-placed rocks/bushes.** Scatter is now budgeted per 512×512 region
+  (defaults 4 rocks / 8 bushes per region) instead of per cell, so they stay rare and
+  evenly spread even on huge fields.
 
 ## [1.7.0] - 2026-07-19 - "Meld Compass"
 

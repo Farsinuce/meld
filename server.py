@@ -2562,16 +2562,20 @@ def api_settings():
         patch["rocks"] = bool(patch["rocks"])
     if patch.get("bushes") is not None:
         patch["bushes"] = bool(patch["bushes"])
+    if patch.get("grass_texture") is not None:
+        patch["grass_texture"] = bool(patch["grass_texture"])
+    if patch.get("land_texture") is not None:
+        patch["land_texture"] = bool(patch["land_texture"])
     if patch.get("rock_density") is not None:
         try:
             patch["rock_density"] = max(0, min(64, int(patch["rock_density"])))
         except (TypeError, ValueError):
-            patch["rock_density"] = 8
+            patch["rock_density"] = 4
     if patch.get("bush_density") is not None:
         try:
             patch["bush_density"] = max(0, min(64, int(patch["bush_density"])))
         except (TypeError, ValueError):
-            patch["bush_density"] = 12
+            patch["bush_density"] = 8
     if patch.get("cpu_stagger_seconds") is not None:
         patch["cpu_stagger_seconds"] = max(1, min(4, int(round(float(patch["cpu_stagger_seconds"])))))
     if patch.get("cpu_stagger_enabled") is not None:

@@ -67,10 +67,15 @@ def default_settings() -> dict:
         "field_mix": {"coarse": 0, "plains": 0, "flower": 0, "farm": 100, "moss": 0},
         # Scatter small schematic props on farmland (off by default). density = relative
         # amount 0..64; only sent to the fork when the toggle is on.
+        # Scatter counts are now per 512x512 region (not per cell) so they stay sparse.
         "rocks": False,
-        "rock_density": 8,
+        "rock_density": 4,
         "bushes": False,
-        "bush_density": 12,
+        "bush_density": 8,
+        # Also texture OSM grassland (meadow/grass/orchard) and untagged satellite land
+        # with the field pattern, not just OSM farmland. Off = unchanged.
+        "grass_texture": False,
+        "land_texture": False,
         "elevation_mode": "global",         # global = locked range, no cliffs
         # Vertical exaggeration: multiplies terrain HEIGHT only (not footprint). 1.0 = true scale;
         # 2-3 = dramatic mountains at the same map size. Auto-compresses to the build height.
