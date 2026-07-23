@@ -73,9 +73,13 @@ def default_settings() -> dict:
         "bushes": False,
         "bush_density": 1,
         # Also texture OSM grassland (meadow/grass/orchard) and untagged satellite land
-        # with the field pattern, not just OSM farmland. Off = unchanged.
-        "grass_texture": False,
-        "land_texture": False,
+        # with the field pattern, not just OSM farmland. ON by default: most of the plain
+        # is untagged ESA cropland and would otherwise render as endless stock wheat
+        # (verified by block audit). Untick for stock-arnis surfaces.
+        "grass_texture": True,
+        "land_texture": True,
+        # Optional separate mix for untagged satellite cropland ('' = reuse field_mix).
+        "land_mix": "",
         "elevation_mode": "global",         # global = locked range, no cliffs
         # Vertical exaggeration: multiplies terrain HEIGHT only (not footprint). 1.0 = true scale;
         # 2-3 = dramatic mountains at the same map size. Auto-compresses to the build height.

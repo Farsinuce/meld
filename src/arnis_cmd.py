@@ -313,11 +313,15 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     if settings.get("bushes"):
         cmd += ["--bushes", "--bush-density", "1"]
     # Extend the field pattern beyond OSM farmland: OSM grassland, and untagged
-    # satellite land. Only sent when toggled on (default off => unchanged).
+    # satellite land (both ON by default — most of the plain is untagged cropland).
     if settings.get("grass_texture"):
         cmd.append("--grass-texture")
     if settings.get("land_texture"):
         cmd.append("--land-texture")
+        # Optional separate mix for untagged cropland; '' = reuse --field-mix.
+        lm = str(settings.get("land_mix") or "").strip()
+        if lm:
+            cmd += ["--land-mix", lm]
     return cmd
 
 

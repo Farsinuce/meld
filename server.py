@@ -2566,6 +2566,9 @@ def api_settings():
         patch["grass_texture"] = bool(patch["grass_texture"])
     if patch.get("land_texture") is not None:
         patch["land_texture"] = bool(patch["land_texture"])
+    if patch.get("land_mix") is not None:
+        # Free-form name=pct spec; keep it short and stripped (arnis ignores bad keys).
+        patch["land_mix"] = str(patch["land_mix"]).strip()[:128]
     if patch.get("rock_density") is not None:
         try:
             patch["rock_density"] = max(0, min(64, int(patch["rock_density"])))

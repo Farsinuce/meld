@@ -565,11 +565,11 @@
         <div style="font-size:11px;color:#9aa;margin:2px 0 3px">Relative shares over farmland. Default = all Farmland (unchanged).</div>
         <div id="fieldMixSliders" style="margin-top:2px"></div>
         <label style="margin-top:6px">Also texture open grassland
-          <span class="i" title="Apply the pattern to OSM meadow / grass / greenfield / orchard too (large loose grassy plots), not just farmland. Uses a built-in grassy profile.">i</span>
-          <input id="grass_texture" type="checkbox"></label>
+          <span class="i" title="Apply the pattern to OSM meadow / grass / greenfield / orchard too (large loose grassy plots), not just farmland. Uses a built-in grassy profile. On by default.">i</span>
+          <input id="grass_texture" type="checkbox" checked></label>
         <label style="margin-top:3px">Also texture untagged land
-          <span class="i" title="Apply the pattern to land that OSM never tagged, using satellite land-cover: cropland gets the farmland mix, grassland gets the grassy profile. Covers the big plain green areas that OSM leaves blank.">i</span>
-          <input id="land_texture" type="checkbox"></label>
+          <span class="i" title="Apply the pattern to land that OSM never tagged, using satellite land-cover: cropland gets your mix, grassland gets the grassy profile, and villages (residential areas) get grassy ground instead of wheat. Covers the big plain areas that OSM leaves blank — without this, they render as endless stock crops. On by default.">i</span>
+          <input id="land_texture" type="checkbox" checked></label>
         <label style="margin-top:6px">Scatter rocks
           <span class="i" title="Drop andesite/tuff rock formations at random rotations — roughly one per 512×512 region of field (kept deliberately sparse).">i</span>
           <input id="rocks" type="checkbox"></label>
@@ -3080,10 +3080,10 @@ if ($('fmReset')) $('fmReset').onclick = async () => {
   FIELD_MIX.forEach(([k, , def]) => { const el = $('fm_' + k); if (el) el.value = def; });
   if ($('rocks')) $('rocks').checked = false;
   if ($('bushes')) $('bushes').checked = false;
-  if ($('grass_texture')) $('grass_texture').checked = false;
-  if ($('land_texture')) $('land_texture').checked = false;
+  if ($('grass_texture')) $('grass_texture').checked = true;   // default ON
+  if ($('land_texture')) $('land_texture').checked = true;     // default ON
   fmPaint(); fmSyncRows();
-  await Promise.all([fmSave(), api('/api/settings', { rocks: false, bushes: false, grass_texture: false, land_texture: false })]);
+  await Promise.all([fmSave(), api('/api/settings', { rocks: false, bushes: false, grass_texture: true, land_texture: true })]);
   if (_fieldShown) renderFieldPreview();
 };
 // Preview: patchwork of the mix (one filled cell per ~7-block patch) + rock/bush dots.
