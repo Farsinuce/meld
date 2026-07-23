@@ -19,12 +19,15 @@ preview of the pattern before you build. Bundles arnis fork 3.0.4.
 - **Scattered rocks and bushes.** Toggle rocks (andesite/tuff formations) and bushes
   (10 species) onto farmland, each with an amount slider. They are placed at random
   rotations in small numbers.
-- **Live pattern preview.** A "🌾 Preview pattern" canvas shows the farmland as coherent
-  blobs of each style (matching how the generator lays them down — big organic fields,
-  not pixel static) plus evenly-scattered dots for rocks and bushes, with a live legend
-  and scroll-to-zoom / drag-to-pan. Updates as you drag the sliders.
+- **Live pattern preview.** A "🌾 Preview pattern" canvas shows the farmland as
+  rectangular field parcels of each style (matching how the generator lays them down —
+  varied plot sizes, dirt-track boundaries, and internal ground variation) with farmland
+  drawn golden, plus evenly-scattered dots for rocks and bushes. Live legend,
+  scroll-to-zoom / drag-to-pan, and a wider area range to see the whole patchwork.
 - **Click any value to type it.** Every mix-share and scatter-amount number can be
   clicked to enter an exact value, not just dragged.
+- **No stray snow on lowland farmland.** The bundled generator no longer speckles flat
+  farmland with snow (snow now needs real mountain relief); genuine peaks still cap.
 
 ## [1.7.0] - 2026-07-19 - "Meld Compass"
 

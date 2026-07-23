@@ -2918,11 +2918,11 @@ function _vnoise(x, z, s){
 // ── Preview window: NxN Minecraft regions (512 blocks each), centered on the selection ──
 // The default is 3x3 so previews start zoomed to LOCAL detail instead of the whole selection.
 // The −/+ stepper widens/tightens the window (re-renders); makeZoomable's scroll zooms within it.
-const _winRegions = { climate: 7, cave: 3, tree: 3, field: 1 };   // climate opens more zoomed-out; field starts tight (per-plot detail)
+const _winRegions = { climate: 7, cave: 3, tree: 3, field: 2 };   // climate opens more zoomed-out; field shows a few plots by default
 // Per-preview window limits: tree stays LOCAL (1x1..3x3, tree dots are per-block detail);
 // climate/cave can pull far out (up to 100x100 regions).
 const _winCfg = { climate: { min: 1, max: 100, step: 2 }, cave: { min: 1, max: 100, step: 2 },
-                  tree: { min: 1, max: 3, step: 1 }, field: { min: 1, max: 4, step: 1 } };
+                  tree: { min: 1, max: 3, step: 1 }, field: { min: 1, max: 8, step: 1 } };
 function wireWindow(key, prefix, render){
   const wo = $(prefix + 'Wout'), wi = $(prefix + 'Win'), lbl = $(prefix + 'Wlbl');
   const cfg = _winCfg[key] || { min: 1, max: 100, step: 2 };
@@ -3011,8 +3011,13 @@ const FIELD_MIX = [
   ['coarse', 'Coarse dirt', 0], ['plains', 'Plains', 0], ['flower', 'Flowers', 0],
   ['farm', 'Farmland', 100], ['moss', 'Moss', 0]];
 const FIELD_COLORS = {
-  coarse: [150, 120, 80], plains: [120, 175, 85], flower: [168, 188, 96],
-  farm: [122, 88, 54], moss: [74, 116, 58],
+  coarse: [150, 120, 80], plains: [120, 175, 85], flower: [150, 186, 96],
+  farm: [206, 186, 76], moss: [74, 116, 58],   // farm = golden wheat/tilled
+};
+// Surface-block colours for the intra-parcel sub-noise (mirrors field_texture.rs).
+const FIELD_BLOCK_COL = {
+  coarse: [150, 120, 80], dirt: [134, 96, 67], grass: [120, 175, 85],
+  moss: [74, 116, 58], farm: [206, 186, 76], track: [152, 132, 96],
 };
 const _FIELD_ORDER = ['coarse', 'plains', 'flower', 'farm', 'moss'];
 (function buildFieldMixSliders(){
@@ -3103,26 +3108,49 @@ function renderFieldPreview(){
   const W = c.width, H = c.height, ctx = c.getContext('2d');
   ctx.clearRect(0, 0, W, H);
   const span = _winRegions.field * 512;                   // blocks across this window
-  // Blob params must match field_texture.rs so the preview reads like the real gen.
-  const BLOB = 24, WARP = 14, WSCALE = 40;
-  const STEP = Math.max(2, Math.round(span / 190));       // fine sampling => smooth blobs, not blocky pixels
+  // Parcel params must match field_texture.rs so the preview reads like the real gen.
+  const MACRO = 160, F_WARP = 4, F_WSCALE = 24, F_SUB = 6;
+  const STEP = Math.max(1, Math.round(span / 300));        // fine sample => crisp parcels, patches + tracks
   const n = Math.max(8, Math.round(span / STEP));
   const cell = W / n;
   const [cx, cz] = _selCenterBlock(), bx0 = cx - span / 2, bz0 = cz - span / 2;
-  const catAt = (bx, bz) => {
-    const wx = _vnoise(bx + 1000, bz - 500, WSCALE), wz = _vnoise(bx - 700, bz + 1300, WSCALE);
-    const sx = Math.round(bx + (wx - 0.5) * 2 * WARP), sz = Math.round(bz + (wz - 0.5) * 2 * WARP);
-    const bbx = Math.floor(sx / BLOB), bbz = Math.floor(sz / BLOB);
-    const target = (_treeHash(bbx, bbz ^ 0x5f3) / 1000) * sum;
-    let cat = 3, cum = 0;
-    for (let i = 0; i < 5; i++){ cum += weights[i]; if (target < cum){ cat = i; break; } }
-    return cat;
+  const parcelSize = (mx, mz) => [18, 30, 46][_treeHash((mx ^ 0x51ed), mz * 7) % 3];
+  const catForParcel = (px, pz) => {
+    if (sum <= 0) return 3;
+    const target = (_treeHash(px, pz ^ 0x5f3) / 1000) * sum;
+    let c = 3, cum = 0;
+    for (let i = 0; i < 5; i++){ cum += weights[i]; if (target < cum){ c = i; break; } }
+    return c;
+  };
+  const parcelAt = (x, z) => {
+    const wx = _vnoise(x + 1000, z - 500, F_WSCALE), wz = _vnoise(x - 700, z + 1300, F_WSCALE);
+    const sx = Math.round(x + (wx - 0.5) * 2 * F_WARP), sz = Math.round(z + (wz - 0.5) * 2 * F_WARP);
+    const ps = parcelSize(Math.floor(sx / MACRO), Math.floor(sz / MACRO));
+    return [Math.floor(sx / ps), Math.floor(sz / ps), ps, ((sx % ps) + ps) % ps, ((sz % ps) + ps) % ps];
+  };
+  const cellColor = (x, z) => {
+    const [px, pz, ps, lx, lz] = parcelAt(x, z);
+    const cat = catForParcel(px, pz);
+    if (lx === 0 || lz === 0 || lx === ps - 1 || lz === ps - 1){
+      let nx = px, nz = pz;
+      if (lx === 0) nx = px - 1; else if (lx === ps - 1) nx = px + 1;
+      else if (lz === 0) nz = pz - 1; else nz = pz + 1;
+      if (catForParcel(nx, nz) !== cat && (_treeHash(px ^ nx, (pz ^ nz) ^ 0x7a11) % 100) < 45)
+        return [FIELD_BLOCK_COL.track, cat];
+    }
+    const s = Math.floor(_vnoise(x, z, F_SUB) * 1000);
+    let col;
+    if (cat === 0) col = s < 300 ? FIELD_BLOCK_COL.dirt : (s < 360 ? FIELD_BLOCK_COL.grass : FIELD_BLOCK_COL.coarse);
+    else if (cat === 4) col = s < 300 ? FIELD_BLOCK_COL.grass : (s < 370 ? FIELD_BLOCK_COL.coarse : FIELD_BLOCK_COL.moss);
+    else if (cat === 3) col = FIELD_BLOCK_COL.farm;
+    else if (cat === 2) col = FIELD_COLORS.flower;
+    else col = FIELD_BLOCK_COL.grass;
+    return [col, cat];
   };
   const counts = [0, 0, 0, 0, 0];
   for (let gy = 0; gy < n; gy++) for (let gx = 0; gx < n; gx++){
-    const cat = catAt(Math.round(bx0 + gx * STEP), Math.round(bz0 + gy * STEP));
+    const [col, cat] = cellColor(Math.round(bx0 + gx * STEP), Math.round(bz0 + gy * STEP));
     counts[cat]++;
-    const col = FIELD_COLORS[_FIELD_ORDER[cat]];
     ctx.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
     ctx.fillRect(Math.floor(gx * cell), Math.floor(gy * cell), Math.ceil(cell) + 1, Math.ceil(cell) + 1);
   }
