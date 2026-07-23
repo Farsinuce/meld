@@ -2903,6 +2903,18 @@ function _treeHash(x, y){   // cheap uniform 32-bit hash -> [0,1000); only the M
   h = Math.imul(h ^ (h >>> 15), 0xC2B2AE3D); h ^= h >>> 13;
   return (h >>> 0) % 1000;
 }
+// Smoothstep value-noise in [0,1), lattice period s — same shape as the fork's
+// value_noise_01. Seed/position differ, so blob SIZE + proportions match, not exact spots.
+function _vnoise(x, z, s){
+  s = Math.max(1, s | 0);
+  const x0 = Math.floor(x / s) * s, z0 = Math.floor(z / s) * s, x1 = x0 + s, z1 = z0 + s;
+  const tx = (x - x0) / s, tz = (z - z0) / s;
+  const fx = tx * tx * (3 - 2 * tx), fz = tz * tz * (3 - 2 * tz);
+  const smp = (a, b) => _treeHash(a, b) / 1000;
+  const v00 = smp(x0, z0), v10 = smp(x1, z0), v01 = smp(x0, z1), v11 = smp(x1, z1);
+  const a = v00 * (1 - fx) + v10 * fx, b = v01 * (1 - fx) + v11 * fx;
+  return a * (1 - fz) + b * fz;
+}
 // ── Preview window: NxN Minecraft regions (512 blocks each), centered on the selection ──
 // The default is 3x3 so previews start zoomed to LOCAL detail instead of the whole selection.
 // The −/+ stepper widens/tightens the window (re-renders); makeZoomable's scroll zooms within it.
@@ -3030,10 +3042,37 @@ function fmSyncRows(){
   if ($('bushRow')) $('bushRow').style.display = ($('bushes') && $('bushes').checked) ? 'flex' : 'none';
 }
 let _fieldShown = false;
+// Click a value label to type an exact number (mix % or scatter amount).
+function _wireEditable(rangeEl, valEl, fmt, after){
+  if (!rangeEl || !valEl) return;
+  valEl.style.cursor = 'pointer';
+  valEl.style.textDecoration = 'underline dotted #55503f';
+  valEl.title = 'Click to type an exact value';
+  valEl.onclick = () => {
+    if (valEl.querySelector('input')) return;
+    const cur = parseInt(rangeEl.value, 10);
+    const lo = parseInt(rangeEl.min, 10), hi = parseInt(rangeEl.max, 10);
+    valEl.textContent = '';
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.min = lo; inp.max = hi; inp.step = rangeEl.step || 1; inp.value = cur;
+    inp.style.cssText = 'width:46px;font-size:11px;padding:1px 2px';
+    const commit = () => {
+      let v = parseInt(inp.value, 10); if (isNaN(v)) v = cur;
+      v = Math.max(lo, Math.min(hi, v));
+      rangeEl.value = v; inp.remove(); valEl.textContent = fmt(v);
+      if (typeof paintRange === 'function') paintRange(rangeEl);
+      after(v);
+    };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape'){ inp.value = cur; inp.blur(); } });
+    inp.addEventListener('blur', commit);
+    valEl.appendChild(inp); inp.focus(); inp.select();
+  };
+}
 FIELD_MIX.forEach(([k]) => {
   const el = $('fm_' + k); if (!el) return;
   el.oninput = () => { fmPaint(); if (_fieldShown) renderFieldPreview(); };
   el.onchange = fmSave;
+  _wireEditable(el, $('fmv_' + k), v => v + '%', () => { fmPaint(); if (_fieldShown) renderFieldPreview(); fmSave(); });
 });
 ['rocks', 'bushes'].forEach(id => {
   const el = $(id); if (!el) return;
@@ -3044,6 +3083,7 @@ FIELD_MIX.forEach(([k]) => {
   const vs = $(id + 'v');
   el.oninput = () => { if (vs) vs.textContent = el.value; if (typeof paintRange === 'function') paintRange(el); if (_fieldShown) renderFieldPreview(); };
   el.onchange = () => api('/api/settings', { [id]: parseInt(el.value, 10) });
+  _wireEditable(el, vs, v => String(v), v => { if (_fieldShown) renderFieldPreview(); api('/api/settings', { [id]: v }); });
 });
 if ($('fmReset')) $('fmReset').onclick = async () => {
   FIELD_MIX.forEach(([k, , def]) => { const el = $('fm_' + k); if (el) el.value = def; });
@@ -3063,41 +3103,52 @@ function renderFieldPreview(){
   const W = c.width, H = c.height, ctx = c.getContext('2d');
   ctx.clearRect(0, 0, W, H);
   const span = _winRegions.field * 512;                   // blocks across this window
-  const PATCH = 7;                                        // matches the fork's patch size
-  const n = Math.max(8, Math.round(span / PATCH));
+  // Blob params must match field_texture.rs so the preview reads like the real gen.
+  const BLOB = 24, WARP = 14, WSCALE = 40;
+  const STEP = Math.max(2, Math.round(span / 190));       // fine sampling => smooth blobs, not blocky pixels
+  const n = Math.max(8, Math.round(span / STEP));
   const cell = W / n;
   const [cx, cz] = _selCenterBlock(), bx0 = cx - span / 2, bz0 = cz - span / 2;
-  const counts = [0, 0, 0, 0, 0];
-  for (let gy = 0; gy < n; gy++) for (let gx = 0; gx < n; gx++){
-    const bx = Math.floor((bx0 + gx * PATCH) / PATCH), bz = Math.floor((bz0 + gy * PATCH) / PATCH);
-    const target = (_treeHash(bx * 2 + 13, (bz ^ 0x5f3) + 29) / 1000) * sum;
+  const catAt = (bx, bz) => {
+    const wx = _vnoise(bx + 1000, bz - 500, WSCALE), wz = _vnoise(bx - 700, bz + 1300, WSCALE);
+    const sx = Math.round(bx + (wx - 0.5) * 2 * WARP), sz = Math.round(bz + (wz - 0.5) * 2 * WARP);
+    const bbx = Math.floor(sx / BLOB), bbz = Math.floor(sz / BLOB);
+    const target = (_treeHash(bbx, bbz ^ 0x5f3) / 1000) * sum;
     let cat = 3, cum = 0;
     for (let i = 0; i < 5; i++){ cum += weights[i]; if (target < cum){ cat = i; break; } }
+    return cat;
+  };
+  const counts = [0, 0, 0, 0, 0];
+  for (let gy = 0; gy < n; gy++) for (let gx = 0; gx < n; gx++){
+    const cat = catAt(Math.round(bx0 + gx * STEP), Math.round(bz0 + gy * STEP));
     counts[cat]++;
     const col = FIELD_COLORS[_FIELD_ORDER[cat]];
     ctx.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
-    ctx.fillRect(Math.floor(gx * cell), Math.floor(gy * cell), Math.ceil(cell), Math.ceil(cell));
+    ctx.fillRect(Math.floor(gx * cell), Math.floor(gy * cell), Math.ceil(cell) + 1, Math.ceil(cell) + 1);
   }
   // Scattered props over the patchwork. density (0..64) reads as a placement chance.
-  const drawScatter = (on, density, sp, rgb, rad) => {
+  // Even, jittered scatter mirroring the fork's scatter_pool: denser => tighter grid.
+  const drawScatter = (on, density, baseGap, rgb, rad, cluster) => {
     if (!on || density <= 0) return 0;
-    const SP = Math.max(6, sp);
-    const dn = Math.max(2, Math.round(span / SP));
-    const dcell = W / dn; let placed = 0;
-    for (let gy = 0; gy < dn; gy++) for (let gx = 0; gx < dn; gx++){
-      const bx = Math.floor(bx0 + gx * SP), bz = Math.floor(bz0 + gy * SP);
-      if ((_treeHash(bx + 771, bz + 917) % 64) >= density) continue;
-      const px = (gx + 0.5) * dcell, py = (gy + 0.5) * dcell;
+    const spacing = Math.max(6, Math.round(baseGap / Math.sqrt(Math.max(1, density))));
+    let placed = 0;
+    for (let bz = 0; bz < span; bz += spacing) for (let bx = 0; bx < span; bx += spacing){
+      const h = _treeHash(bx + Math.floor(bx0) + 771, bz + Math.floor(bz0) + 917);
+      const jx = h % spacing, jz = (Math.floor(h / 7)) % spacing;
+      const px = (bx + jx) / span * W, py = (bz + jz) / span * H;
       ctx.beginPath(); ctx.arc(px, py, rad, 0, 6.2832);
       ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`; ctx.fill(); placed++;
+      if (cluster && (h & 7) < 3){   // small clump companion (bushes)
+        ctx.beginPath(); ctx.arc(px + rad * 1.7, py + rad * 0.9, rad * 0.82, 0, 6.2832); ctx.fill(); placed++;
+      }
     }
     return placed;
   };
   const rockOn = $('rocks') && $('rocks').checked, bushOn = $('bushes') && $('bushes').checked;
   const rockD = $('rock_density') ? parseInt($('rock_density').value, 10) : 0;
   const bushD = $('bush_density') ? parseInt($('bush_density').value, 10) : 0;
-  const nrock = drawScatter(rockOn, rockD, 18, [158, 152, 142], Math.max(1.3, cell * 1.2));
-  const nbush = drawScatter(bushOn, bushD, 11, [64, 132, 58], Math.max(1.0, cell * 0.9));
+  const nrock = drawScatter(rockOn, rockD, 90, [162, 156, 146], Math.max(2, W / 110), false);
+  const nbush = drawScatter(bushOn, bushD, 60, [66, 138, 60], Math.max(1.6, W / 150), true);
   c.style.display = '';
   if (c._resetZoom) c._resetZoom();
   showWinRow('fm');
