@@ -559,6 +559,40 @@
         <canvas id="treeCanvas" width="288" height="288" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504;margin-top:5px"></canvas>
         <div id="treeLegend" class="stat" style="margin-top:3px"></div>
       </details>
+      <details id="fieldsWrap" class="drawer">
+        <summary>Farmland texture
+          <span class="i" title="Repaint OSM farmland as a mix of patch styles + scatter small rocks/bushes on it. The sliders are relative area shares (like the cave-biome sliders): each ~7-block plot becomes one style, so a plains=60 share makes ~60% of the farmland plains. Default is all Farmland (stock tilled crops) — leave it there and nothing changes. Rocks (andesite/tuff) and bushes (10 species) are placed at random rotations in small numbers. Preview shows the patchwork + scatter for your selection. Only affects landuse=farmland areas.">i</span></summary>
+        <div style="font-size:11px;color:#9aa;margin:2px 0 3px">Relative shares over OSM farmland. Default = all Farmland (unchanged).</div>
+        <div id="fieldMixSliders" style="margin-top:2px"></div>
+        <label style="margin-top:6px">Scatter rocks
+          <span class="i" title="Drop andesite/tuff rock formations on farmland at random rotations. Amount = relative density.">i</span>
+          <input id="rocks" type="checkbox"></label>
+        <div id="rockRow" style="display:none;align-items:center;gap:6px;margin:1px 0 0 4px">
+          <span style="width:64px;font-size:11px;color:#cdbfa3;flex:0 0 auto">amount</span>
+          <input id="rock_density" type="range" min="0" max="64" step="1" value="8" style="flex:1;min-width:0">
+          <span id="rock_densityv" style="width:34px;text-align:right;font-size:11px;color:#9aa;flex:0 0 auto">8</span>
+        </div>
+        <label style="margin-top:3px">Scatter bushes
+          <span class="i" title="Scatter leafy bushes (10 species × 6 shapes) on farmland at random rotations. Amount = relative density.">i</span>
+          <input id="bushes" type="checkbox"></label>
+        <div id="bushRow" style="display:none;align-items:center;gap:6px;margin:1px 0 0 4px">
+          <span style="width:64px;font-size:11px;color:#cdbfa3;flex:0 0 auto">amount</span>
+          <input id="bush_density" type="range" min="0" max="64" step="1" value="12" style="flex:1;min-width:0">
+          <span id="bush_densityv" style="width:34px;text-align:right;font-size:11px;color:#9aa;flex:0 0 auto">12</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:5px">
+          <button class="sec" id="fmReset" type="button" style="width:auto;padding:4px 8px;font-size:11px" title="Back to stock: all farmland, rocks/bushes off.">Reset</button>
+          <button class="sec" id="fmPreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Preview the farmland patchwork + scattered rocks/bushes these settings produce (one colour per patch style, dots for rocks/bushes). Updates live. Scroll to zoom, drag to pan.">🌾 Preview pattern</button>
+          <button class="sec xbtn" id="fmClear" type="button" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:11px">✕</button>
+        </div>
+        <div id="fmWinRow" style="display:none;align-items:center;gap:5px;font-size:11px;color:#9aa;margin-top:3px">
+          area <button class="sec" id="fmWout" type="button" style="width:auto;padding:0 7px;font-size:13px;line-height:1.4" title="Zoom out (wider area)">−</button>
+          <span id="fmWlbl">1×1</span>
+          <button class="sec" id="fmWin" type="button" style="width:auto;padding:0 7px;font-size:13px;line-height:1.4" title="Zoom in (tighter)">+</button> reg · scroll=zoom
+        </div>
+        <canvas id="fieldCanvas" width="288" height="288" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504;margin-top:5px"></canvas>
+        <div id="fieldLegend" class="stat" style="margin-top:3px"></div>
+      </details>
       <details id="lootWrap" class="drawer" style="display:none">
         <summary>Chest loot
           <span class="i" title="What generated buildings' chests contain. Chests spawn only when Buildings AND Interiors are BOTH on. Pick a vanilla preset (trial chamber, stronghold, buried treasure, ...) or build your own: each theme is a weighted group, each item has a min-max stack count and a rarity weight. Loot is deterministic per chest, so re-rendering a tile always yields the same chest.">i</span></summary>
@@ -1853,6 +1887,27 @@ async function refreshState() {
       });
       if (typeof tsPaint === 'function') tsPaint();
     } }
+  { // Farmland texture mix + scatter toggles/densities.
+    const fm = st.field_mix || {};
+    if (typeof FIELD_MIX !== 'undefined') {
+      FIELD_MIX.forEach(([k, , def]) => {
+        const el = $('fm_' + k);
+        if (el && document.activeElement !== el) el.value = (fm[k] != null ? fm[k] : def);
+      });
+      if (typeof fmPaint === 'function') fmPaint();
+    }
+    if ($('rocks')) $('rocks').checked = !!st.rocks;
+    if ($('bushes')) $('bushes').checked = !!st.bushes;
+    if ($('rock_density') && document.activeElement !== $('rock_density')) {
+      $('rock_density').value = (st.rock_density != null ? st.rock_density : 8);
+      const v = $('rock_densityv'); if (v) v.textContent = $('rock_density').value;
+    }
+    if ($('bush_density') && document.activeElement !== $('bush_density')) {
+      $('bush_density').value = (st.bush_density != null ? st.bush_density : 12);
+      const v = $('bush_densityv'); if (v) v.textContent = $('bush_density').value;
+    }
+    if (typeof fmSyncRows === 'function') fmSyncRows();
+  }
   if ($('vexag') && document.activeElement !== $('vexag')) $('vexag').value = st.vertical_exaggeration || 1;
   if ($('snowMode')) $('snowMode').value = st.snow_mode || 'peaks';
   if (typeof updateSnowFields === 'function') updateSnowFields();
@@ -2828,7 +2883,7 @@ function makeZoomable(canvas){
   wrap.addEventListener('pointercancel', end);
   wrap.addEventListener('dblclick', () => { s = 1; tx = 0; ty = 0; apply(); });
 }
-['climateCanvas', 'cbCanvasU', 'cbCanvasD', 'treeCanvas'].forEach(id => makeZoomable($(id)));
+['climateCanvas', 'cbCanvasU', 'cbCanvasD', 'treeCanvas', 'fieldCanvas'].forEach(id => makeZoomable($(id)));
 
 // ── Tree-size preview: client-side speckle map of the size mix the sliders + scale produce ──
 const TREE_TIER_COLORS = {
@@ -2851,11 +2906,11 @@ function _treeHash(x, y){   // cheap uniform 32-bit hash -> [0,1000); only the M
 // ── Preview window: NxN Minecraft regions (512 blocks each), centered on the selection ──
 // The default is 3x3 so previews start zoomed to LOCAL detail instead of the whole selection.
 // The −/+ stepper widens/tightens the window (re-renders); makeZoomable's scroll zooms within it.
-const _winRegions = { climate: 7, cave: 3, tree: 3 };   // climate opens more zoomed-out
+const _winRegions = { climate: 7, cave: 3, tree: 3, field: 1 };   // climate opens more zoomed-out; field starts tight (per-plot detail)
 // Per-preview window limits: tree stays LOCAL (1x1..3x3, tree dots are per-block detail);
 // climate/cave can pull far out (up to 100x100 regions).
 const _winCfg = { climate: { min: 1, max: 100, step: 2 }, cave: { min: 1, max: 100, step: 2 },
-                  tree: { min: 1, max: 3, step: 1 } };
+                  tree: { min: 1, max: 3, step: 1 }, field: { min: 1, max: 4, step: 1 } };
 function wireWindow(key, prefix, render){
   const wo = $(prefix + 'Wout'), wi = $(prefix + 'Win'), lbl = $(prefix + 'Wlbl');
   const cfg = _winCfg[key] || { min: 1, max: 100, step: 2 };
@@ -2936,6 +2991,134 @@ if ($('tsClear')) $('tsClear').onclick = () => {
 wireWindow('tree', 'ts', renderTreePreview);
 // live update while dragging sliders, once the preview is shown
 TREE_SIZES.forEach(([k]) => { const el = $('ts_' + k); if (el) el.addEventListener('input', () => { if (_treeShown) renderTreePreview(); }); });
+
+// ── Farmland texture: mix sliders + scattered rocks/bushes, with a client-side preview ──
+// Mirrors the tree preview: everything is a pure function of position so the picture
+// matches the fork (which splits farmland into ~7-block patches by a uniform hash).
+const FIELD_MIX = [
+  ['coarse', 'Coarse dirt', 0], ['plains', 'Plains', 0], ['flower', 'Flowers', 0],
+  ['farm', 'Farmland', 100], ['moss', 'Moss', 0]];
+const FIELD_COLORS = {
+  coarse: [150, 120, 80], plains: [120, 175, 85], flower: [168, 188, 96],
+  farm: [122, 88, 54], moss: [74, 116, 58],
+};
+const _FIELD_ORDER = ['coarse', 'plains', 'flower', 'farm', 'moss'];
+(function buildFieldMixSliders(){
+  const host = $('fieldMixSliders'); if (!host) return;
+  host.innerHTML = FIELD_MIX.map(([key, name, def]) =>
+    `<div style="display:flex;align-items:center;gap:6px;margin:1px 0;border-radius:2px;padding:0 2px">
+       <span style="width:70px;font-size:11px;color:#cdbfa3;flex:0 0 auto">${name}</span>
+       <input id="fm_${key}" type="range" min="0" max="200" step="1" value="${def}" style="flex:1;min-width:0">
+       <span id="fmv_${key}" style="width:34px;text-align:right;font-size:11px;color:#9aa;flex:0 0 auto">${def}%</span>
+     </div>`).join('');
+})();
+function fmCollect(){
+  const out = {};
+  FIELD_MIX.forEach(([k]) => { const el = $('fm_' + k); if (el) out[k] = parseInt(el.value, 10); });
+  return out;
+}
+function fmPaint(){
+  FIELD_MIX.forEach(([k]) => {
+    const el = $('fm_' + k); if (!el) return;
+    const vs = $('fmv_' + k); if (vs) vs.textContent = parseInt(el.value, 10) + '%';
+    if (typeof paintRange === 'function') paintRange(el);
+  });
+}
+function fmSave(){ return api('/api/settings', { field_mix: fmCollect() }); }
+function fmSyncRows(){
+  if ($('rockRow')) $('rockRow').style.display = ($('rocks') && $('rocks').checked) ? 'flex' : 'none';
+  if ($('bushRow')) $('bushRow').style.display = ($('bushes') && $('bushes').checked) ? 'flex' : 'none';
+}
+let _fieldShown = false;
+FIELD_MIX.forEach(([k]) => {
+  const el = $('fm_' + k); if (!el) return;
+  el.oninput = () => { fmPaint(); if (_fieldShown) renderFieldPreview(); };
+  el.onchange = fmSave;
+});
+['rocks', 'bushes'].forEach(id => {
+  const el = $(id); if (!el) return;
+  el.addEventListener('change', () => { fmSyncRows(); api('/api/settings', { [id]: el.checked }); if (_fieldShown) renderFieldPreview(); });
+});
+[['rock_density'], ['bush_density']].forEach(([id]) => {
+  const el = $(id); if (!el) return;
+  const vs = $(id + 'v');
+  el.oninput = () => { if (vs) vs.textContent = el.value; if (typeof paintRange === 'function') paintRange(el); if (_fieldShown) renderFieldPreview(); };
+  el.onchange = () => api('/api/settings', { [id]: parseInt(el.value, 10) });
+});
+if ($('fmReset')) $('fmReset').onclick = async () => {
+  FIELD_MIX.forEach(([k, , def]) => { const el = $('fm_' + k); if (el) el.value = def; });
+  if ($('rocks')) $('rocks').checked = false;
+  if ($('bushes')) $('bushes').checked = false;
+  fmPaint(); fmSyncRows();
+  await Promise.all([fmSave(), api('/api/settings', { rocks: false, bushes: false })]);
+  if (_fieldShown) renderFieldPreview();
+};
+// Preview: patchwork of the mix (one filled cell per ~7-block patch) + rock/bush dots.
+function renderFieldPreview(){
+  const c = $('fieldCanvas'); if (!c) return;
+  const mix = fmCollect();
+  let weights = _FIELD_ORDER.map(k => Math.max(0, mix[k] || 0));
+  let sum = weights.reduce((a, b) => a + b, 0);
+  if (sum === 0){ weights = [0, 0, 0, 1, 0]; sum = 1; }   // stock all-farm
+  const W = c.width, H = c.height, ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  const span = _winRegions.field * 512;                   // blocks across this window
+  const PATCH = 7;                                        // matches the fork's patch size
+  const n = Math.max(8, Math.round(span / PATCH));
+  const cell = W / n;
+  const [cx, cz] = _selCenterBlock(), bx0 = cx - span / 2, bz0 = cz - span / 2;
+  const counts = [0, 0, 0, 0, 0];
+  for (let gy = 0; gy < n; gy++) for (let gx = 0; gx < n; gx++){
+    const bx = Math.floor((bx0 + gx * PATCH) / PATCH), bz = Math.floor((bz0 + gy * PATCH) / PATCH);
+    const target = (_treeHash(bx * 2 + 13, (bz ^ 0x5f3) + 29) / 1000) * sum;
+    let cat = 3, cum = 0;
+    for (let i = 0; i < 5; i++){ cum += weights[i]; if (target < cum){ cat = i; break; } }
+    counts[cat]++;
+    const col = FIELD_COLORS[_FIELD_ORDER[cat]];
+    ctx.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+    ctx.fillRect(Math.floor(gx * cell), Math.floor(gy * cell), Math.ceil(cell), Math.ceil(cell));
+  }
+  // Scattered props over the patchwork. density (0..64) reads as a placement chance.
+  const drawScatter = (on, density, sp, rgb, rad) => {
+    if (!on || density <= 0) return 0;
+    const SP = Math.max(6, sp);
+    const dn = Math.max(2, Math.round(span / SP));
+    const dcell = W / dn; let placed = 0;
+    for (let gy = 0; gy < dn; gy++) for (let gx = 0; gx < dn; gx++){
+      const bx = Math.floor(bx0 + gx * SP), bz = Math.floor(bz0 + gy * SP);
+      if ((_treeHash(bx + 771, bz + 917) % 64) >= density) continue;
+      const px = (gx + 0.5) * dcell, py = (gy + 0.5) * dcell;
+      ctx.beginPath(); ctx.arc(px, py, rad, 0, 6.2832);
+      ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`; ctx.fill(); placed++;
+    }
+    return placed;
+  };
+  const rockOn = $('rocks') && $('rocks').checked, bushOn = $('bushes') && $('bushes').checked;
+  const rockD = $('rock_density') ? parseInt($('rock_density').value, 10) : 0;
+  const bushD = $('bush_density') ? parseInt($('bush_density').value, 10) : 0;
+  const nrock = drawScatter(rockOn, rockD, 18, [158, 152, 142], Math.max(1.3, cell * 1.2));
+  const nbush = drawScatter(bushOn, bushD, 11, [64, 132, 58], Math.max(1.0, cell * 0.9));
+  c.style.display = '';
+  if (c._resetZoom) c._resetZoom();
+  showWinRow('fm');
+  const total = counts.reduce((a, b) => a + b, 0) || 1;
+  let leg = _FIELD_ORDER.map((k, i) =>
+    '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:8px">' +
+    `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:rgb(${FIELD_COLORS[k].join(',')})"></span>` +
+    k + ' ' + (counts[i] * 100 / total).toFixed(0) + '%</span>').join('');
+  if (nrock) leg += `<span style="margin-right:8px">· ~${nrock} rocks</span>`;
+  if (nbush) leg += `<span>· ~${nbush} bushes</span>`;
+  $('fieldLegend').innerHTML = leg;
+}
+if ($('fmPreview')) $('fmPreview').onclick = () => { _fieldShown = true; renderFieldPreview(); };
+if ($('fmClear')) $('fmClear').onclick = () => {
+  _fieldShown = false;
+  if ($('fieldCanvas')) $('fieldCanvas').style.display = 'none';
+  if ($('fieldLegend')) $('fieldLegend').innerHTML = '';
+  if ($('fmWinRow')) $('fmWinRow').style.display = 'none';
+};
+wireWindow('field', 'fm', renderFieldPreview);
+fmSyncRows(); fmPaint();
 
 // ---- Schematic props (per-family toggle; only wired families shown) ----
 const PROP_FAMILIES = [['boat','Boats'],['car','Cars'],['crane','Cranes'],['excavator','Excavators'],['fountain','Fountains'],['lighthouse','Lighthouses'],['playground','Playgrounds'],['tombstone','Tombstones'],['tractor','Tractors'],['windturbine','Wind turbines']];

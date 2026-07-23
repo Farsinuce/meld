@@ -2548,6 +2548,30 @@ def api_settings():
             except (TypeError, ValueError):
                 clean[name] = default
         patch["tree_size_weights"] = clean
+    # Farmland texture mix (five relative shares 0..200) + scatter toggles/densities.
+    if patch.get("field_mix") is not None:
+        raw = patch["field_mix"] if isinstance(patch["field_mix"], dict) else {}
+        clean = {}
+        for name in arnis_cmd.FIELD_MIX_KEYS:
+            try:
+                clean[name] = max(0, min(200, int(raw.get(name, 0))))
+            except (TypeError, ValueError):
+                clean[name] = 0
+        patch["field_mix"] = clean
+    if patch.get("rocks") is not None:
+        patch["rocks"] = bool(patch["rocks"])
+    if patch.get("bushes") is not None:
+        patch["bushes"] = bool(patch["bushes"])
+    if patch.get("rock_density") is not None:
+        try:
+            patch["rock_density"] = max(0, min(64, int(patch["rock_density"])))
+        except (TypeError, ValueError):
+            patch["rock_density"] = 8
+    if patch.get("bush_density") is not None:
+        try:
+            patch["bush_density"] = max(0, min(64, int(patch["bush_density"])))
+        except (TypeError, ValueError):
+            patch["bush_density"] = 12
     if patch.get("cpu_stagger_seconds") is not None:
         patch["cpu_stagger_seconds"] = max(1, min(4, int(round(float(patch["cpu_stagger_seconds"])))))
     if patch.get("cpu_stagger_enabled") is not None:

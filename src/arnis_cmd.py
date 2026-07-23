@@ -52,6 +52,28 @@ def cave_biomes_spec(settings: dict) -> str:
     return ",".join(parts)
 
 
+# Farmland texture categories the fork's --field-mix accepts, in order.
+FIELD_MIX_KEYS = ["coarse", "plains", "flower", "farm", "moss"]
+
+
+def field_mix_spec(settings: dict) -> str:
+    """`--field-mix` value from the field_mix setting, or '' when the mix is stock
+    (only 'farm' has weight). Emits just the non-zero shares so proportions are exact
+    and a default project stays byte-identical (no flag at all)."""
+    mix = settings.get("field_mix") or {}
+    parts = {}
+    for name in FIELD_MIX_KEYS:
+        try:
+            pct = int(mix.get(name, 0))
+        except (TypeError, ValueError):
+            pct = 0
+        parts[name] = max(0, min(200, pct))
+    # Stock = no non-farm share -> let the fork use its default (tilled farmland).
+    if parts["coarse"] + parts["plains"] + parts["flower"] + parts["moss"] == 0:
+        return ""
+    return ",".join(f"{k}={v}" for k, v in parts.items() if v > 0)
+
+
 # Biogeographic realm -> tree pack dir, picked from the selection centre (lat, lon). Ordered:
 # the first box that contains the point wins (finer/subset realms first so they take priority).
 # (code, lat_min, lat_max, lon_min, lon_max)
@@ -278,6 +300,25 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
         spec = tree_size_weights_spec(settings)
         if spec:
             cmd += ["--tree-size-weights", spec]
+
+    # Farmland texturing (--field-mix) + scattered rocks/bushes. The mix flag is sent
+    # only when a non-farm share is set; --rocks/--bushes only when toggled on. All
+    # three default off -> a default project stays byte-identical.
+    fm = field_mix_spec(settings)
+    if fm:
+        cmd += ["--field-mix", fm]
+    if settings.get("rocks"):
+        try:
+            rd = max(0, min(64, int(settings.get("rock_density", 0))))
+        except (TypeError, ValueError):
+            rd = 0
+        cmd += ["--rocks", "--rock-density", str(rd)]
+    if settings.get("bushes"):
+        try:
+            bd = max(0, min(64, int(settings.get("bush_density", 0))))
+        except (TypeError, ValueError):
+            bd = 0
+        cmd += ["--bushes", "--bush-density", str(bd)]
     return cmd
 
 

@@ -60,6 +60,17 @@ def default_settings() -> dict:
         # ~double. small <=6, medium 7-12, big 13-20, tall 21-28, giant 29-40 blocks. Giant OFF by
         # default + only renders at 1:1; tiny maps never place tall/giant. 0 tiers fall back smaller.
         "tree_size_weights": {"small": 100, "medium": 100, "big": 100, "tall": 100, "giant": 0},
+        # Farmland texturing: split OSM farmland into a weighted mix of five patch
+        # styles (relative area shares). The default farm=100 (rest 0) = stock tilled
+        # farmland; the fork gets --field-mix only when a non-farm share is set, so a
+        # default project stays byte-identical.
+        "field_mix": {"coarse": 0, "plains": 0, "flower": 0, "farm": 100, "moss": 0},
+        # Scatter small schematic props on farmland (off by default). density = relative
+        # amount 0..64; only sent to the fork when the toggle is on.
+        "rocks": False,
+        "rock_density": 8,
+        "bushes": False,
+        "bush_density": 12,
         "elevation_mode": "global",         # global = locked range, no cliffs
         # Vertical exaggeration: multiplies terrain HEIGHT only (not footprint). 1.0 = true scale;
         # 2-3 = dramatic mountains at the same map size. Auto-compresses to the build height.

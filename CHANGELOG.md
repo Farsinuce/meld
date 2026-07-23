@@ -4,6 +4,26 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.7.1] - 2026-07-23
+
+Farmland comes alive. A new **Farmland texture** drawer splits the map's farmland into a
+mix of patch styles and scatters small rocks and bushes over it, with a live on-screen
+preview of the pattern before you build. Bundles arnis fork 3.0.4.
+
+### Added
+
+- **Farmland texture mix.** Five sliders (Coarse dirt / Plains / Flowers / Farmland /
+  Moss) set the relative shares of OSM farmland. Each ~7-block plot becomes one style,
+  so `Plains 60%` makes roughly 60% of the farmland open grass. The default is all
+  Farmland, so an untouched project builds exactly as before.
+- **Scattered rocks and bushes.** Toggle rocks (andesite/tuff formations) and bushes
+  (10 species) onto farmland, each with an amount slider. They are placed at random
+  rotations in small numbers.
+- **Live pattern preview.** A "🌾 Preview pattern" canvas shows the farmland patchwork
+  (one colour per style) plus dots for the scattered rocks and bushes for your
+  selection, with a live legend and scroll-to-zoom / drag-to-pan — the same idiom as the
+  tree and cave-biome previews. Updates as you drag the sliders.
+
 ## [1.7.0] - 2026-07-19 - "Meld Compass"
 
 A big usability pass focused on guiding people to run and build everything easily: a guided three-step rail, a settings search, a darker glass skin, one Generate button, project folders and a render queue that builds worlds one after another, borders from any drawn shape, a slimmer in-place server setup, and a one-click cross-platform launcher. Bundles arnis fork 3.0.3 (generator unchanged).

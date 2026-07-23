@@ -2,6 +2,14 @@
 
 Short, human highlights for each Meld release. Full detail lives in [CHANGELOG.md](CHANGELOG.md).
 
+## v1.7.1
+
+**Farmland texturing: mix the map's farmland into plains, flowers, coarse dirt and moss, scatter rocks and bushes over it, and preview the pattern before you build.** Bundles arnis fork 3.0.4.
+
+- **Farmland texture drawer.** Five sliders set the relative shares of OSM farmland — Coarse dirt, Plains, Flowers, Farmland, Moss — split into small coherent plots. Default is all Farmland, so nothing changes unless you move a slider.
+- **Rocks and bushes.** Toggle scattered rock formations (andesite/tuff) and bushes (10 species) onto farmland, each with an amount slider; placed at random rotations in small numbers.
+- **Live pattern preview.** A canvas shows the patchwork (one colour per style) plus dots for the rocks/bushes over your selection, with a legend and scroll-to-zoom, just like the tree preview.
+
 ## v1.7.0 - Meld Compass
 
 **Run and build everything more easily: one guided flow, projects and folders, a queue that builds worlds one after another, and one-click startup on any OS.**
