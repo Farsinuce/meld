@@ -571,21 +571,11 @@
           <span class="i" title="Apply the pattern to land that OSM never tagged, using satellite land-cover: cropland gets the farmland mix, grassland gets the grassy profile. Covers the big plain green areas that OSM leaves blank.">i</span>
           <input id="land_texture" type="checkbox"></label>
         <label style="margin-top:6px">Scatter rocks
-          <span class="i" title="Drop andesite/tuff rock formations at random rotations. Amount = rocks per 512×512 region of field (kept sparse).">i</span>
+          <span class="i" title="Drop andesite/tuff rock formations at random rotations — roughly one per 512×512 region of field (kept deliberately sparse).">i</span>
           <input id="rocks" type="checkbox"></label>
-        <div id="rockRow" style="display:none;align-items:center;gap:6px;margin:1px 0 0 4px">
-          <span style="width:74px;font-size:11px;color:#cdbfa3;flex:0 0 auto">per region</span>
-          <input id="rock_density" type="range" min="0" max="64" step="1" value="4" style="flex:1;min-width:0">
-          <span id="rock_densityv" style="width:34px;text-align:right;font-size:11px;color:#9aa;flex:0 0 auto">4</span>
-        </div>
         <label style="margin-top:3px">Scatter bushes
-          <span class="i" title="Scatter leafy bushes (10 species × 6 shapes) at random rotations. Amount = bushes per 512×512 region of field (kept sparse).">i</span>
+          <span class="i" title="Scatter leafy bushes (10 species × 6 shapes) at random rotations — roughly one per 512×512 region of field (kept deliberately sparse).">i</span>
           <input id="bushes" type="checkbox"></label>
-        <div id="bushRow" style="display:none;align-items:center;gap:6px;margin:1px 0 0 4px">
-          <span style="width:74px;font-size:11px;color:#cdbfa3;flex:0 0 auto">per region</span>
-          <input id="bush_density" type="range" min="0" max="64" step="1" value="8" style="flex:1;min-width:0">
-          <span id="bush_densityv" style="width:34px;text-align:right;font-size:11px;color:#9aa;flex:0 0 auto">8</span>
-        </div>
         <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:5px">
           <button class="sec" id="fmReset" type="button" style="width:auto;padding:4px 8px;font-size:11px" title="Back to stock: all farmland, rocks/bushes off.">Reset</button>
           <button class="sec" id="fmPreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Preview the farmland patchwork + scattered rocks/bushes these settings produce (one colour per patch style, dots for rocks/bushes). Updates live. Scroll to zoom, drag to pan.">🌾 Preview pattern</button>
@@ -1906,14 +1896,6 @@ async function refreshState() {
     if ($('bushes')) $('bushes').checked = !!st.bushes;
     if ($('grass_texture')) $('grass_texture').checked = !!st.grass_texture;
     if ($('land_texture')) $('land_texture').checked = !!st.land_texture;
-    if ($('rock_density') && document.activeElement !== $('rock_density')) {
-      $('rock_density').value = (st.rock_density != null ? st.rock_density : 4);
-      const v = $('rock_densityv'); if (v) v.textContent = $('rock_density').value;
-    }
-    if ($('bush_density') && document.activeElement !== $('bush_density')) {
-      $('bush_density').value = (st.bush_density != null ? st.bush_density : 8);
-      const v = $('bush_densityv'); if (v) v.textContent = $('bush_density').value;
-    }
     if (typeof fmSyncRows === 'function') fmSyncRows();
   }
   if ($('vexag') && document.activeElement !== $('vexag')) $('vexag').value = st.vertical_exaggeration || 1;
@@ -3051,8 +3033,7 @@ function fmPaint(){
 }
 function fmSave(){ return api('/api/settings', { field_mix: fmCollect() }); }
 function fmSyncRows(){
-  if ($('rockRow')) $('rockRow').style.display = ($('rocks') && $('rocks').checked) ? 'flex' : 'none';
-  if ($('bushRow')) $('bushRow').style.display = ($('bushes') && $('bushes').checked) ? 'flex' : 'none';
+  /* scatter density is locked to 1 per region — no slider rows to toggle */
 }
 let _fieldShown = false;
 // Click a value label to type an exact number (mix % or scatter amount).
@@ -3094,13 +3075,6 @@ FIELD_MIX.forEach(([k]) => {
 ['grass_texture', 'land_texture'].forEach(id => {
   const el = $(id); if (!el) return;
   el.addEventListener('change', () => api('/api/settings', { [id]: el.checked }));
-});
-[['rock_density'], ['bush_density']].forEach(([id]) => {
-  const el = $(id); if (!el) return;
-  const vs = $(id + 'v');
-  el.oninput = () => { if (vs) vs.textContent = el.value; if (typeof paintRange === 'function') paintRange(el); if (_fieldShown) renderFieldPreview(); };
-  el.onchange = () => api('/api/settings', { [id]: parseInt(el.value, 10) });
-  _wireEditable(el, vs, v => String(v), v => { if (_fieldShown) renderFieldPreview(); api('/api/settings', { [id]: v }); });
 });
 if ($('fmReset')) $('fmReset').onclick = async () => {
   FIELD_MIX.forEach(([k, , def]) => { const el = $('fm_' + k); if (el) el.value = def; });
@@ -3187,10 +3161,10 @@ function renderFieldPreview(){
     return placed;
   };
   const rockOn = $('rocks') && $('rocks').checked, bushOn = $('bushes') && $('bushes').checked;
-  const rockD = $('rock_density') ? parseInt($('rock_density').value, 10) : 0;
-  const bushD = $('bush_density') ? parseInt($('bush_density').value, 10) : 0;
-  const nrock = drawScatter(rockOn, rockD, 90, [162, 156, 146], Math.max(2, W / 110), false);
-  const nbush = drawScatter(bushOn, bushD, 60, [66, 138, 60], Math.max(1.6, W / 150), true);
+  // Density is locked to 1 per 512-region (no slider), so preview spacing ~= a region.
+  const rockD = rockOn ? 1 : 0, bushD = bushOn ? 1 : 0;
+  const nrock = drawScatter(rockOn, rockD, 512, [162, 156, 146], Math.max(2, W / 110), false);
+  const nbush = drawScatter(bushOn, bushD, 380, [66, 138, 60], Math.max(1.6, W / 150), true);
   c.style.display = '';
   if (c._resetZoom) c._resetZoom();
   showWinRow('fm');

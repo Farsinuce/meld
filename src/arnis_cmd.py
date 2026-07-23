@@ -307,18 +307,11 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     fm = field_mix_spec(settings)
     if fm:
         cmd += ["--field-mix", fm]
+    # Scatter density is locked to 1 per region (no UI slider) — sparse by design.
     if settings.get("rocks"):
-        try:
-            rd = max(0, min(64, int(settings.get("rock_density", 0))))
-        except (TypeError, ValueError):
-            rd = 0
-        cmd += ["--rocks", "--rock-density", str(rd)]
+        cmd += ["--rocks", "--rock-density", "1"]
     if settings.get("bushes"):
-        try:
-            bd = max(0, min(64, int(settings.get("bush_density", 0))))
-        except (TypeError, ValueError):
-            bd = 0
-        cmd += ["--bushes", "--bush-density", str(bd)]
+        cmd += ["--bushes", "--bush-density", "1"]
     # Extend the field pattern beyond OSM farmland: OSM grassland, and untagged
     # satellite land. Only sent when toggled on (default off => unchanged).
     if settings.get("grass_texture"):

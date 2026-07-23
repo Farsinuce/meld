@@ -67,11 +67,11 @@ def default_settings() -> dict:
         "field_mix": {"coarse": 0, "plains": 0, "flower": 0, "farm": 100, "moss": 0},
         # Scatter small schematic props on farmland (off by default). density = relative
         # amount 0..64; only sent to the fork when the toggle is on.
-        # Scatter counts are now per 512x512 region (not per cell) so they stay sparse.
+        # Scatter is per 512x512 region and locked to 1 each (sparse, no UI slider).
         "rocks": False,
-        "rock_density": 4,
+        "rock_density": 1,
         "bushes": False,
-        "bush_density": 8,
+        "bush_density": 1,
         # Also texture OSM grassland (meadow/grass/orchard) and untagged satellite land
         # with the field pattern, not just OSM farmland. Off = unchanged.
         "grass_texture": False,
