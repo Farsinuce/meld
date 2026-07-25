@@ -80,6 +80,10 @@ def default_settings() -> dict:
         "land_texture": True,
         # Optional separate mix for untagged satellite cropland ('' = reuse field_mix).
         "land_mix": "",
+        # Farm-plot crop shares: each farm parcel grows ONE crop picked by these
+        # weights (real monoculture plots). Defaults = the combined patchwork.
+        "farm_crops": {"wheat": 40, "potato": 15, "carrot": 15, "beetroot": 8,
+                       "sunflower": 12, "pumpkin": 5, "fallow": 5},
         "elevation_mode": "global",         # global = locked range, no cliffs
         # Vertical exaggeration: multiplies terrain HEIGHT only (not footprint). 1.0 = true scale;
         # 2-3 = dramatic mountains at the same map size. Auto-compresses to the build height.

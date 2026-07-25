@@ -74,6 +74,31 @@ def field_mix_spec(settings: dict) -> str:
     return ",".join(f"{k}={v}" for k, v in parts.items() if v > 0)
 
 
+# Farm-plot crop keys + default shares (the "combined" patchwork; must match the fork).
+FARM_CROPS = [("wheat", 40), ("potato", 15), ("carrot", 15), ("beetroot", 8),
+              ("sunflower", 12), ("pumpkin", 5), ("fallow", 5)]
+
+
+def farm_crops_spec(settings: dict) -> str:
+    """`--farm-crops` value from the farm_crops setting, or '' when every crop sits at
+    its default share (so default runs need no flag)."""
+    crops = settings.get("farm_crops") or {}
+    vals = {}
+    changed = False
+    for name, default in FARM_CROPS:
+        try:
+            pct = int(crops.get(name, default))
+        except (TypeError, ValueError):
+            pct = default
+        pct = max(0, min(200, pct))
+        vals[name] = pct
+        if pct != default:
+            changed = True
+    if not changed:
+        return ""
+    return ",".join(f"{k}={v}" for k, v in vals.items() if v > 0)
+
+
 # Biogeographic realm -> tree pack dir, picked from the selection centre (lat, lon). Ordered:
 # the first box that contains the point wins (finer/subset realms first so they take priority).
 # (code, lat_min, lat_max, lon_min, lon_max)
@@ -307,6 +332,9 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     fm = field_mix_spec(settings)
     if fm:
         cmd += ["--field-mix", fm]
+    fc = farm_crops_spec(settings)
+    if fc:
+        cmd += ["--farm-crops", fc]
     # Scatter density is locked to 1 per region (no UI slider) — sparse by design.
     if settings.get("rocks"):
         cmd += ["--rocks", "--rock-density", "1"]

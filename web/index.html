@@ -564,6 +564,9 @@
           <span class="i" title="Repaint OSM farmland as a mix of patch styles + scatter small rocks/bushes on it. The sliders are relative area shares (like the cave-biome sliders): each ~7-block plot becomes one style, so a plains=60 share makes ~60% of the farmland plains. Default is all Farmland (stock tilled crops) — leave it there and nothing changes. Rocks (andesite/tuff) and bushes (10 species) are placed at random rotations in small numbers. Preview shows the patchwork + scatter for your selection. The sliders drive OSM farmland; the two toggles below extend the same idea to open grassland and to untagged (satellite) land.">i</span></summary>
         <div style="font-size:11px;color:#9aa;margin:2px 0 3px">Relative shares over farmland. Default = all Farmland (unchanged).</div>
         <div id="fieldMixSliders" style="margin-top:2px"></div>
+        <div style="font-size:11px;color:#cdbfa3;margin:6px 0 1px">Farm plots
+          <span class="i" title="What the Farmland share grows. Each plot (parcel) gets ONE crop picked by these weights — real monoculture fields: golden wheat plots next to potato plots next to sunflower rows. Default = the combined patchwork. Wheat/fallow plots also get small hay-bale bundles; pumpkin patches sit on a grass/coarse mosaic; bare patches use packed mud (never regrows grass) with dead bushes.">i</span></div>
+        <div id="farmCropSliders" style="margin-top:1px"></div>
         <label style="margin-top:6px">Also texture open grassland
           <span class="i" title="Apply the pattern to OSM meadow / grass / greenfield / orchard too (large loose grassy plots), not just farmland. Uses a built-in grassy profile. On by default.">i</span>
           <input id="grass_texture" type="checkbox" checked></label>
@@ -1883,7 +1886,7 @@ async function refreshState() {
       });
       if (typeof tsPaint === 'function') tsPaint();
     } }
-  { // Farmland texture mix + scatter toggles/densities.
+  { // Farmland texture mix + farm crops + scatter toggles/densities.
     const fm = st.field_mix || {};
     if (typeof FIELD_MIX !== 'undefined') {
       FIELD_MIX.forEach(([k, , def]) => {
@@ -1891,6 +1894,14 @@ async function refreshState() {
         if (el && document.activeElement !== el) el.value = (fm[k] != null ? fm[k] : def);
       });
       if (typeof fmPaint === 'function') fmPaint();
+    }
+    const fcs = st.farm_crops || {};
+    if (typeof FARM_CROPS !== 'undefined') {
+      FARM_CROPS.forEach(([k, , def]) => {
+        const el = $('fc_' + k);
+        if (el && document.activeElement !== el) el.value = (fcs[k] != null ? fcs[k] : def);
+      });
+      if (typeof fcPaint === 'function') fcPaint();
     }
     if ($('rocks')) $('rocks').checked = !!st.rocks;
     if ($('bushes')) $('bushes').checked = !!st.bushes;
@@ -3036,6 +3047,40 @@ function fmSyncRows(){
   /* scatter density is locked to 1 per region — no slider rows to toggle */
 }
 let _fieldShown = false;
+// ── Farm-plot crop sliders (each farm parcel grows ONE crop, weighted) ──
+const FARM_CROPS = [
+  ['wheat', 'Wheat', 40], ['potato', 'Potato', 15], ['carrot', 'Carrot', 15],
+  ['beetroot', 'Beetroot', 8], ['sunflower', 'Sunflower', 12], ['pumpkin', 'Pumpkin', 5],
+  ['fallow', 'Fallow', 5]];
+const FARM_CROP_COLORS = {
+  wheat: [206, 186, 76], potato: [148, 126, 74], carrot: [208, 138, 60],
+  beetroot: [164, 88, 80], sunflower: [230, 206, 56], pumpkin: [198, 118, 46],
+  fallow: [172, 152, 108],
+};
+(function buildFarmCropSliders(){
+  const host = $('farmCropSliders'); if (!host) return;
+  host.innerHTML = FARM_CROPS.map(([key, name, def]) =>
+    `<div style="display:flex;align-items:center;gap:6px;margin:1px 0;border-radius:2px;padding:0 2px">
+       <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:rgb(${FARM_CROP_COLORS[key].join(',')});flex:0 0 auto"></span>
+       <span style="width:62px;font-size:11px;color:#cdbfa3;flex:0 0 auto">${name}</span>
+       <input id="fc_${key}" type="range" min="0" max="200" step="1" value="${def}" style="flex:1;min-width:0">
+       <span id="fcv_${key}" style="width:34px;text-align:right;font-size:11px;color:#9aa;flex:0 0 auto">${def}%</span>
+     </div>`).join('');
+})();
+function fcCollect(){
+  const out = {};
+  FARM_CROPS.forEach(([k]) => { const el = $('fc_' + k); if (el) out[k] = parseInt(el.value, 10); });
+  return out;
+}
+function fcPaint(){
+  FARM_CROPS.forEach(([k]) => {
+    const el = $('fc_' + k); if (!el) return;
+    const vs = $('fcv_' + k); if (vs && !vs.querySelector('input')) vs.textContent = parseInt(el.value, 10) + '%';
+    if (typeof paintRange === 'function') paintRange(el);
+  });
+}
+function fcSave(){ return api('/api/settings', { farm_crops: fcCollect() }); }
+
 // Click a value label to type an exact number (mix % or scatter amount).
 function _wireEditable(rangeEl, valEl, fmt, after){
   if (!rangeEl || !valEl) return;
@@ -3068,6 +3113,12 @@ FIELD_MIX.forEach(([k]) => {
   el.onchange = fmSave;
   _wireEditable(el, $('fmv_' + k), v => v + '%', () => { fmPaint(); if (_fieldShown) renderFieldPreview(); fmSave(); });
 });
+FARM_CROPS.forEach(([k]) => {
+  const el = $('fc_' + k); if (!el) return;
+  el.oninput = () => { fcPaint(); if (_fieldShown) renderFieldPreview(); };
+  el.onchange = fcSave;
+  _wireEditable(el, $('fcv_' + k), v => v + '%', () => { fcPaint(); if (_fieldShown) renderFieldPreview(); fcSave(); });
+});
 ['rocks', 'bushes'].forEach(id => {
   const el = $(id); if (!el) return;
   el.addEventListener('change', () => { fmSyncRows(); api('/api/settings', { [id]: el.checked }); if (_fieldShown) renderFieldPreview(); });
@@ -3078,12 +3129,13 @@ FIELD_MIX.forEach(([k]) => {
 });
 if ($('fmReset')) $('fmReset').onclick = async () => {
   FIELD_MIX.forEach(([k, , def]) => { const el = $('fm_' + k); if (el) el.value = def; });
+  FARM_CROPS.forEach(([k, , def]) => { const el = $('fc_' + k); if (el) el.value = def; });
   if ($('rocks')) $('rocks').checked = false;
   if ($('bushes')) $('bushes').checked = false;
   if ($('grass_texture')) $('grass_texture').checked = true;   // default ON
   if ($('land_texture')) $('land_texture').checked = true;     // default ON
-  fmPaint(); fmSyncRows();
-  await Promise.all([fmSave(), api('/api/settings', { rocks: false, bushes: false, grass_texture: true, land_texture: true })]);
+  fmPaint(); fcPaint(); fmSyncRows();
+  await Promise.all([fmSave(), fcSave(), api('/api/settings', { rocks: false, bushes: false, grass_texture: true, land_texture: true })]);
   if (_fieldShown) renderFieldPreview();
 };
 // Preview: patchwork of the mix (one filled cell per ~7-block patch) + rock/bush dots.
@@ -3128,9 +3180,22 @@ function renderFieldPreview(){
     }
     const s = Math.floor(_vnoise(x, z, F_SUB) * 1000);
     let col;
-    if (cat === 0) col = s < 300 ? FIELD_BLOCK_COL.dirt : (s < 360 ? FIELD_BLOCK_COL.grass : FIELD_BLOCK_COL.coarse);
+    if (cat === 0) col = s < 210 ? [130, 106, 82] : (s < 260 ? [88, 78, 66] : (s < 320 ? FIELD_BLOCK_COL.dirt : (s < 380 ? FIELD_BLOCK_COL.grass : FIELD_BLOCK_COL.coarse)));
     else if (cat === 4) col = s < 300 ? FIELD_BLOCK_COL.grass : (s < 370 ? FIELD_BLOCK_COL.coarse : FIELD_BLOCK_COL.moss);
-    else if (cat === 3) col = FIELD_BLOCK_COL.farm;
+    else if (cat === 3) {
+      // Farm parcel: tint by its single crop (mirrors the fork's per-parcel pick).
+      const w = (typeof fcCollect === 'function') ? fcCollect() : {};
+      const keys = FARM_CROPS.map(([k]) => k);
+      const weights = keys.map(k => Math.max(0, w[k] != null ? w[k] : 0));
+      let wsum = weights.reduce((a, b) => a + b, 0);
+      let crop = 'wheat';
+      if (wsum > 0){
+        const t = (_treeHash(px ^ 0xC0FE, pz * 13) / 1000) * wsum;
+        let cum = 0;
+        for (let i = 0; i < keys.length; i++){ cum += weights[i]; if (t < cum){ crop = keys[i]; break; } }
+      }
+      col = FARM_CROP_COLORS[crop] || FIELD_BLOCK_COL.farm;
+    }
     else if (cat === 2) col = FIELD_COLORS.flower;
     else col = FIELD_BLOCK_COL.grass;
     return [col, cat];

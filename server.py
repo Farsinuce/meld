@@ -2569,6 +2569,15 @@ def api_settings():
     if patch.get("land_mix") is not None:
         # Free-form name=pct spec; keep it short and stripped (arnis ignores bad keys).
         patch["land_mix"] = str(patch["land_mix"]).strip()[:128]
+    if patch.get("farm_crops") is not None:
+        raw = patch["farm_crops"] if isinstance(patch["farm_crops"], dict) else {}
+        clean = {}
+        for name, default in arnis_cmd.FARM_CROPS:
+            try:
+                clean[name] = max(0, min(200, int(raw.get(name, default))))
+            except (TypeError, ValueError):
+                clean[name] = default
+        patch["farm_crops"] = clean
     if patch.get("rock_density") is not None:
         try:
             patch["rock_density"] = max(0, min(64, int(patch["rock_density"])))

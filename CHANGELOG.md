@@ -24,7 +24,14 @@ preview of the pattern before you build. Bundles arnis fork 3.0.4.
   varied plot sizes, dirt-track boundaries, and internal ground variation) with farmland
   drawn golden, plus evenly-scattered dots for rocks and bushes. Live legend,
   scroll-to-zoom / drag-to-pan, and a wider area range to see the whole patchwork.
-- **Click any value to type it.** Every mix-share and scatter-amount number can be
+- **Real farm plots.** A new "Farm plots" slider group sets what the Farmland share
+  grows — wheat / potato / carrot / beetroot / sunflower / pumpkin / fallow. Each plot
+  (parcel) grows ONE crop, so the map forms a real monoculture patchwork: golden wheat
+  fields next to potato fields next to sunflower rows. Wheat/fallow plots get hay-bale
+  bundles; pumpkin patches sit on a grass/coarse mosaic; bare patches use packed mud
+  (never regrows grass) with dead bushes; rocks/bushes hug plot edges. The preview
+  colours each plot by its crop. Default = the combined patchwork (unchanged look).
+- **Click any value to type it.** Every mix-share, crop-share and scatter number can be
   clicked to enter an exact value, not just dragged.
 - **No stray snow on lowland farmland.** The bundled generator no longer speckles flat
   farmland with snow (snow now needs real mountain relief); genuine peaks still cap.
