@@ -2562,6 +2562,14 @@ def api_settings():
         patch["rocks"] = bool(patch["rocks"])
     if patch.get("bushes") is not None:
         patch["bushes"] = bool(patch["bushes"])
+    if patch.get("scatter_mode") is not None:
+        sm = str(patch["scatter_mode"]).strip().lower()
+        patch["scatter_mode"] = sm if sm in ("none", "rocks", "bushes", "both") else "both"
+    if patch.get("field_scale") is not None:
+        try:
+            patch["field_scale"] = max(25, min(400, int(patch["field_scale"])))
+        except (TypeError, ValueError):
+            patch["field_scale"] = 100
     if patch.get("grass_texture") is not None:
         patch["grass_texture"] = bool(patch["grass_texture"])
     if patch.get("land_texture") is not None:

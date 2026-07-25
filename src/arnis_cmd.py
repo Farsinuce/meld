@@ -335,11 +335,23 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     fc = farm_crops_spec(settings)
     if fc:
         cmd += ["--farm-crops", fc]
-    # Scatter density is locked to 1 per region (no UI slider) — sparse by design.
-    if settings.get("rocks"):
-        cmd += ["--rocks", "--rock-density", "1"]
-    if settings.get("bushes"):
-        cmd += ["--bushes", "--bush-density", "1"]
+    # Rock/bush scatter: one mode selector (chunk-rolled 20% in the fork). Legacy
+    # projects that stored separate rocks/bushes booleans are migrated on the fly.
+    mode = str(settings.get("scatter_mode") or "").strip().lower()
+    if mode not in ("none", "rocks", "bushes", "both"):
+        r = bool(settings.get("rocks")); b = bool(settings.get("bushes"))
+        mode = "both" if (r and b) else "rocks" if r else "bushes" if b else "none"
+    if mode in ("rocks", "both"):
+        cmd.append("--rocks")
+    if mode in ("bushes", "both"):
+        cmd.append("--bushes")
+    # Field-pattern zoom (only when non-default).
+    try:
+        fs = max(25, min(400, int(settings.get("field_scale", 100))))
+    except (TypeError, ValueError):
+        fs = 100
+    if fs != 100:
+        cmd += ["--field-scale", str(fs)]
     # Extend the field pattern beyond OSM farmland: OSM grassland, and untagged
     # satellite land (both ON by default — most of the plain is untagged cropland).
     if settings.get("grass_texture"):

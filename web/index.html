@@ -573,12 +573,20 @@
         <label style="margin-top:3px">Also texture untagged land
           <span class="i" title="Apply the pattern to land that OSM never tagged, using satellite land-cover: cropland gets your mix, grassland gets the grassy profile, and villages (residential areas) get grassy ground instead of wheat. Covers the big plain areas that OSM leaves blank — without this, they render as endless stock crops. On by default.">i</span>
           <input id="land_texture" type="checkbox" checked></label>
-        <label style="margin-top:6px">Scatter rocks
-          <span class="i" title="Drop andesite/tuff rock formations at random rotations — roughly one per 512×512 region of field (kept deliberately sparse).">i</span>
-          <input id="rocks" type="checkbox"></label>
-        <label style="margin-top:3px">Scatter bushes
-          <span class="i" title="Scatter leafy bushes (10 species × 6 shapes) at random rotations — roughly one per 512×512 region of field (kept deliberately sparse).">i</span>
-          <input id="bushes" type="checkbox"></label>
+        <label style="margin-top:6px">Rocks &amp; bushes
+          <span class="i" title="Schematic scatter over farm, grassland AND untagged satellite land: every 16×16 chunk has a 20% chance of one rock (andesite/tuff, 8 shapes) or bush (10 species × 6 shapes) at a random rotation. Pick what spawns.">i</span>
+          <select id="scatter_mode">
+            <option value="both">Rocks + bushes</option>
+            <option value="rocks">Rocks only</option>
+            <option value="bushes">Bushes only</option>
+            <option value="none">None</option>
+          </select></label>
+        <div style="display:flex;align-items:center;gap:6px;margin:4px 0 0 2px">
+          <span style="width:74px;font-size:11px;color:#cdbfa3;flex:0 0 auto">Pattern size
+            <span class="i" title="Zoom for the whole field pattern: scales every parcel/plot dimension. 100% = default; 200% = fields twice as large; 50% = half.">i</span></span>
+          <input id="field_scale" type="range" min="25" max="400" step="5" value="100" style="flex:1;min-width:0">
+          <span id="field_scalev" style="width:38px;text-align:right;font-size:11px;color:#9aa;flex:0 0 auto">100%</span>
+        </div>
         <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:5px">
           <button class="sec" id="fmReset" type="button" style="width:auto;padding:4px 8px;font-size:11px" title="Back to stock: all farmland, rocks/bushes off.">Reset</button>
           <button class="sec" id="fmPreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Preview the farmland patchwork + scattered rocks/bushes these settings produce (one colour per patch style, dots for rocks/bushes). Updates live. Scroll to zoom, drag to pan.">🌾 Preview pattern</button>
@@ -1903,11 +1911,17 @@ async function refreshState() {
       });
       if (typeof fcPaint === 'function') fcPaint();
     }
-    if ($('rocks')) $('rocks').checked = !!st.rocks;
-    if ($('bushes')) $('bushes').checked = !!st.bushes;
+    if ($('scatter_mode')) {
+      let sm = st.scatter_mode;
+      if (!sm) sm = (st.rocks && st.bushes) ? 'both' : st.rocks ? 'rocks' : st.bushes ? 'bushes' : 'none';
+      $('scatter_mode').value = sm;
+    }
+    if ($('field_scale') && document.activeElement !== $('field_scale')) {
+      $('field_scale').value = (st.field_scale != null ? st.field_scale : 100);
+      const v = $('field_scalev'); if (v) v.textContent = $('field_scale').value + '%';
+    }
     if ($('grass_texture')) $('grass_texture').checked = !!st.grass_texture;
     if ($('land_texture')) $('land_texture').checked = !!st.land_texture;
-    if (typeof fmSyncRows === 'function') fmSyncRows();
   }
   if ($('vexag') && document.activeElement !== $('vexag')) $('vexag').value = st.vertical_exaggeration || 1;
   if ($('snowMode')) $('snowMode').value = st.snow_mode || 'peaks';
@@ -3043,9 +3057,6 @@ function fmPaint(){
   });
 }
 function fmSave(){ return api('/api/settings', { field_mix: fmCollect() }); }
-function fmSyncRows(){
-  /* scatter density is locked to 1 per region — no slider rows to toggle */
-}
 let _fieldShown = false;
 // ── Farm-plot crop sliders (each farm parcel grows ONE crop, weighted) ──
 const FARM_CROPS = [
@@ -3119,10 +3130,16 @@ FARM_CROPS.forEach(([k]) => {
   el.onchange = fcSave;
   _wireEditable(el, $('fcv_' + k), v => v + '%', () => { fcPaint(); if (_fieldShown) renderFieldPreview(); fcSave(); });
 });
-['rocks', 'bushes'].forEach(id => {
-  const el = $(id); if (!el) return;
-  el.addEventListener('change', () => { fmSyncRows(); api('/api/settings', { [id]: el.checked }); if (_fieldShown) renderFieldPreview(); });
+if ($('scatter_mode')) $('scatter_mode').addEventListener('change', () => {
+  api('/api/settings', { scatter_mode: $('scatter_mode').value });
+  if (_fieldShown) renderFieldPreview();
 });
+if ($('field_scale')) {
+  const el = $('field_scale'), vs = $('field_scalev');
+  el.oninput = () => { if (vs) vs.textContent = el.value + '%'; if (typeof paintRange === 'function') paintRange(el); if (_fieldShown) renderFieldPreview(); };
+  el.onchange = () => api('/api/settings', { field_scale: parseInt(el.value, 10) });
+  _wireEditable(el, vs, v => v + '%', v => { if (_fieldShown) renderFieldPreview(); api('/api/settings', { field_scale: v }); });
+}
 ['grass_texture', 'land_texture'].forEach(id => {
   const el = $(id); if (!el) return;
   el.addEventListener('change', () => api('/api/settings', { [id]: el.checked }));
@@ -3130,12 +3147,12 @@ FARM_CROPS.forEach(([k]) => {
 if ($('fmReset')) $('fmReset').onclick = async () => {
   FIELD_MIX.forEach(([k, , def]) => { const el = $('fm_' + k); if (el) el.value = def; });
   FARM_CROPS.forEach(([k, , def]) => { const el = $('fc_' + k); if (el) el.value = def; });
-  if ($('rocks')) $('rocks').checked = false;
-  if ($('bushes')) $('bushes').checked = false;
+  if ($('scatter_mode')) $('scatter_mode').value = 'both';
+  if ($('field_scale')) { $('field_scale').value = 100; const v = $('field_scalev'); if (v) v.textContent = '100%'; }
   if ($('grass_texture')) $('grass_texture').checked = true;   // default ON
   if ($('land_texture')) $('land_texture').checked = true;     // default ON
-  fmPaint(); fcPaint(); fmSyncRows();
-  await Promise.all([fmSave(), fcSave(), api('/api/settings', { rocks: false, bushes: false, grass_texture: true, land_texture: true })]);
+  fmPaint(); fcPaint();
+  await Promise.all([fmSave(), fcSave(), api('/api/settings', { scatter_mode: 'both', field_scale: 100, grass_texture: true, land_texture: true })]);
   if (_fieldShown) renderFieldPreview();
 };
 // Preview: patchwork of the mix (one filled cell per ~7-block patch) + rock/bush dots.
@@ -3148,16 +3165,17 @@ function renderFieldPreview(){
   const W = c.width, H = c.height, ctx = c.getContext('2d');
   ctx.clearRect(0, 0, W, H);
   const span = _winRegions.field * 512;                   // blocks across this window
-  // Parcel params must match field_texture.rs so the preview reads like the real gen.
-  const MACRO = 160, F_WARP = 4, F_WSCALE = 24, F_SUB = 6;
+  // Parcel params must match field_texture.rs v3 (orientation domains + strips + zoom).
+  const MACRO = 192, F_WARP = 4, F_WSCALE = 24, F_SUB = 6;
+  const F_ANGLES = [[0,1],[0.258819,0.965926],[0.5,0.866025],[0.707107,0.707107],[-0.258819,0.965926],[-0.5,0.866025]];
+  const F_SCALE = $('field_scale') ? Math.max(25, Math.min(400, parseInt($('field_scale').value, 10) || 100)) : 100;
   const STEP = Math.max(1, Math.round(span / 300));        // fine sample => crisp parcels, patches + tracks
   const n = Math.max(8, Math.round(span / STEP));
   const cell = W / n;
   const [cx, cz] = _selCenterBlock(), bx0 = cx - span / 2, bz0 = cz - span / 2;
-  const parcelSize = (mx, mz) => [18, 30, 46][_treeHash((mx ^ 0x51ed), mz * 7) % 3];
-  const catForParcel = (px, pz) => {
+  const catForParcel = (px, pz, ds) => {
     if (sum <= 0) return 3;
-    const target = (_treeHash(px, pz ^ 0x5f3) / 1000) * sum;
+    const target = (_treeHash(px, (pz ^ 0x5f3) ^ ds) / 1000) * sum;
     let c = 3, cum = 0;
     for (let i = 0; i < 5; i++){ cum += weights[i]; if (target < cum){ c = i; break; } }
     return c;
@@ -3165,17 +3183,28 @@ function renderFieldPreview(){
   const parcelAt = (x, z) => {
     const wx = _vnoise(x + 1000, z - 500, F_WSCALE), wz = _vnoise(x - 700, z + 1300, F_WSCALE);
     const sx = Math.round(x + (wx - 0.5) * 2 * F_WARP), sz = Math.round(z + (wz - 0.5) * 2 * F_WARP);
-    const ps = parcelSize(Math.floor(sx / MACRO), Math.floor(sz / MACRO));
-    return [Math.floor(sx / ps), Math.floor(sz / ps), ps, ((sx % ps) + ps) % ps, ((sz % ps) + ps) % ps];
+    const mx = Math.floor(sx / MACRO), mz = Math.floor(sz / MACRO);
+    const dh = _treeHash(mx ^ 0x51ed, mz * 7);
+    const ds = (dh ^ (mx * 0x3bb5) ^ (mz * 0xf0ed)) | 0;
+    const base = Math.max(6, Math.floor([18, 30, 46][dh % 3] * F_SCALE / 100));
+    const lay = Math.floor(dh / 8) % 10;
+    let w, l;
+    if (lay <= 2){ w = Math.max(8, Math.floor(base * 2 / 5)); l = Math.max(16, Math.floor(base * 12 / 5)); }
+    else if (lay <= 5){ w = Math.max(16, Math.floor(base * 12 / 5)); l = Math.max(8, Math.floor(base * 2 / 5)); }
+    else { w = base; l = base; }
+    const a = F_ANGLES[Math.floor(dh / 64) % 6], sinT = a[0], cosT = a[1];
+    const rx = Math.round(sx * cosT + sz * sinT), rz = Math.round(-sx * sinT + sz * cosT);
+    return [Math.floor(rx / w), Math.floor(rz / l), w, l, ((rx % w) + w) % w, ((rz % l) + l) % l, ds];
   };
   const cellColor = (x, z) => {
-    const [px, pz, ps, lx, lz] = parcelAt(x, z);
-    const cat = catForParcel(px, pz);
-    if (lx === 0 || lz === 0 || lx === ps - 1 || lz === ps - 1){
+    const [px, pz, w, l, lx, lz, ds] = parcelAt(x, z);
+    const ps = w;
+    const cat = catForParcel(px, pz, ds);
+    if (lx === 0 || lz === 0 || lx === w - 1 || lz === l - 1){
       let nx = px, nz = pz;
-      if (lx === 0) nx = px - 1; else if (lx === ps - 1) nx = px + 1;
+      if (lx === 0) nx = px - 1; else if (lx === w - 1) nx = px + 1;
       else if (lz === 0) nz = pz - 1; else nz = pz + 1;
-      if (catForParcel(nx, nz) !== cat && (_treeHash(px ^ nx, (pz ^ nz) ^ 0x7a11) % 100) < 45)
+      if (catForParcel(nx, nz, ds) !== cat && (_treeHash(px ^ nx, ((pz ^ nz) ^ 0x7a11) ^ ds) % 100) < 45)
         return [FIELD_BLOCK_COL.track, cat];
     }
     const s = Math.floor(_vnoise(x, z, F_SUB) * 1000);
@@ -3190,7 +3219,7 @@ function renderFieldPreview(){
       let wsum = weights.reduce((a, b) => a + b, 0);
       let crop = 'wheat';
       if (wsum > 0){
-        const t = (_treeHash(px ^ 0xC0FE, pz * 13) / 1000) * wsum;
+        const t = (_treeHash(px ^ 0xC0FE, (pz * 13) ^ ds) / 1000) * wsum;
         let cum = 0;
         for (let i = 0; i < keys.length; i++){ cum += weights[i]; if (t < cum){ crop = keys[i]; break; } }
       }
@@ -3250,7 +3279,7 @@ if ($('fmClear')) $('fmClear').onclick = () => {
   if ($('fmWinRow')) $('fmWinRow').style.display = 'none';
 };
 wireWindow('field', 'fm', renderFieldPreview);
-fmSyncRows(); fmPaint();
+fmPaint();
 
 // ---- Schematic props (per-family toggle; only wired families shown) ----
 const PROP_FAMILIES = [['boat','Boats'],['car','Cars'],['crane','Cranes'],['excavator','Excavators'],['fountain','Fountains'],['lighthouse','Lighthouses'],['playground','Playgrounds'],['tombstone','Tombstones'],['tractor','Tractors'],['windturbine','Wind turbines']];

@@ -24,6 +24,12 @@ preview of the pattern before you build. Bundles arnis fork 3.0.4.
   varied plot sizes, dirt-track boundaries, and internal ground variation) with farmland
   drawn golden, plus evenly-scattered dots for rocks and bushes. Live legend,
   scroll-to-zoom / drag-to-pan, and a wider area range to see the whole patchwork.
+- **Real field layout.** Fields now sit in orientation domains — long strips and blocky
+  plots at multiple angles (0/±15/±30/45°) like real farmland from above, with a
+  **Pattern size** slider (25-400%) to zoom the whole layout. Rocks & bushes became one
+  selector (Rocks + bushes / Rocks / Bushes / None): every 16×16 chunk of farm, grass
+  and untagged land has a 20% chance of one schematic piece. The preview mirrors the
+  angled parcels, strips and pattern size.
 - **Real farm plots.** A new "Farm plots" slider group sets what the Farmland share
   grows — wheat / potato / carrot / beetroot / sunflower / pumpkin / fallow. Each plot
   (parcel) grows ONE crop, so the map forms a real monoculture patchwork: golden wheat

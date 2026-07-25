@@ -67,11 +67,11 @@ def default_settings() -> dict:
         "field_mix": {"coarse": 0, "plains": 0, "flower": 0, "farm": 100, "moss": 0},
         # Scatter small schematic props on farmland (off by default). density = relative
         # amount 0..64; only sent to the fork when the toggle is on.
-        # Scatter is per 512x512 region and locked to 1 each (sparse, no UI slider).
-        "rocks": False,
-        "rock_density": 1,
-        "bushes": False,
-        "bush_density": 1,
+        # Rock/bush schematic scatter: one selector — none | rocks | bushes | both.
+        # Each 16x16 chunk of farm/grass/untagged land rolls 20% for one piece.
+        "scatter_mode": "both",
+        # Field-pattern zoom percent (25-400): scales all parcel/plot sizes.
+        "field_scale": 100,
         # Also texture OSM grassland (meadow/grass/orchard) and untagged satellite land
         # with the field pattern, not just OSM farmland. ON by default: most of the plain
         # is untagged ESA cropland and would otherwise render as endless stock wheat
