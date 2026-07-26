@@ -6,12 +6,12 @@ Turn an OpenStreetMap selection into one seamless Minecraft world. Meld tiles th
 every tile in parallel, and melds them with no height cliffs and no seams. From a city block to a
 whole continent.
 
-&nbsp;![version](https://img.shields.io/badge/version-1.7.0-blue)
+&nbsp;![version](https://img.shields.io/badge/version-1.7.1-blue)
 &nbsp;![Minecraft](https://img.shields.io/badge/Minecraft%20Java-1.21%2B-brightgreen)
 &nbsp;![Python](https://img.shields.io/badge/Python-3.10%2B-yellow)
 &nbsp;![built on](https://img.shields.io/badge/built%20on-Arnis%20fork-orange)
 
-**Windows · macOS · Linux** &nbsp;·&nbsp; Latest: **[1.7.0 Meld Compass](CHANGELOG.md)** &nbsp;·&nbsp; [Getting started](docs/getting-started.mdx)
+**Windows · macOS · Linux** &nbsp;·&nbsp; Latest: **[1.7.1 Farmlands](CHANGELOG.md)** &nbsp;·&nbsp; [Getting started](docs/getting-started.mdx)
 
 </div>
 
@@ -94,6 +94,7 @@ has the highlights of each release.
 | **Caves** (1.5.0) | One toggle carves a full **vanilla-style cave system** into every cell at generation time: caverns, tunnels, underground rivers and lakes, the vanilla ore table, geodes, and **eight themed cave biomes** — deterministic and seam-safe across tiles, with a bundled `cave-pack/` of 143 hand-made cave formations placed automatically. Powered by the Arnis fork's `--caves` engine. See [docs](https://meldmc.com/docs/caves). |
 | **Export & compression** (1.5.0) | Ship the finished world smaller: **zip / tar.zst** archives (~1.85×, still vanilla-playable after extracting), **Linear** (~4.85×, Leaf/Folia servers), or **B_Linear** via a bundled Rust converter — with keep-modes that never delete the raw world until the new copy verifies. Plus a standalone `meldconvert.py` CLI. |
 | **Server setup** (1.5.0) | World to **running Leaf server** in five confirmed steps: plan (exact versions + hashes), stage, download (hash-verified), accept the EULA, start — with a live console, the border plugins pre-staged, format-correct world files, an optional **Voxy** streamer (players see the whole map on join), a pre-render sweep, automatic first-start backup, and a crash watchdog. Localhost by design. See [docs](https://meldmc.com/docs/server-setup). |
+| **Farmlands** (1.7.1) | Farmland, grassland and untagged plains become real countryside: rotated **field parcels** that follow the roads, **monoculture crop plots** (wheat / potato / carrot / beetroot / sunflower / pumpkin / fallow) at different growth stages, wildflower meadows, dirt tracks, hay bales, and scattered **rocks & bushes** — with per-land-kind mix sliders and a live pattern preview. |
 | **Projects, folders & render queue** (1.7.0) | Keep many worlds side by side in the **Projects gallery**: clone, rename, locate on the map, drag to reorder, and group into **folders**. Focus the map on one folder, then **queue** a folder (or any set) to render **one after another** with pause / stop / kill and per-project + combined size estimates. |
 | **Guided one-click UI** (1.7.0) | A three-step rail (Settings / Prepare data / Generate), a **settings search**, a single **Generate world** button, a darker glass skin, and a **one-click launcher** for Windows, macOS and Linux (`meld.bat` / `meld.command` / `meld.sh`) that installs everything and starts. **Borders & zones** now build from any **drawn rectangle or polygon**, and Server setup can run the world **in place** with no copy. See [CHANGELOG](CHANGELOG.md). |
 | **LOD ready** | Chunk lighting is baked in, so distant chunks render lit in Distant Horizons and Voxy without flying the whole world first. |

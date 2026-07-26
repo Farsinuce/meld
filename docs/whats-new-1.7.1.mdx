@@ -1,0 +1,62 @@
+# What's new in 1.7.1 - Farmlands
+
+Farmlands turns the open land into real countryside. Until now, fields rendered as one
+endless carpet of tilled crops, meadows were flat green, and the huge plains OSM never
+mapped looked empty. 1.7.1 gives all of it the structure of real agricultural land —
+and puts you in control of the mix.
+
+## Field parcels
+
+Farmland now splits into **rectangular parcels** like real plots seen from above: long
+strips and blocky fields at multiple angles, **aligned to the nearby road network** the
+way real cadastre follows its access roads. Parcels are separated by dirt tracks,
+their interiors carry worn spots and noise texture, and field systems change
+orientation along organically wandering borders instead of a grid. Parcel sizes are
+defined in real metres and track the map scale, and a **Pattern size** slider
+(25-400%) zooms the whole layout.
+
+## Real crop plots
+
+Each field grows **one crop**: wheat, potato, carrot, beetroot, sunflower rows on
+tilled ridges, pumpkin patches on a grass mosaic, or fallow resting ground. Neighbour
+fields ripen at different growth stages, bird-sown stray patches break up the
+monoculture, wheat and fallow plots carry hay-bale bundles, and **sunflower fields
+cluster in the low, open plains**. A new **Farm plots** slider group weights the crop
+shares.
+
+## Three land profiles
+
+A **Profile** picker gives each land kind its own five-way mix (Coarse dirt / Plains /
+Flowers / Farmland / Moss):
+
+- **Farmland** — OSM-tagged fields, your main sliders.
+- **Grassland** — OSM meadows, grass, orchards and village greens; defaults grassy.
+- **Untagged land** — the satellite-classified plains OSM leaves blank; defaults to
+  open plains rather than endless crops. Villages get grassy ground instead of wheat.
+
+Everything carries vanilla-density cover: short grass, ferns, two-block large ferns,
+tall grass, ten wildflower species, sunflowers, dead bushes, and moss.
+
+## Rocks and bushes
+
+One selector (Rocks + bushes / Rocks / Bushes / None) scatters 68 bundled schematics —
+8 andesite/tuff rock formations and 60 bushes across 10 species — at random rotations
+over farm, grass and untagged land. Bushes appear in roughly 5% of chunks and the much
+rarer rocks in about 2%, never on rivers, lakes, roads, or tilled fields.
+
+## Live pattern preview
+
+The "🌾 Preview pattern" canvas mirrors the generator: angled parcels and strips,
+domain borders, per-crop plot tints (farmland drawn golden), vegetation speckle, and
+scatter dots — following whichever profile you have selected, with scroll-zoom and a
+wide area stepper.
+
+## Fixes
+
+- Flat lowland farmland no longer gets stray snow speckle (snow needs real mountain
+  relief; genuine peaks still cap).
+- Nothing floats over water any more: sunflowers, flowers, moss and bushes are swept
+  off rivers and lakes, and schematic pieces never stamp onto water.
+
+Farmlands bundles the arnis fork 3.0.4 generator. Every new behaviour is additive and
+seam-safe; a project that never opens the Farmland drawer builds exactly as before.

@@ -4,56 +4,51 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
-## [1.7.1] - 2026-07-23
+## [1.7.1] - 2026-07-26 - "Farmlands"
 
-Farmland comes alive. A new **Farmland texture** drawer splits the map's farmland into a
-mix of patch styles and scatters small rocks and bushes over it, with a live on-screen
-preview of the pattern before you build. Bundles arnis fork 3.0.4.
+The countryside comes alive. Farmland, grassland, and the plains OSM never mapped turn
+into real agricultural land: rotated field parcels that follow the roads, monoculture
+crop plots at different growth stages, wildflower meadows, dirt tracks, hay bales, and
+scattered rocks and bushes — with live pattern previews and per-land-kind controls.
+Bundles arnis fork 3.0.4.
 
 ### Added
 
-- **Farmland texture mix.** Five sliders (Coarse dirt / Plains / Flowers / Farmland /
-  Moss) set the relative shares of OSM farmland. Each ~7-block plot becomes one style,
-  so `Plains 60%` makes roughly 60% of the farmland open grass. The default is all
-  Farmland, so an untouched project builds exactly as before.
-- **Scattered rocks and bushes.** Toggle rocks (andesite/tuff formations) and bushes
-  (10 species) onto farmland, each with an amount slider. They are placed at random
-  rotations in small numbers.
-- **Live pattern preview.** A "🌾 Preview pattern" canvas shows the farmland as
-  rectangular field parcels of each style (matching how the generator lays them down —
-  varied plot sizes, dirt-track boundaries, and internal ground variation) with farmland
-  drawn golden, plus evenly-scattered dots for rocks and bushes. Live legend,
-  scroll-to-zoom / drag-to-pan, and a wider area range to see the whole patchwork.
-- **Real field layout.** Fields now sit in orientation domains — long strips and blocky
-  plots at multiple angles like real farmland from above, **aligned to the nearby road
-  network** where roads exist. Parcel sizes track the map scale (same real-world plot
-  size at any scale), with a **Pattern size** slider (25-400%) on top. Rocks & bushes
-  became one selector (Rocks + bushes / Rocks / Bushes / None): bushes in ~5% and the
-  much rarer rocks in ~2% of chunks over farm, grass and untagged land — and pieces
-  never stamp onto rivers or lakes any more. A **Profile** picker (Farmland / Grassland
-  / Untagged land) gives each land kind its own five shares, with grassy and
-  open-plains defaults; the preview follows the selected profile.
-- **Real farm plots.** A new "Farm plots" slider group sets what the Farmland share
-  grows — wheat / potato / carrot / beetroot / sunflower / pumpkin / fallow. Each plot
-  (parcel) grows ONE crop, so the map forms a real monoculture patchwork: golden wheat
-  fields next to potato fields next to sunflower rows. Wheat/fallow plots get hay-bale
-  bundles; pumpkin patches sit on a grass/coarse mosaic; bare patches use packed mud
-  (never regrows grass) with dead bushes; rocks/bushes hug plot edges. The preview
-  colours each plot by its crop. Default = the combined patchwork (unchanged look).
-- **Click any value to type it.** Every mix-share, crop-share and scatter number can be
-  clicked to enter an exact value, not just dragged.
-- **No stray snow on lowland farmland.** The bundled generator no longer speckles flat
-  farmland with snow (snow now needs real mountain relief); genuine peaks still cap.
-- **Texture more than farmland.** Two toggles in the Farmland drawer — "Also texture open
-  grassland" (OSM meadow/grass/orchard) and "Also texture untagged land" (satellite
-  cropland/grassland) — extend the field pattern to the large green areas that OSM leaves
-  blank, so they stop rendering as flat land. **Both are on by default** (most of a rural
-  plain is untagged cropland, which otherwise renders as endless stock wheat), villages
-  (residential areas) get grassy ground instead of crops, and a `land_mix` setting lets
-  untagged cropland use its own shares separate from real farmland.
-- **Sparser, better-placed rocks/bushes.** Scatter is now budgeted per 512×512 region
-  (defaults 4 rocks / 8 bushes per region) instead of per cell, so they stay rare and
-  evenly spread even on huge fields.
+- **Farmland texture drawer.** Five sliders (Coarse dirt / Plains / Flowers / Farmland /
+  Moss) set the relative shares of farmland; each plot becomes one style, so
+  `Plains 60%` makes ~60% of the farmland open grass. A **Profile** picker (Farmland /
+  Grassland / Untagged land) gives each land kind its own five shares — grassland
+  defaults grassy, untagged satellite land defaults to open plains instead of endless
+  crops. Every value is click-to-type.
+- **Real farm plots.** A "Farm plots" slider group weights what fields grow — wheat,
+  potato, carrot, beetroot, sunflower rows, pumpkin patches, fallow. Each field grows
+  one crop at one stage; neighbouring fields ripen differently, stray bird-sown patches
+  and hay-bale bundles break up the carpet, and sunflower fields cluster in the low
+  open plains.
+- **Fields that follow the land.** Parcels sit in orientation domains at multiple
+  angles — long strips and blocky plots — **aligned to the nearby road network**, with
+  organically wandering domain borders and farmland that feathers into the surrounding
+  grassland. Parcel sizes track the map scale, with a **Pattern size** slider (25-400%).
+- **Texture more than farmland.** "Also texture open grassland" and "Also texture
+  untagged land" (both on by default) extend the pattern to OSM meadows and to the huge
+  satellite-classified plains OSM leaves blank; villages get grassy ground instead of
+  wheat. Everything carries vanilla-density cover: short grass, ferns, large ferns,
+  tall grass, ten wildflower species, sunflowers, dead bushes, moss.
+- **Rocks & bushes.** One selector (Rocks + bushes / Rocks / Bushes / None): 8 rock
+  formations and 60 bush schematics scatter at random rotations across farm, grass and
+  untagged land — bushes in ~5% and rocks in ~2% of chunks, never on rivers, lakes,
+  roads, or tilled fields.
+- **Live pattern preview.** The "🌾 Preview pattern" canvas mirrors the generator —
+  angled parcels, strips, domain borders, per-crop plot tints (farmland golden),
+  vegetation speckle, scatter dots — and follows the selected profile, with
+  scroll-zoom and a wide area range.
+
+### Fixed
+
+- **No stray snow on lowland farmland.** Snow now needs real mountain relief; genuine
+  peaks still cap.
+- **Nothing floats over water.** Sunflowers, flowers, moss and bushes no longer hover
+  over rivers and lakes, and schematic pieces never stamp onto water.
 
 ## [1.7.0] - 2026-07-19 - "Meld Compass"
 

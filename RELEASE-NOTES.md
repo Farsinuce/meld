@@ -2,13 +2,16 @@
 
 Short, human highlights for each Meld release. Full detail lives in [CHANGELOG.md](CHANGELOG.md).
 
-## v1.7.1
+## v1.7.1 - Farmlands
 
-**Farmland texturing: mix the map's farmland into plains, flowers, coarse dirt and moss, scatter rocks and bushes over it, and preview the pattern before you build.** Bundles arnis fork 3.0.4.
+**Open land becomes real countryside: rotated field parcels that follow the roads, crop plots at different growth stages, wildflower meadows, hay bales, rocks and bushes — across farmland, grassland, and the plains OSM never mapped.** Bundles arnis fork 3.0.4.
 
-- **Farmland texture drawer.** Five sliders set the relative shares of OSM farmland — Coarse dirt, Plains, Flowers, Farmland, Moss — split into small coherent plots. Default is all Farmland, so nothing changes unless you move a slider.
-- **Rocks and bushes.** Toggle scattered rock formations (andesite/tuff) and bushes (10 species) onto farmland, each with an amount slider; placed at random rotations in small numbers.
-- **Live pattern preview.** A canvas shows the patchwork (one colour per style) plus dots for the rocks/bushes over your selection, with a legend and scroll-to-zoom, just like the tree preview.
+- **Field parcels.** Farmland splits into strips and blocky plots at multiple angles, aligned to the road network, with dirt-track boundaries and organic domain borders. Pattern-size slider (25-400%); parcel sizes track the map scale.
+- **Real crop plots.** Wheat, potato, carrot, beetroot, sunflower rows, pumpkin patches, and fallow — one crop per field, different growth stages per field, stray bird-sown patches, hay-bale bundles, and sunflowers clustering in the low plains. Weighted by a new "Farm plots" slider group.
+- **Three land profiles.** Farmland / Grassland / Untagged land each get their own five-way mix (grassland defaults grassy, untagged defaults open plains); villages get grassy ground instead of wheat. All of it carries vanilla-density grass, ferns, ten wildflower species and moss.
+- **Rocks & bushes.** 68 bundled schematics scatter at random rotations over farm, grass and untagged land (bushes ~5%, rocks ~2% of chunks) — never on water, roads, or tilled fields.
+- **Live preview.** The pattern canvas mirrors it all: angles, strips, crop tints, vegetation speckle, scatter dots — per selected profile.
+- **Fixes.** No stray snow on flat farmland; nothing floats over rivers or lakes.
 
 ## v1.7.0 - Meld Compass
 
