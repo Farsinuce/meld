@@ -3214,7 +3214,9 @@ function renderFieldPreview(){
   const parcelAt = (x, z) => {
     const wx = _vnoise(x + 1000, z - 500, F_WSCALE), wz = _vnoise(x - 700, z + 1300, F_WSCALE);
     const sx = Math.round(x + (wx - 0.5) * 2 * F_WARP), sz = Math.round(z + (wz - 0.5) * 2 * F_WARP);
-    const mx = Math.floor(sx / MACRO), mz = Math.floor(sz / MACRO);
+    const mwx = _vnoise(sx - 4000, sz + 2000, 64), mwz = _vnoise(sx + 5000, sz - 3000, 64);
+    const dxw = sx + Math.round((mwx - 0.5) * 56), dzw = sz + Math.round((mwz - 0.5) * 56);
+    const mx = Math.floor(dxw / MACRO), mz = Math.floor(dzw / MACRO);
     const dh = _treeHash(mx ^ 0x51ed, mz * 7);
     const ds = (dh ^ (mx * 0x3bb5) ^ (mz * 0xf0ed)) | 0;
     const _sizes = fmProfileKey() === 'field_mix' ? [18, 30, 46] : [40, 80, 140];
@@ -3263,10 +3265,19 @@ function renderFieldPreview(){
   };
   const counts = [0, 0, 0, 0, 0];
   for (let gy = 0; gy < n; gy++) for (let gx = 0; gx < n; gx++){
-    const [col, cat] = cellColor(Math.round(bx0 + gx * STEP), Math.round(bz0 + gy * STEP));
+    const wx2 = Math.round(bx0 + gx * STEP), wz2 = Math.round(bz0 + gy * STEP);
+    const [col, cat] = cellColor(wx2, wz2);
     counts[cat]++;
     ctx.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
     ctx.fillRect(Math.floor(gx * cell), Math.floor(gy * cell), Math.ceil(cell) + 1, Math.ceil(cell) + 1);
+    // Vegetation speckle so grassy styles read as covered (denser = plains/flower).
+    if (cat === 1 || cat === 2 || cat === 4){
+      const hsp = _treeHash(wx2 * 3 + 11, wz2 * 3 - 7);
+      if (hsp % 1000 < 300){
+        ctx.fillStyle = cat === 2 && hsp % 7 === 0 ? 'rgba(240,220,90,0.8)' : 'rgba(58,102,44,0.55)';
+        ctx.fillRect(Math.floor(gx * cell), Math.floor(gy * cell), 1, 1);
+      }
+    }
   }
   // Scattered props over the patchwork. density (0..64) reads as a placement chance.
   // Even, jittered scatter mirroring the fork's scatter_pool: denser => tighter grid.
