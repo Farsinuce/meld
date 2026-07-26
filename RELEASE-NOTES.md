@@ -2,7 +2,7 @@
 
 Short, human highlights for each Meld release. Full detail lives in [CHANGELOG.md](CHANGELOG.md).
 
-## v1.7.1 - Farmlands
+## v1.8.0 - Farmlands
 
 **Open land becomes real countryside: rotated field parcels that follow the roads, crop plots at different growth stages, wildflower meadows, hay bales, rocks and bushes — across farmland, grassland, and the plains OSM never mapped.** Bundles arnis fork 3.0.4.
 

@@ -4,7 +4,7 @@ Meld turns one map selection into one seamless Minecraft world. It tiles a big a
 
 New here? Start with [Getting started](./getting-started.mdx) to install and run Meld in one click on
 Windows, macOS or Linux. For what changed in the latest release, see
-[What's new in 1.7.1](./whats-new-1.7.1.mdx); the full per-release history lives in
+[What's new in 1.8.0](./whats-new-1.8.0.mdx); the full per-release history lives in
 [CHANGELOG.md](../CHANGELOG.md).
 
 ## How a build flows, end to end
@@ -37,7 +37,7 @@ Each page explains the why, the mechanism, and how to use it in the app.
 
 ## What changed between releases
 
-- [What's new in Meld 1.7.1, Farmlands](./whats-new-1.7.1.mdx). Field parcels that follow the roads, monoculture crop plots at different growth stages, wildflower meadows, hay bales, rocks and bushes across farmland, grassland and the untagged plains, with per-land-kind mix sliders and a live pattern preview.
+- [What's new in Meld 1.8.0, Farmlands](./whats-new-1.8.0.mdx). Field parcels that follow the roads, monoculture crop plots at different growth stages, wildflower meadows, hay bales, rocks and bushes across farmland, grassland and the untagged plains, with per-land-kind mix sliders and a live pattern preview.
 - [What's new in Meld 1.7.0, Meld Compass](./whats-new-1.7.0.mdx). A guided three-step rail, a settings search, one Generate button, project folders and a render queue that builds worlds one after another with pause/stop/kill and size estimates, borders from any drawn rectangle or polygon, an in-place server setup, and one-click startup on Windows, macOS and Linux.
 - Releases 1.4.0 through 1.6.2 (region trees, terrain height and snow, borders and zones, the cave system, export and compression, one-click server setup, and the water/cave rendering fixes) are summarised in the [CHANGELOG](../CHANGELOG.md).
 - [What's new in Meld 1.3.0](./whats-new-1.3.0.mdx). A benchmark report for every run, live mid-run tuning of workers/threads/CPU budget, one guided rail, fast first-build defaults, a free 1 to 64 cell size, and accurate CPU/RAM gauges.
