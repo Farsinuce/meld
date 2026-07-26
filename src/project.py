@@ -78,8 +78,11 @@ def default_settings() -> dict:
         # (verified by block audit). Untick for stock-arnis surfaces.
         "grass_texture": True,
         "land_texture": True,
-        # Optional separate mix for untagged satellite cropland ('' = reuse field_mix).
-        "land_mix": "",
+        # Per-profile mixes (relative shares). Grassland = OSM meadow/grass/orchard +
+        # satellite grassland; Untagged = satellite cropland OSM never mapped. Defaults:
+        # grassland is grassy, untagged is open-plains-leaning (not half crops).
+        "grass_mix": {"coarse": 6, "plains": 64, "flower": 22, "farm": 0, "moss": 8},
+        "untagged_mix": {"coarse": 15, "plains": 40, "flower": 10, "farm": 25, "moss": 10},
         # Farm-plot crop shares: each farm parcel grows ONE crop picked by these
         # weights (real monoculture plots). Defaults = the combined patchwork.
         "farm_crops": {"wheat": 40, "potato": 15, "carrot": 15, "beetroot": 8,

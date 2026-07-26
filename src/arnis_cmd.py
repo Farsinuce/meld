@@ -56,22 +56,24 @@ def cave_biomes_spec(settings: dict) -> str:
 FIELD_MIX_KEYS = ["coarse", "plains", "flower", "farm", "moss"]
 
 
-def field_mix_spec(settings: dict) -> str:
-    """`--field-mix` value from the field_mix setting, or '' when the mix is stock
-    (only 'farm' has weight). Emits just the non-zero shares so proportions are exact
-    and a default project stays byte-identical (no flag at all)."""
-    mix = settings.get("field_mix") or {}
+def _mix_spec(mix: dict) -> str:
+    """Render a 5-share mix dict as the fork's `name=pct` list ('' when farm-only)."""
     parts = {}
     for name in FIELD_MIX_KEYS:
         try:
-            pct = int(mix.get(name, 0))
+            pct = int((mix or {}).get(name, 0))
         except (TypeError, ValueError):
             pct = 0
         parts[name] = max(0, min(200, pct))
-    # Stock = no non-farm share -> let the fork use its default (tilled farmland).
     if parts["coarse"] + parts["plains"] + parts["flower"] + parts["moss"] == 0:
         return ""
     return ",".join(f"{k}={v}" for k, v in parts.items() if v > 0)
+
+
+def field_mix_spec(settings: dict) -> str:
+    """`--field-mix` value, or '' when stock (farm-only) so default runs stay
+    byte-identical (no flag at all)."""
+    return _mix_spec(settings.get("field_mix"))
 
 
 # Farm-plot crop keys + default shares (the "combined" patchwork; must match the fork).
@@ -356,12 +358,16 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     # satellite land (both ON by default — most of the plain is untagged cropland).
     if settings.get("grass_texture"):
         cmd.append("--grass-texture")
+        gm = _mix_spec(settings.get("grass_mix"))
+        if gm:
+            cmd += ["--grass-mix", gm]
     if settings.get("land_texture"):
         cmd.append("--land-texture")
-        # Optional separate mix for untagged cropland; '' = reuse --field-mix.
-        lm = str(settings.get("land_mix") or "").strip()
-        if lm:
-            cmd += ["--land-mix", lm]
+        # Untagged cropland's own mix (plains-leaning default); omitting the flag
+        # would fall back to the farmland sliders in the fork.
+        um = _mix_spec(settings.get("untagged_mix"))
+        if um:
+            cmd += ["--land-mix", um]
     return cmd
 
 

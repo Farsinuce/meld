@@ -2574,9 +2574,16 @@ def api_settings():
         patch["grass_texture"] = bool(patch["grass_texture"])
     if patch.get("land_texture") is not None:
         patch["land_texture"] = bool(patch["land_texture"])
-    if patch.get("land_mix") is not None:
-        # Free-form name=pct spec; keep it short and stripped (arnis ignores bad keys).
-        patch["land_mix"] = str(patch["land_mix"]).strip()[:128]
+    for _mixkey in ("grass_mix", "untagged_mix"):
+        if patch.get(_mixkey) is not None:
+            raw = patch[_mixkey] if isinstance(patch[_mixkey], dict) else {}
+            clean = {}
+            for name in arnis_cmd.FIELD_MIX_KEYS:
+                try:
+                    clean[name] = max(0, min(200, int(raw.get(name, 0))))
+                except (TypeError, ValueError):
+                    clean[name] = 0
+            patch[_mixkey] = clean
     if patch.get("farm_crops") is not None:
         raw = patch["farm_crops"] if isinstance(patch["farm_crops"], dict) else {}
         clean = {}
