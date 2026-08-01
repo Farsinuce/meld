@@ -151,6 +151,10 @@ def default_settings() -> dict:
         # How many OSM tiles download at once. 2 = the public Overpass per-IP slot allowance
         # (halves prefetch time without tripping the rate limit). Capped at 4 for private endpoints.
         "prefetch_concurrency": 2,
+        # Days before a cached OSM grid tile counts as stale and re-downloads (0 = never).
+        # Long on purpose: a mass expiry re-fetches a whole country through the public
+        # Overpass rate limit (hours of "Fetch OSM" on an area that was already local).
+        "osm_cache_ttl_days": 365,
         # Region data pack: how many elevation tiles the bulk downloader pulls at once. 16 keeps
         # one controlled process well under any S3 throttle (vs the per-cell burst that flat-seams).
         "datapack_tile_concurrency": 16,

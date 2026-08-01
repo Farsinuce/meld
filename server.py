@@ -2570,6 +2570,11 @@ def api_settings():
             patch["field_scale"] = max(25, min(400, int(patch["field_scale"])))
         except (TypeError, ValueError):
             patch["field_scale"] = 100
+    if patch.get("osm_cache_ttl_days") is not None:
+        try:
+            patch["osm_cache_ttl_days"] = max(0, min(3650, int(patch["osm_cache_ttl_days"])))
+        except (TypeError, ValueError):
+            patch["osm_cache_ttl_days"] = 365
     if patch.get("grass_texture") is not None:
         patch["grass_texture"] = bool(patch["grass_texture"])
     if patch.get("land_texture") is not None:

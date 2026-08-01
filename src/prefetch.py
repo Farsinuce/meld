@@ -287,8 +287,19 @@ def preview_clumps(cells, origin, settings) -> list[dict]:
 # OSM responses drift (new buildings/roads), unlike terrain/ESA tiles, so the shared OSM
 # cache entries expire. Bump OSM_CACHE_VERSION if the Overpass query shape ever changes
 # (it salts the key, invalidating every old file).
-OSM_CACHE_TTL_DAYS = 30
+# Default TTL is long on purpose: a mass expiry re-downloads a whole country through the
+# public Overpass 2-slot rate limit (hours). settings['osm_cache_ttl_days'] overrides;
+# 0 means never expire.
+OSM_CACHE_TTL_DAYS = 365
 OSM_CACHE_VERSION = "v1"
+
+
+def _ttl_seconds(settings: dict) -> float:
+    try:
+        days = float(settings.get("osm_cache_ttl_days", OSM_CACHE_TTL_DAYS))
+    except (TypeError, ValueError):
+        days = OSM_CACHE_TTL_DAYS
+    return days * 86400 if days > 0 else float("inf")
 
 
 def meld_cache_root() -> Path:
@@ -503,7 +514,7 @@ def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk) -> dict
 
     osm_files: dict[str, str] = {}
     _files_lock = threading.Lock()   # tiles download in parallel; guard the shared map
-    ttl_s = OSM_CACHE_TTL_DAYS * 86400
+    ttl_s = _ttl_seconds(settings)
 
     # Each cell's covering set of stable grid tiles (the reuse unit). Computed from the SAME
     # seam-expanded bbox the cell hands Arnis, so the tiles fully cover what the cell needs.
