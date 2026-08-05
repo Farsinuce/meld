@@ -4,6 +4,62 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.8.1] - 2026-08-06 - "Height"
+
+Pick the Minecraft version you are building for, and let a world's vertical range follow
+its terrain instead of vanilla's -64..319. Defaults are unchanged: a project that does not
+touch these settings emits no new flags and generates exactly as 1.8.0 did.
+
+### Added
+- **Minecraft version** selector (Settings -> Arnis). Decides the `DataVersion` written
+  into every chunk, whether extended build height may be declared at all, and the chunk
+  layout. Only versions the fork has VERIFIED constants for are offered — an unverified
+  one would produce a world that loads and then quietly misbehaves. Choosing a pre-1.17
+  version disables the extended-height toggle with the reason shown inline, rather than
+  hiding it.
+- **Extend build height**, reworked. The world now declares exactly the range its terrain
+  needs via a generated datapack, instead of a fixed 4064-block one. If the terrain fits
+  vanilla, no datapack is written at all — no experimental-features prompt, and no
+  unremovable pack, for nothing.
+- **Headroom above peak** and **Underroom below floor** sliders: the room reserved for
+  trees and buildings above, and caves and water carving below. Underroom past 8 is what
+  pushes a world below vanilla's floor.
+- **World floor Y / World ceiling Y** boxes for setting the range exactly. Blank = fitted
+  from the terrain. A value that would cut into the terrain is refused with a reason
+  rather than clamped, so mountain tops are never silently lost.
+- `tools/height_test/height_check.py`: generates real worlds and reads back what landed on
+  disk — the dimension geometry, `pack.mcmeta`, the `level.dat` registration, the
+  `DataVersion` in the chunks, that every section lies inside the declared world, that
+  both refusals exit non-zero, that a deep world's basement is filled rock, and that two
+  tiles with very different water content still choose the same datum.
+
+### Fixed
+- **The master world lost its datapack.** `merge_cell_into_master` copied region files and
+  `level.dat` but not `datapacks/`, while arnis registers `file/arnis_tall` inside each
+  cell's `level.dat`. A merged world therefore asked for a datapack that was never copied,
+  and Minecraft loaded it at vanilla height — every block above y=319 of an extended world
+  gone. Packs are now copied before `level.dat` and under the same lock, so an interrupted
+  merge can leave a spare pack but never a `level.dat` referencing a missing one, and a
+  world whose first merge predates this fix is backfilled.
+- **A Y-cliff along coastlines.** Meld now sends `--water-carve-clearance max` to every
+  cell. Without it the fork measures that clearance per cell, so a cell holding deep water
+  put its datum ~5 blocks above an inland neighbour (measured: Y -62 vs Y -57) and the
+  shared border became a step. This is the one flag on the command line that exists purely
+  because Meld tiles.
+
+### Notes
+- Because the clearance is now fixed, Meld's datum moves from Y -62 to Y -56 for inland
+  areas. A fresh world is unaffected; **re-rendering an existing world will place it 6
+  blocks higher**, so do not mix old and new cells in one world.
+- With the default underroom (16) and Meld's terrain datum at Y -56, extended height
+  writes a datapack for essentially every project rather than only mountainous ones. Set
+  underroom to 8 if you want "no datapack unless the terrain needs it".
+- Verified structurally on generated worlds, not yet loaded in Minecraft: a 4096x4096-block
+  Yosemite build at 1:4 as four cells agreed on geometry, datum and DataVersion, kept every
+  section inside the declared world, and reached Y 559 — 240 blocks above vanilla's ceiling.
+  The two-cell seam probe still reports 100.000% agreement on ground blocks and terrain Y.
+- Requires the bundled Arnis Meld fork **3.0.5**.
+
 ## [1.8.0] - 2026-07-26 - "Farmlands"
 
 The countryside comes alive. Farmland, grassland, and the plains OSM never mapped turn
