@@ -87,6 +87,7 @@ def merge_cell_into_master(
         "collisions": 0,
         "subdirs_merged": [],
         "level_dat": "skipped",
+        "datapacks": "skipped",
     }
 
     # ── PRE-FLIGHT (read-only) ───────────────────────────────────────────────
@@ -155,6 +156,22 @@ def merge_cell_into_master(
         result["regions_copied"] += 1
     result["subdirs_merged"] = sorted(subs_seen)
 
+    # datapacks/ MUST reach the master world, and BEFORE level.dat does.
+    #
+    # Arnis installs its extended-height pack into the CELL world and registers
+    # `file/arnis_tall` inside that cell's level.dat. Copying the level.dat without the
+    # pack files leaves the master world asking for a datapack that isn't there;
+    # Minecraft then loads it at vanilla height and every block above y=319 of an
+    # extended world is gone. Copying packs first means an interrupted merge can leave
+    # spare packs but never a level.dat referencing a missing one.
+    #
+    # Idempotent and run on every cell, so a world whose first merge predates this fix,
+    # or one where the pack appeared part-way through, gets backfilled.
+    if (cell_p / "datapacks").is_dir():
+        with _MASTER_LOCK:
+            master_p.mkdir(parents=True, exist_ok=True)
+            result["datapacks"] = _copy_datapacks(cell_p, master_p)
+
     # level.dat — copy once, patch the name. Serialised across concurrent merges.
     src_dat = cell_p / "level.dat"
     dst_dat = master_p / "level.dat"
@@ -169,6 +186,26 @@ def merge_cell_into_master(
                     result["level_dat"] = "copied"
 
     return result
+
+
+def _copy_datapacks(cell_p: Path, master_p: Path) -> str:
+    """Copy the cell world's datapacks/ into the master world, skipping packs already
+    there. Call under _MASTER_LOCK. Returns a short status for the merge result."""
+    src_root = cell_p / "datapacks"
+    if not src_root.is_dir():
+        return "none"
+    copied = []
+    for pack in sorted(src_root.iterdir()):
+        dst = master_p / "datapacks" / pack.name
+        if dst.exists():
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if pack.is_dir():
+            shutil.copytree(pack, dst)
+        else:
+            shutil.copy2(pack, dst)
+        copied.append(pack.name)
+    return ("copied: " + ", ".join(copied)) if copied else "already present"
 
 
 def strip_buffer_regions(cell_world_path: str, cell_key: str) -> int:
