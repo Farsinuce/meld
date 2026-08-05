@@ -61,3 +61,6 @@ run*_result.json
 # The old cave engine's cave.json format (obsolete; the live pack ships in cave-pack/).
 cave-packs/
 server-run.*
+
+# Seam-test renders (multi-GB region files, regenerated on demand)
+tools/seam_test/_work/
