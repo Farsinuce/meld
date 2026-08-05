@@ -232,6 +232,18 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
                 cmd += [flag, str(int(val))]
     if settings.get("mc_version"):
         cmd += ["--mc-version", str(settings["mc_version"]).strip()]
+    # SEAM-CRITICAL, always sent. The fork otherwise MEASURES how much room to reserve
+    # under the terrain for the deepest water carve from each cell's own land cover, so a
+    # coastal cell puts its datum ~5 blocks above an inland neighbour and the shared
+    # border becomes a Y-cliff (measured: inland Y-62 vs coast Y-57). 'max' reserves the
+    # engine's bounded worst case in EVERY cell, so they all agree.
+    cmd += ["--water-carve-clearance", "max"]
+    # Explicit world floor/ceiling. Blank = derived from the terrain + headroom/underroom.
+    # The fork refuses values that would cut into the terrain rather than clamping them.
+    for key, flag in (("world_min_y", "--min-y"), ("world_max_y", "--max-y")):
+        val = settings.get(key)
+        if val not in (None, ""):
+            cmd += [flag, str(int(val))]
     # NOTE: stream-to-disk is NOT a CLI flag in the merged Arnis (upstream removed the
     # flag in eebecb5; it's now the ARNIS_STREAM_TO_DISK env var + a RAM heuristic).
     # Meld sets that env per-cell in server._runner for big cells, so nothing is added

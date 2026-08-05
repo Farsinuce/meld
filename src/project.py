@@ -57,6 +57,11 @@ def default_settings() -> dict:
         # height is fitted. Only used with disable_height_limit.
         "height_headroom": 32,
         "height_underroom": 16,
+        # Explicit world floor / ceiling, "" = derive from the terrain + the room above.
+        # Multiples of 16 within -2032..2031; the fork REFUSES a value that would cut into
+        # the terrain rather than silently shearing it.
+        "world_min_y": "",
+        "world_max_y": "",
         # Pre-bake per-chunk lighting so LOD mods (Voxy, Distant Horizons) render
         # distant chunks lit without visiting them (Arnis issue #1071). On by default
         # because Meld builds areas too large to fly through; slower + bigger files.

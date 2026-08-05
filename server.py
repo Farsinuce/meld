@@ -2575,6 +2575,18 @@ def api_settings():
     # would be a second source of truth that silently drifts from the fork's table.
     if patch.get("mc_version") is not None:
         patch["mc_version"] = str(patch["mc_version"]).strip()[:32]
+    # Explicit world bounds: "" clears them. Kept as ints otherwise; the fork does the
+    # real validation (alignment, engine limits, terrain fit) and refuses with a reason.
+    for _b in ("world_min_y", "world_max_y"):
+        if patch.get(_b) is not None:
+            raw = str(patch[_b]).strip()
+            if raw == "":
+                patch[_b] = ""
+            else:
+                try:
+                    patch[_b] = max(-2032, min(2031, int(float(raw))))
+                except (TypeError, ValueError):
+                    patch[_b] = ""
     for _room in ("height_headroom", "height_underroom"):
         if patch.get(_room) is not None:
             try:

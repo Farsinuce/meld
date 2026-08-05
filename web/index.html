@@ -676,6 +676,13 @@
         <label>Underroom below floor <span id="hUnderVal" style="float:right;color:var(--acc2)">16</span>
           <span class="i" title="Blocks kept free below the lowest terrain for caves and water carving. More than 8 here pushes the world below vanilla's floor, which is what makes the extra range worth having.">i</span>
           <input id="hUnder" type="range" min="0" max="128" step="8" value="16"></label>
+        <label>World floor Y (min)
+          <span class="i" title="Set the world's floor exactly instead of deriving it. Multiple of 16, down to -2032. Leave blank for automatic. A value that would cut into the terrain is REFUSED with a reason, never silently applied.">i</span>
+          <input id="wMinY" type="number" step="16" min="-2032" max="2031" placeholder="auto" style="width:90px"></label>
+        <label>World ceiling Y (max)
+          <span class="i" title="Set the world's ceiling exactly instead of deriving it. Up to 2031, and min+height must not pass 2032. Leave blank for automatic. A ceiling under the terrain's peak is REFUSED rather than shearing the peaks off.">i</span>
+          <input id="wMaxY" type="number" step="16" min="-2032" max="2031" placeholder="auto" style="width:90px"></label>
+        <div class="stat" style="margin:2px 0 0 2px;opacity:.75">Blank = fitted from the terrain. Engine limits: -2032 &hellip; 2031, multiples of 16.</div>
       </div>
       <label>Bake lighting (LOD mods)
         <span class="i" title="Pre-bake per-chunk light so Voxy / Distant Horizons render distant chunks lit without visiting them (Arnis issue #1071). On by default; slower to generate and bigger region files.">i</span>
@@ -2012,6 +2019,9 @@ async function refreshState() {
       $(out).textContent = $(id).value;
     }
   }
+  for (const [id, key] of [['wMinY','world_min_y'],['wMaxY','world_max_y']])
+    if ($(id) && document.activeElement !== $(id))
+      $(id).value = (st[key] === undefined || st[key] === null) ? '' : st[key];
   if (typeof heightGateUpdate === 'function') heightGateUpdate();
   if ($('prune')) $('prune').checked = st.prune_cell_after_merge !== false;
   if ($('masterDir') && document.activeElement !== $('masterDir')) $('masterDir').value = st.master_world_dir || '';
@@ -2686,6 +2696,8 @@ async function saveAllSettings() {
     mc_version: $('mcver') ? $('mcver').value : '',
     height_headroom: $('hHead') ? num($('hHead').value, 32) : 32,
     height_underroom: $('hUnder') ? num($('hUnder').value, 16) : 16,
+    world_min_y: $('wMinY') ? $('wMinY').value.trim() : '',
+    world_max_y: $('wMaxY') ? $('wMaxY').value.trim() : '',
     bake_lighting: $('bakelight').checked, stream_to_disk: $('streamdisk').checked,
     trees: $('trees') ? $('trees').checked : true,
     tree_realm: $('treeRealm') ? $('treeRealm').value : 'auto',
@@ -2743,6 +2755,10 @@ function heightGateUpdate() {
 ['mcver','heightlimit'].forEach(id => $(id) && $(id).addEventListener('change', heightGateUpdate));
 $('mcver') && $('mcver').addEventListener('change', () =>
   api('/api/settings', { mc_version: $('mcver').value }));
+[['wMinY','world_min_y'],['wMaxY','world_max_y']].forEach(([id,key]) => {
+  const el = $(id); if (!el) return;
+  el.addEventListener('change', () => api('/api/settings', { [key]: el.value.trim() }));
+});
 [['hHead','height_headroom','hHeadVal'],['hUnder','height_underroom','hUnderVal']].forEach(([id,key,out]) => {
   const el = $(id); if (!el) return;
   el.addEventListener('input', () => { $(out).textContent = el.value; });
