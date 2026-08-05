@@ -2570,6 +2570,17 @@ def api_settings():
             patch["field_scale"] = max(25, min(400, int(patch["field_scale"])))
         except (TypeError, ValueError):
             patch["field_scale"] = 100
+    # Target Minecraft version. Kept as a plain string: the fork owns the list of versions
+    # it has verified constants for, and refuses anything else — validating it here too
+    # would be a second source of truth that silently drifts from the fork's table.
+    if patch.get("mc_version") is not None:
+        patch["mc_version"] = str(patch["mc_version"]).strip()[:32]
+    for _room in ("height_headroom", "height_underroom"):
+        if patch.get(_room) is not None:
+            try:
+                patch[_room] = max(0, min(512, int(patch[_room])))
+            except (TypeError, ValueError):
+                patch[_room] = 32 if _room == "height_headroom" else 16
     if patch.get("osm_cache_ttl_days") is not None:
         try:
             patch["osm_cache_ttl_days"] = max(0, min(3650, int(patch["osm_cache_ttl_days"])))

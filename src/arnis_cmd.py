@@ -218,8 +218,20 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
         spec = cave_biomes_spec(settings)
         if spec:
             cmd += ["--cave-biomes", spec]
+    # Vertical geometry. The fork derives the world's height from the terrain and refuses
+    # a target version it has no VERIFIED constants for, so a bad mc_version fails the run
+    # loudly instead of producing a world that loads and then quietly misbehaves.
     if settings.get("disable_height_limit"):
         cmd.append("--disable-height-limit")
+        # Room reserved above the peak / below the floor when fitting. Only meaningful
+        # with extended height, so they ride along with the flag.
+        for key, flag in (("height_headroom", "--height-headroom"),
+                          ("height_underroom", "--height-underroom")):
+            val = settings.get(key)
+            if val is not None:
+                cmd += [flag, str(int(val))]
+    if settings.get("mc_version"):
+        cmd += ["--mc-version", str(settings["mc_version"]).strip()]
     # NOTE: stream-to-disk is NOT a CLI flag in the merged Arnis (upstream removed the
     # flag in eebecb5; it's now the ARNIS_STREAM_TO_DISK env var + a RAM heuristic).
     # Meld sets that env per-cell in server._runner for big cells, so nothing is added

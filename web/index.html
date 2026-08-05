@@ -656,9 +656,27 @@
         <canvas id="cbCanvasD" style="display:none;width:100%;height:auto;image-rendering:pixelated;border:1px solid var(--line);border-radius:2px;background:#060504"></canvas>
         <div id="cbStats" class="stat" style="margin-top:3px;white-space:pre-wrap"></div>
       </details>
+      <label>Minecraft version
+        <span class="i" title="Decides the DataVersion written into every chunk, whether extended build height can be declared (1.17+), and the chunk layout. Only versions the fork has VERIFIED constants for are offered — an unverified one would produce a world that loads and then quietly misbehaves. Default = the fork's built-in.">i</span>
+        <select id="mcver" style="width:110px">
+          <option value="">Default</option>
+          <option value="1.21.4">1.21.4</option>
+          <option value="1.21.5">1.21.5</option>
+          <option value="26.1.2">26.1.2</option>
+          <option value="26.2">26.2</option>
+        </select></label>
       <label>Extend build height
-        <span class="i" title="Disable the Y height limit (experimental; Java 1.21.4+ Y=-2032..2031).">i</span>
+        <span class="i" title="Fit the world's vertical range to the terrain instead of vanilla's -64..319, via a generated datapack. Experimental: Minecraft prompts for 'Experimental Features' on first load and the pack can never be removed from that world. Needs 1.17+. If the terrain already fits vanilla, no datapack is written.">i</span>
         <input id="heightlimit" type="checkbox"></label>
+      <div id="heightGate" class="stat" style="display:none;color:#ffb74d;margin:-2px 0 4px 2px"></div>
+      <div id="heightRooms" style="display:none">
+        <label>Headroom above peak <span id="hHeadVal" style="float:right;color:var(--acc2)">32</span>
+          <span class="i" title="Blocks kept free above the highest terrain for trees and buildings.">i</span>
+          <input id="hHead" type="range" min="0" max="128" step="8" value="32"></label>
+        <label>Underroom below floor <span id="hUnderVal" style="float:right;color:var(--acc2)">16</span>
+          <span class="i" title="Blocks kept free below the lowest terrain for caves and water carving. More than 8 here pushes the world below vanilla's floor, which is what makes the extra range worth having.">i</span>
+          <input id="hUnder" type="range" min="0" max="128" step="8" value="16"></label>
+      </div>
       <label>Bake lighting (LOD mods)
         <span class="i" title="Pre-bake per-chunk light so Voxy / Distant Horizons render distant chunks lit without visiting them (Arnis issue #1071). On by default; slower to generate and bigger region files.">i</span>
         <input id="bakelight" type="checkbox"></label>
@@ -1984,6 +2002,17 @@ async function refreshState() {
     if ($(id) && document.activeElement !== $(id)) $(id).checked = key === 'interior' || key === 'fill_ground'
       || key === 'disable_height_limit' || key === 'stream_to_disk' || key === 'aws_only_elevation' || key === 'regional_elevation_only'
       ? !!st[key] : st[key] !== false;
+  // Height controls: restore, then re-run the version gate so a reloaded project shows
+  // the same enabled/disabled state it was saved with.
+  if ($('mcver') && document.activeElement !== $('mcver')) $('mcver').value = st.mc_version || '';
+  for (const [id, key, out, dflt] of [['hHead','height_headroom','hHeadVal',32],
+                                      ['hUnder','height_underroom','hUnderVal',16]]) {
+    if ($(id) && document.activeElement !== $(id)) {
+      $(id).value = (st[key] === undefined || st[key] === null) ? dflt : st[key];
+      $(out).textContent = $(id).value;
+    }
+  }
+  if (typeof heightGateUpdate === 'function') heightGateUpdate();
   if ($('prune')) $('prune').checked = st.prune_cell_after_merge !== false;
   if ($('masterDir') && document.activeElement !== $('masterDir')) $('masterDir').value = st.master_world_dir || '';
   // cave biome sliders + panel visibility (panel shows only while Caves is on)
@@ -2654,6 +2683,9 @@ async function saveAllSettings() {
     roof: $('roof').checked, interior: $('interior').checked,
     land_cover: $('landcover').checked, fill_ground: $('fillground').checked, caves: $('caves').checked,
     disable_height_limit: $('heightlimit').checked, generate_3d_models: $('m3d').checked,
+    mc_version: $('mcver') ? $('mcver').value : '',
+    height_headroom: $('hHead') ? num($('hHead').value, 32) : 32,
+    height_underroom: $('hUnder') ? num($('hUnder').value, 16) : 16,
     bake_lighting: $('bakelight').checked, stream_to_disk: $('streamdisk').checked,
     trees: $('trees') ? $('trees').checked : true,
     tree_realm: $('treeRealm') ? $('treeRealm').value : 'auto',
@@ -2686,6 +2718,38 @@ $('m3d').addEventListener('change', () => api('/api/settings', { generate_3d_mod
  ['fillground','fill_ground'],['caves','caves'],['heightlimit','disable_height_limit'],
  ['bakelight','bake_lighting'],['streamdisk','stream_to_disk']].forEach(([id, key]) =>
   $(id) && $(id).addEventListener('change', () => api('/api/settings', { [key]: $(id).checked })));
+// ── Height: version gate + reserved room ─────────────────────────────────────────
+// Extended build height arrived in 1.17. Below that the control is DISABLED with the
+// reason shown inline, never hidden — a hidden control just looks broken.
+function heightGateUpdate() {
+  const sel = $('mcver'), cb = $('heightlimit'), msg = $('heightGate'), rooms = $('heightRooms');
+  if (!sel || !cb) return;
+  const v = sel.value;
+  // Anything the fork lists as pre-1.17. Kept as an explicit list so a new row in the
+  // fork's table never silently disables the control here.
+  const NO_EXTENDED = ['1.16.5'];
+  const blocked = NO_EXTENDED.includes(v);
+  cb.disabled = blocked;
+  if (blocked) {
+    if (cb.checked) { cb.checked = false; api('/api/settings', { disable_height_limit: false }); }
+    msg.textContent = 'Minecraft ' + v + ' has no extended build height — that arrived in 1.17. '
+      + 'Target 1.18+ for a taller world, or keep the vanilla –64..319 range.';
+    msg.style.display = '';
+  } else {
+    msg.style.display = 'none';
+  }
+  rooms.style.display = (cb.checked && !blocked) ? '' : 'none';
+}
+['mcver','heightlimit'].forEach(id => $(id) && $(id).addEventListener('change', heightGateUpdate));
+$('mcver') && $('mcver').addEventListener('change', () =>
+  api('/api/settings', { mc_version: $('mcver').value }));
+[['hHead','height_headroom','hHeadVal'],['hUnder','height_underroom','hUnderVal']].forEach(([id,key,out]) => {
+  const el = $(id); if (!el) return;
+  el.addEventListener('input', () => { $(out).textContent = el.value; });
+  el.addEventListener('change', () => api('/api/settings', { [key]: num(el.value, 0) }));
+});
+heightGateUpdate();
+
 // Tree size tiers now auto-save via the ts_ slider onchange handlers (tsSave), below.
 
 // ── Cave biome mix: per-theme sliders (0–200% of the default share) + zone preview ──

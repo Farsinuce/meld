@@ -49,6 +49,14 @@ def default_settings() -> dict:
                                "volcanic": 100, "coral": 100},
         "osm_bake_workers": 4,  # offline .pbf bake parallelism; UI caps at 8, auto from CPU cores
         "disable_height_limit": False,
+        # Target Minecraft version. "" = the fork's default. Only versions with VERIFIED
+        # constants are accepted (the fork refuses anything else rather than guessing a
+        # DataVersion, which would yield a world that loads and then misbehaves).
+        "mc_version": "",
+        # Blocks kept free above the highest terrain / below the lowest when the world's
+        # height is fitted. Only used with disable_height_limit.
+        "height_headroom": 32,
+        "height_underroom": 16,
         # Pre-bake per-chunk lighting so LOD mods (Voxy, Distant Horizons) render
         # distant chunks lit without visiting them (Arnis issue #1071). On by default
         # because Meld builds areas too large to fly through; slower + bigger files.

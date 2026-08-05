@@ -64,3 +64,4 @@ server-run.*
 
 # Seam-test renders (multi-GB region files, regenerated on demand)
 tools/seam_test/_work/
+tools/height_test/_work/
