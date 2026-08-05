@@ -54,10 +54,21 @@ touch these settings emits no new flags and generates exactly as 1.8.0 did.
 - With the default underroom (16) and Meld's terrain datum at Y -56, extended height
   writes a datapack for essentially every project rather than only mountainous ones. Set
   underroom to 8 if you want "no datapack unless the terrain needs it".
-- Verified structurally on generated worlds, not yet loaded in Minecraft: a 4096x4096-block
-  Yosemite build at 1:4 as four cells agreed on geometry, datum and DataVersion, kept every
-  section inside the declared world, and reached Y 559 — 240 blocks above vanilla's ceiling.
-  The two-cell seam probe still reports 100.000% agreement on ground blocks and terrain Y.
+- **Confirmed in Minecraft 26.1.2.** A 4096x4096-block Yosemite build at 1:4, generated as
+  four cells and merged: they agreed on geometry, datum and DataVersion, kept every section
+  inside the declared world, and reached Y 559 — 240 blocks above vanilla's ceiling. The
+  merged world opens in game with the generated height datapack active. The two-cell seam
+  probe still reports 100.000% agreement on ground blocks and terrain Y.
+- Two datapack bugs that only the game could find were fixed on the way there: the pack was
+  written in the 1.21.x metadata schema, which 26.x rejects outright ("Errors in currently
+  selected data packs prevented the world from loading"), and an intermediate change
+  restamped level.dat's version, which made Minecraft skip the DataFixer and fail even in
+  Safe Mode. Both are fixed in the bundled fork. Neither was visible to any file-level
+  check — the files were internally consistent and said exactly what was intended — so an
+  extended-height change is not done until a world has actually been opened.
+- Extended height on **26.2** is currently refused: it uses the 26.x datapack schema but no
+  verified pack format for it has been read out of a real pack yet, and guessing one
+  produces a world that will not open.
 - Requires the bundled Arnis Meld fork **3.0.5**.
 
 ## [1.8.0] - 2026-07-26 - "Farmlands"
