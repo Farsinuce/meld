@@ -1,12 +1,10 @@
 <div align="center">
 
-<img src="assets/banner.png" alt="Meld, turn the real world into one seamless Minecraft world" width="100%">
+<img src="assets/banner.png" alt="Meld, Arnis at scale" width="100%">
 
-# Meld, Arnis at scale
+# Turn the real world into one seamless Minecraft world
 
-Turn an OpenStreetMap selection into one seamless Minecraft world. From a city block to a whole
-continent.
-
+From a single city block to a whole continent, in one build.
 Built on a fork of [Arnis](https://github.com/louis-e/arnis) by louis-e.
 
 &nbsp;![version](https://img.shields.io/badge/version-1.8.1-blue)

@@ -8,9 +8,9 @@ the root README, so if the two disagree, the root README wins.
 
 <div align="center">
 
-<img src="assets/banner.png" alt="Meld, turn the real world into one seamless Minecraft world" width="100%">
+<img src="../assets/banner.png" alt="Meld, Arnis at scale" width="100%">
 
-# Meld, Arnis at scale
+# Turn the real world into one seamless Minecraft world
 
 Turn an OpenStreetMap selection into one seamless Minecraft world. Meld tiles the area, builds
 every tile in parallel, and melds them with no height cliffs and no seams. From a city block to a
