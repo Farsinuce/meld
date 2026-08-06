@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/banner.png" alt="Meld, Arnis at scale" width="100%">
+<img src="assets/banner.png?v=181" alt="Meld, Arnis at scale" width="100%">
 
 # Turn the real world into one seamless Minecraft world
 
