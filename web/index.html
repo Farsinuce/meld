@@ -12,15 +12,15 @@
 <style>
   /* dark brown-black stone + golden (matches the MELD logo) */
   @font-face { font-family:'Monocraft'; src:url('https://cdn.jsdelivr.net/gh/IdreesInc/Monocraft@main/dist/Monocraft-ttf/Monocraft.ttf') format('truetype'); font-weight:400 700; font-display:swap; }
-  :root { --bg:#0b0a08; --panel:#16130d; --line:rgba(255,255,255.10); --fg:#f0e9da; --mut:#9a9079;
+  :root { --bg:#0b0a08; --panel:#16130d; --line:rgba(255,255,255,.10); --fg:#f0e9da; --mut:#9a9079;
           --acc:#e3a417; --acc2:#f0bf3a; --ok:#86b45a; --run:#cf9f3c; --bad:#cf5a3e; --plan:#6b6253;
           --pixel:'Monocraft','system-ui',sans-serif;
           /* Glass design (mirrors the RomaniaSMP site): semi-transparent warm-dark panels with a
              backdrop blur, a hairline white border, and a CRISP 1px black ring instead of a soft
              drop shadow (that soft blur was the 'shadowy blurry' look). Softer radii throughout. */
-          --glass:rgba(17,16,13.84); --glass2:rgba(28,26,21.72); --raise:rgba(255,255,255.05);
-          --hair:rgba(255,255,255.09); --hair2:rgba(255,255,255.05);
-          --ring:0 0 0 1px rgba(0,0,0.4); --blur:blur(16px); --r:12px; --rsm:8px; --rxs:5px; }
+          --glass:rgba(17,16,13,.84); --glass2:rgba(28,26,21,.72); --raise:rgba(255,255,255,.05);
+          --hair:rgba(255,255,255,.09); --hair2:rgba(255,255,255,.05);
+          --ring:0 0 0 1px rgba(0,0,0,.4); --blur:blur(16px); --r:12px; --rsm:8px; --rxs:5px; }
   * { box-sizing:border-box; }
   /* App shell fills the viewport exactly and never scrolls the PAGE, the rails scroll
      internally. Without this, zooming in overflows the viewport width and the browser
@@ -33,20 +33,20 @@
   #map { position:absolute; inset:0; z-index:1; background:var(--bg); }
   .leaflet-container { background:var(--bg); }
   /* Keep the Leaflet + custom map controls clear of the floating rails (left rail 300, right 340). */
-  .leaflet-top.leaflet-left.leaflet-bottom.leaflet-left { margin-left:312px; }
-  .leaflet-top.leaflet-right.leaflet-bottom.leaflet-right { margin-right:352px; }
+  .leaflet-top.leaflet-left, .leaflet-bottom.leaflet-left { margin-left:312px; }
+  .leaflet-top.leaflet-right, .leaflet-bottom.leaflet-right { margin-right:352px; }
   /* dim the OSM tiles to match the dark panel */
   .leaflet-tile { filter: brightness(0.78) saturate(0.9) contrast(1.04); }
   #side { position:absolute; top:0; right:0; bottom:0; width:340px; z-index:15; border-left:1px solid var(--hair);
-          background:linear-gradient(180deg, rgba(13,12,10.82), rgba(10,9,8.88));
+          background:linear-gradient(180deg, rgba(13,12,10,.82), rgba(10,9,8,.88));
           backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur);
-          box-shadow:inset 1px 0 0 rgba(255,255,255.04);
+          box-shadow:inset 1px 0 0 rgba(255,255,255,.04);
           overflow-y:auto; overflow-x:hidden; padding:14px; }
   /* Left status rail: mirrors #side, floats on the left over the full-bleed map. */
   #sideL { position:absolute; top:0; left:0; bottom:0; width:300px; z-index:15; border-right:1px solid var(--hair);
-           background:linear-gradient(180deg, rgba(13,12,10.82), rgba(10,9,8.88));
+           background:linear-gradient(180deg, rgba(13,12,10,.82), rgba(10,9,8,.88));
            backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur);
-           box-shadow:inset -1px 0 0 rgba(255,255,255.04);
+           box-shadow:inset -1px 0 0 rgba(255,255,255,.04);
            overflow-y:auto; overflow-x:hidden; padding:14px; }
   /* themed scrollbars everywhere (left + right rails and inner lists): darkest-black track, gold
      thumb. Firefox uses scrollbar-color; WebKit/Chromium uses the ::-webkit-scrollbar pseudos. */
@@ -67,7 +67,7 @@
   #side .card { transition:border-color .12s; }
   #side .card > h2 { cursor:pointer; user-select:none; margin:-2px -4px 9px; padding:4px 6px;
     border-radius:3px; transition:background .12s, color .12s; }
-  #side .card > h2:hover { background:rgba(240,191,58.10); color:#ffd86b; }
+  #side .card > h2:hover { background:rgba(240,191,58,.10); color:#ffd86b; }
   #side .card.collapsed:hover { border-color:#5a5037; }
   /* crisp solid triangle (CSS borders, not a font glyph): points down when open, rotates to
      point right when collapsed, same on every OS, scales cleanly. */
@@ -95,7 +95,7 @@
   /* inline button icon: inherits the button's currentColor (so it goes gold/green with the button). */
   .bi { vertical-align:-2px; }
   /* themed Leaflet popup for the teleport command (default Leaflet popups are white). */
-  .leaflet-popup-content-wrapper.leaflet-popup-tip { background:var(--glass); color:var(--fg);
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:var(--glass); color:var(--fg);
     border:1px solid var(--hair); border-radius:var(--rsm); box-shadow:var(--ring);
     backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); }
   .leaflet-popup-content { margin:10px 12px; }
@@ -120,27 +120,27 @@
   .i { color:var(--mut); cursor:help; font-size:11px; text-transform:none; border:1px solid var(--line);
        display:inline-block; vertical-align:middle; font-style:normal; font-weight:400; font-family:system-ui,Segoe UI,sans-serif;
              border-radius:50%; width:15px; height:15px; text-align:center; line-height:13px; }
-  input,select { background:rgba(0,0,0.30); color:var(--fg); border:1px solid var(--hair);
+  input,select { background:rgba(0,0,0,.30); color:var(--fg); border:1px solid var(--hair);
                  border-radius:var(--rsm); padding:5px 8px; width:120px; font:inherit; }
   /* darken the native option popup so it isn't a bright wide panel over the dark UI */
   select { background:#151209; }
   select option, select optgroup { background:#151209; color:var(--fg); }
-  button.sec.active { border-color:var(--acc); color:var(--acc2); background:rgba(227,164,23.14); }
-  input:focus,select:focus { outline:none; border-color:var(--acc); box-shadow:0 0 0 1px rgba(227,164,23.6); }
+  button.sec.active { border-color:var(--acc); color:var(--acc2); background:rgba(227,164,23,.14); }
+  input:focus,select:focus { outline:none; border-color:var(--acc); box-shadow:0 0 0 1px rgba(227,164,23,.6); }
   button { background:linear-gradient(180deg,#f0bf3a,#e3a417); color:#241a02;
            border:2px solid #9a6a12; border-radius:var(--rsm);
            padding:8px 10px; font-family:var(--pixel); font-weight:700; letter-spacing:.02em;
            cursor:pointer; width:100%; margin-top:6px;
-           box-shadow: inset 0 1px 0 rgba(255,235,170.35), var(--ring); }
+           box-shadow: inset 0 1px 0 rgba(255,235,170,.35), var(--ring); }
   button:hover { filter:brightness(1.06); }
   button:active { transform:translateY(1px); }
   button.sec { background:var(--raise); color:var(--fg); border:1px solid var(--hair); border-radius:var(--rsm);
                box-shadow:none; font-weight:700; }
-  button.sec:hover { border-color:var(--acc); color:var(--acc2); background:rgba(227,164,23.10); }
+  button.sec:hover { border-color:var(--acc); color:var(--acc2); background:rgba(227,164,23,.10); }
   button:disabled { opacity:.5; cursor:not-allowed; }
   /* custom checkbox: dark box; when ticked, a gold button with a centered dark check */
   input[type=checkbox] { appearance:none; -webkit-appearance:none; width:18px; height:18px; margin:0;
-    border:1px solid var(--hair); border-radius:var(--rxs); background:rgba(0,0,0.30) center/12px no-repeat; cursor:pointer;
+    border:1px solid var(--hair); border-radius:var(--rxs); background:rgba(0,0,0,.30) center/12px no-repeat; cursor:pointer;
     flex:0 0 auto; align-self:center; transition:border-color .1s, background-color .1s; }
   input[type=checkbox]:hover { border-color:var(--acc); }
   input[type=checkbox]:checked { border-color:#9a6a12; background-color:var(--acc);
@@ -152,7 +152,7 @@
   input[type=range]::-webkit-slider-runnable-track{ height:6px; border-radius:3px; background:transparent; }
   input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:14px; height:14px;
     margin-top:-5px; border-radius:2px; background:var(--acc2); border:2px solid #000;
-    box-shadow:0 1px 2px rgba(0,0,0.5); }
+    box-shadow:0 1px 2px rgba(0,0,0,.5); }
   input[type=range]:hover::-webkit-slider-thumb{ background:#ffd24a; }
   input[type=range]::-moz-range-track{ height:6px; border-radius:3px; background:#2a2620; border:1px solid #000; }
   input[type=range]::-moz-range-progress{ height:6px; border-radius:3px; background:var(--acc2); }
@@ -165,7 +165,7 @@
   .row button { margin-top:0; }
   .chip { display:inline-block; padding:2px 7px; border-radius:var(--rxs); font-size:10px;
           font-family:var(--pixel); letter-spacing:.04em; text-transform:uppercase;
-          background:rgba(0,0,0.30); border:1px solid var(--hair); }
+          background:rgba(0,0,0,.30); border:1px solid var(--hair); }
   /* Collapsible glass drawer for tucking loose toggle clusters (props/3D families, etc.) into a
      tidy dropdown instead of a wall of checkboxes. Native <details>, no JS needed. */
   /* Closed drawer = looks like a plain .sec button. Open drawer = the button chrome vanishes;
@@ -177,7 +177,7 @@
     padding:8px 10px; border:1px solid var(--hair); border-radius:var(--rsm); background:var(--raise); }
   details.drawer > summary::-webkit-details-marker { display:none; }
   details.drawer > summary::before { content:'▸'; color:var(--acc); font-size:11px; transition:transform .12s; }
-  details.drawer > summary:hover { border-color:var(--acc); color:var(--acc2); background:rgba(227,164,23.10); }
+  details.drawer > summary:hover { border-color:var(--acc); color:var(--acc2); background:rgba(227,164,23,.10); }
   /* OPEN: strip the button look so it reads as a heading over flush content */
   details.drawer[open] > summary { background:transparent; border:none; padding:4px 0 4px; color:var(--acc2); }
   details.drawer[open] > summary::before { transform:rotate(90deg); }
@@ -188,9 +188,9 @@
   details.drawer > :not(summary):not(.dbody):last-child { padding-bottom:6px; }
   /* settings search: tint the match like the drawer hover (gold box + left bar), no glow.
      The one you're cycled to (.search-cur) tints stronger with a full outline. */
-  .search-hit { background:rgba(227,164,23.13) !important; box-shadow:none !important;
+  .search-hit { background:rgba(227,164,23,.13) !important; box-shadow:none !important;
     border:none !important; border-radius:0 !important; scroll-margin:90px; transition:background .15s; }
-  .search-hit.search-cur { background:rgba(227,164,23.32) !important; }
+  .search-hit.search-cur { background:rgba(227,164,23,.32) !important; }
   #railSearchClear:hover { color:#ffd86b; }
   .lk { color:var(--ok); } .un { color:var(--mut); }
   /* segmented multi-toggle (tree sizes): connected chips, no wrap, multi-select */
@@ -226,7 +226,7 @@
   .wjmsg { font-size:11px; color:var(--mut); overflow-wrap:anywhere; margin-top:2px; }
   .cellemoji { background:none !important; border:none !important; }
   .cellemoji div { font-size:17px; text-align:center; line-height:22px;
-                   text-shadow:0 0 3px rgba(0,0,0.7),0 0 2px rgba(0,0,0.7); }
+                   text-shadow:0 0 3px rgba(0,0,0,.7),0 0 2px rgba(0,0,0,.7); }
   .wrow { display:flex; align-items:center; justify-content:space-between; gap:6px;
           font-size:12px; padding:3px 0; border-bottom:1px solid var(--line); min-width:0; }
   .wrow > span:first-child { min-width:0; overflow-wrap:anywhere; }
@@ -234,18 +234,18 @@
   .wrow button { width:auto; margin:0; padding:2px 7px; font-size:11px; }
   .xbtn { background:var(--bad); color:#fff; }
   #coordbox { position:fixed; left:310px; bottom:10px; z-index:600; pointer-events:none;
-              background:rgba(20,18,13.82); color:var(--fg); border:1px solid var(--line);
+              background:rgba(20,18,13,.82); color:var(--fg); border:1px solid var(--line);
               border-radius:5px; padding:4px 9px; font:11px/1.3 ui-monospace,Consolas,monospace; }
   #credit { position:fixed; left:310px; bottom:40px; z-index:600;
-            background:rgba(20,18,13.82); color:var(--mut); border:1px solid var(--line);
+            background:rgba(20,18,13,.82); color:var(--mut); border:1px solid var(--line);
             border-radius:5px; padding:3px 8px; font:10.5px/1.3 ui-monospace,Consolas,monospace; }
   #credit a { color:var(--acc2); text-decoration:none; }
   #credit a:hover { text-decoration:underline; }
   /* Explore search box: matches the dark translucent corner overlays (coordbox / credit). */
   #exploreSearch { position:fixed; top:12px; right:352px; z-index:600; display:none; }
-  #exploreSearch form { display:flex; gap:5px; align-items:center; background:rgba(20,18,13.82);
+  #exploreSearch form { display:flex; gap:5px; align-items:center; background:rgba(20,18,13,.82);
     border:1px solid var(--line); border-radius:5px; padding:5px; backdrop-filter:blur(2px); }
-  #exploreSearch input { width:190px; background:rgba(0,0,0.35); color:var(--fg);
+  #exploreSearch input { width:190px; background:rgba(0,0,0,.35); color:var(--fg);
     border:1px solid var(--line); border-radius:3px; padding:5px 8px;
     font:12px/1.3 ui-monospace,Consolas,monospace; }
   #exploreSearch input::placeholder { color:var(--mut); }
@@ -260,7 +260,7 @@
   .report b { color:var(--fg); }
   /* themed center modal (replaces native alert/confirm) */
   .modal-overlay { position:fixed; inset:0; z-index:7000; display:flex; align-items:center; justify-content:center;
-    background:rgba(6,5,4.66); backdrop-filter:blur(3px); padding:20px; animation:mfade .12s ease; }
+    background:rgba(6,5,4,.66); backdrop-filter:blur(3px); padding:20px; animation:mfade .12s ease; }
   @keyframes mfade { from { opacity:0; } to { opacity:1; } }
   /* glass card frame: hairline border + crisp 1px ring + backdrop blur (no soft drop shadow) */
   .modal-box { background:var(--glass); border:1px solid var(--hair); border-radius:var(--r); max-width:380px; width:100%;
@@ -276,9 +276,9 @@
   .modal-btn { width:auto; margin:0; padding:8px 16px; font-size:12px; cursor:pointer; border-radius:var(--rsm);
     font-family:var(--pixel); font-weight:700; letter-spacing:.02em; }
   .mb-gold { background:linear-gradient(180deg,#f0bf3a,#e3a417); color:#241a02; border:2px solid #9a6a12;
-    box-shadow: inset 0 1px 0 rgba(255,235,170.35); }
+    box-shadow: inset 0 1px 0 rgba(255,235,170,.35); }
   .mb-ghost { background:var(--raise); color:var(--fg); border:1px solid var(--hair); box-shadow:none; }
-  .mb-gold:hover { filter:brightness(1.06); } .mb-ghost:hover { color:var(--acc2); border-color:var(--acc); background:rgba(227,164,23.10); }
+  .mb-gold:hover { filter:brightness(1.06); } .mb-ghost:hover { color:var(--acc2); border-color:var(--acc); background:rgba(227,164,23,.10); }
   /* Docs quick-menu: anchored glass dropdown under the header 📖 Docs button */
   .docs-menu { position:absolute; top:calc(100% + 4px); right:0; z-index:4000; min-width:182px;
     background:var(--glass); border:1px solid var(--hair); border-radius:var(--rsm); padding:5px;
@@ -502,7 +502,7 @@
         <input id="regionalonly" type="checkbox"></label>
       <details id="climateWrap" class="drawer">
         <summary>Climate (Köppen)
-          <span class="i" title="The whole map's biome tint and arid/polar surface blocks (desert sand, tundra gravel, ice cap snow...) follow the real Köppen-Geiger climate, sampled per block so it varies smoothly across a large region instead of jumping cell-to-cell. Always on. Preview renders the exact grouped climate this area will get, straight from the bundled climate grid, one colour per group, with measured percentages.">i</span></summary>
+          <span class="i" title="The whole map's biome tint and arid/polar surface blocks (desert sand, tundra gravel, ice cap snow, and so on) follow the real Köppen-Geiger climate, sampled per block so it varies smoothly across a large region instead of jumping cell-to-cell. Always on. Preview renders the exact grouped climate this area will get, straight from the bundled climate grid, one colour per group, with measured percentages.">i</span></summary>
         <div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center;margin-top:4px">
           <button class="sec" id="climatePreview" type="button" style="flex:1;padding:4px 8px;font-size:11px" title="Render the Köppen climate layout for your drawn selection (or planned cells) as a top-down map. Colours match the climate groups that drive biome + surface blocks.">🗺 Preview climate</button>
           <button class="sec xbtn" id="climateClear" type="button" style="width:auto;flex:0 0 auto;padding:4px 8px;font-size:11px">✕</button>
@@ -609,7 +609,7 @@
       </details>
       <details id="lootWrap" class="drawer" style="display:none">
         <summary>Chest loot
-          <span class="i" title="What generated buildings' chests contain. Chests spawn only when Buildings AND Interiors are BOTH on. Pick a vanilla preset (trial chamber, stronghold, buried treasure...) or build your own: each theme is a weighted group, each item has a min-max stack count and a rarity weight. Loot is deterministic per chest, so re-rendering a tile always yields the same chest.">i</span></summary>
+          <span class="i" title="What generated buildings' chests contain. Chests spawn only when Buildings AND Interiors are BOTH on. Pick a vanilla preset (trial chamber, stronghold, buried treasure, and so on) or build your own: each theme is a weighted group, each item has a min-max stack count and a rarity weight. Loot is deterministic per chest, so re-rendering a tile always yields the same chest.">i</span></summary>
         <div id="lootStatus" class="stat" style="margin-top:2px">built-in default</div>
         <select id="lootPreset" class="sec" style="width:100%;margin-top:4px;padding:4px 6px;font-size:11px" title="Load a vanilla-structure loot table as a starting point, then edit + Save.">
           <option value="">Load a vanilla preset...</option>
@@ -1101,7 +1101,7 @@ let _cellStatus = {};          // cell_key -> last drawn status (skip redundant 
 let combinedBorder = [];       // bold double-line outline around the whole grid
 let exploreMode = false;       // map "explore" mode: hide cells, click for a teleport command
 let plannedCells = [];         // last planned cell list (cell_key + bbox)
-let selectionPolygon = null;   // array of rings [[ [lat,lon]... ]...] when shaped (not a box)
+let selectionPolygon = null;   // array of rings [[ [lat,lon],... ], ...] when shaped (not a box)
 let selectMode = 'replace';    // how a drawn/searched shape applies: replace | add | remove
 let editCells = false;         // when on, drag the map to add/remove individual cells
 let retrySelect = false;       // when on, drag to mark cells for retry (a separate clump)
@@ -1615,7 +1615,7 @@ function drawStatHist() {
   }
   const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
-  ctx.strokeStyle = 'rgba(255,255,255.06)'; ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(255,255,255,.06)'; ctx.lineWidth = 1;
   for (let g = 1; g < 4; g++) { const y = cssH - (g / 4) * cssH; ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(cssW, y + .5); ctx.stroke(); }
   const step = cssW / (_STAT_HIST_MAX - 1);
   const draw = (arr, stroke, fill) => {
@@ -1627,8 +1627,8 @@ function drawStatHist() {
     ctx.lineTo(x(arr.length - 1), cssH); ctx.lineTo(x(0), cssH); ctx.closePath();
     ctx.fillStyle = fill; ctx.fill();
   };
-  draw(_statHist.ram, '#86b45a', 'rgba(134,180,90.12)');
-  draw(_statHist.cpu, '#e3a417', 'rgba(227,164,23.15)');
+  draw(_statHist.ram, '#86b45a', 'rgba(134,180,90,.12)');
+  draw(_statHist.cpu, '#e3a417', 'rgba(227,164,23,.15)');
 }
 
 // Live CPU / RAM / disk gauges in the left rail's System card. Fed by /api/status .stats.
@@ -1920,7 +1920,7 @@ async function refreshState() {
     }
     tw = tw || {small:100,medium:100,big:100,tall:100,giant:0};
     if (typeof TREE_SIZES !== 'undefined') {
-      TREE_SIZES.forEach(([k, def]) => {
+      TREE_SIZES.forEach(([k, , def]) => {
         const el = $('ts_' + k);
         if (el && document.activeElement !== el) el.value = (tw[k] != null ? tw[k] : def);
       });
@@ -1929,13 +1929,13 @@ async function refreshState() {
   { // Farmland texture mix + farm crops + scatter toggles/densities.
     if (typeof _profStore !== 'undefined') {
       ['field_mix', 'grass_mix', 'untagged_mix'].forEach(k => {
-        if (st[k]) _profStore[k] = { ...PROFILE_DEFAULTS[k]...st[k] };
+        if (st[k]) _profStore[k] = { ...PROFILE_DEFAULTS[k], ...st[k] };
       });
       if (typeof fmLoadProfile === 'function') fmLoadProfile();
     }
     const fcs = st.farm_crops || {};
     if (typeof FARM_CROPS !== 'undefined') {
-      FARM_CROPS.forEach(([k, def]) => {
+      FARM_CROPS.forEach(([k, , def]) => {
         const el = $('fc_' + k);
         if (el && document.activeElement !== el) el.value = (fcs[k] != null ? fcs[k] : def);
       });
@@ -2267,7 +2267,7 @@ function buildProjCard(p) {
   const prog = p.merged ? `${p.merged}/${p.cells} merged` : (p.cells ? `${p.cells} planned` : 'not planned');
   const card = document.createElement('div');
   card.className = 'projCard'; card.draggable = true; card.dataset.slug = p.slug;
-  card.style.cssText = 'border:1px solid ' + (p.active ? 'var(--acc2,#d6ba58)' : 'var(--line)') + ';border-radius:6px;padding:8px 9px;background:' + (p.active ? 'rgba(214,186,88.06)' : 'transparent') + ';cursor:grab';
+  card.style.cssText = 'border:1px solid ' + (p.active ? 'var(--acc2,#d6ba58)' : 'var(--line)') + ';border-radius:6px;padding:8px 9px;background:' + (p.active ? 'rgba(214,186,88,.06)' : 'transparent') + ';cursor:grab';
   card.innerHTML =
     `<div style="display:flex;align-items:center;gap:6px">
        <span title="Drag to reorder or drop on a folder" style="color:var(--mut,#9a917f)">⠿</span>
@@ -2318,7 +2318,7 @@ function projGalRenderCards() {
   const folderHeader = (folder, projs) => {
     const hdr = document.createElement('div');
     const collapsed = !!_collapsedFolders[folder], focused = _focusFolder === folder;
-    hdr.style.cssText = 'display:flex;align-items:center;gap:5px;padding:5px 6px;border:1px dashed ' + (focused ? 'var(--acc)' : 'var(--line)') + ';border-radius:6px;background:rgba(255,255,255.03);font-weight:600;font-size:12px;margin-top:2px';
+    hdr.style.cssText = 'display:flex;align-items:center;gap:5px;padding:5px 6px;border:1px dashed ' + (focused ? 'var(--acc)' : 'var(--line)') + ';border-radius:6px;background:rgba(255,255,255,.03);font-weight:600;font-size:12px;margin-top:2px';
     const tog = document.createElement('span'); tog.textContent = collapsed ? '▸' : '▾'; tog.style.cssText = 'color:var(--acc);cursor:pointer';
     tog.onclick = () => { _collapsedFolders[folder] = !collapsed; projGalRenderCards(); };
     const nm = document.createElement('span'); nm.textContent = '📁 ' + folder;
@@ -2887,7 +2887,7 @@ function tsPaint(){
   });
 }
 function tsSave(){ return api('/api/settings', { tree_size_weights: tsCollect() }); }
-TREE_SIZES.forEach(([k, def]) => {
+TREE_SIZES.forEach(([k, , def]) => {
   const el = $('ts_' + k); if (!el) return;
   el.oninput = () => {
     el.value = Math.round(el.value / 10) * 10;
@@ -2932,7 +2932,7 @@ TREE_SIZES.forEach(([k, def]) => {
   };
 });
 if ($('tsReset')) $('tsReset').onclick = async () => {
-  TREE_SIZES.forEach(([k, def]) => { const el = $('ts_' + k); if (el) el.value = def; });
+  TREE_SIZES.forEach(([k, , def]) => { const el = $('ts_' + k); if (el) el.value = def; });
   tsPaint();
   await tsSave();
 };
@@ -3148,7 +3148,7 @@ function fmCollect(){
 }
 function fmLoadProfile(){
   const st = _profStore[fmProfileKey()] || {};
-  FIELD_MIX.forEach(([k, def]) => { const el = $('fm_' + k); if (el) el.value = (st[k] != null ? st[k] : 0); });
+  FIELD_MIX.forEach(([k, , def]) => { const el = $('fm_' + k); if (el) el.value = (st[k] != null ? st[k] : 0); });
   fmPaint();
 }
 function fmPaint(){
@@ -3257,7 +3257,7 @@ if ($('field_scale')) {
 if ($('fmReset')) $('fmReset').onclick = async () => {
   ['field_mix', 'grass_mix', 'untagged_mix'].forEach(k => { _profStore[k] = { ...PROFILE_DEFAULTS[k] }; });
   fmLoadProfile();
-  FARM_CROPS.forEach(([k, def]) => { const el = $('fc_' + k); if (el) el.value = def; });
+  FARM_CROPS.forEach(([k, , def]) => { const el = $('fc_' + k); if (el) el.value = def; });
   if ($('scatter_mode')) $('scatter_mode').value = 'both';
   if ($('field_scale')) { $('field_scale').value = 100; const v = $('field_scalev'); if (v) v.textContent = '100%'; }
   if ($('grass_texture')) $('grass_texture').checked = true;   // default ON
