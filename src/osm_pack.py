@@ -278,7 +278,13 @@ def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None
                 # just those members' tiles in the main pass (keeps the maps tiny).
                 rel_ways: set = set()
                 rel_nodes: set = set()
+                rel_seen = 0
                 for o in osmium.FileProcessor(pbf, osmium.osm.RELATION):   # relations only
+                    rel_seen += 1
+                    # Minutes on a country .pbf, so Stop is honoured here too.
+                    if (rel_seen & 0xFFFF) == 0 and should_stop and should_stop():
+                        _log("  [OSM bake] stopped during the relation pass")
+                        raise _Stopped()
                     for m in o.members:
                         if m.type == "w":
                             rel_ways.add(m.ref)
@@ -294,11 +300,12 @@ def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None
                 seen = 0
                 for o in fp:
                     seen += 1
-                    if (seen & 0x1FFFFF) == 0:    # ~ every 2M elements
+                    if (seen & 0x3FFFF) == 0:      # ~ every 260k elements: sub-second stop latency
                         if should_stop and should_stop():
                             _log("  [OSM bake] stopped mid-file")
                             raise _Stopped()
-                        _log(f"  [OSM bake] {Path(pbf).name}: {seen // 1_000_000}M elements…")
+                        if (seen & 0x1FFFFF) == 0:  # ~ every 2M elements: progress line
+                            _log(f"  [OSM bake] {Path(pbf).name}: {seen // 1_000_000}M elements…")
 
                     if isinstance(o, osmium.osm.Node):
                         loc = o.location
@@ -462,7 +469,13 @@ def _scan_pbf_into(pbf: str, target_list, out_dir: str, z: int, stop_path):
     try:
         rel_ways: set = set()
         rel_nodes: set = set()
+        rel_seen = 0
         for o in osmium.FileProcessor(pbf, osmium.osm.RELATION):
+            rel_seen += 1
+            # The relation pre-pass alone runs for minutes on a country .pbf, so it has to
+            # honour the stop too — otherwise Stop does nothing until the pass finishes.
+            if (rel_seen & 0xFFFF) == 0 and stopped():
+                return {"written": [], "elements": 0, "ok": True, "stopped": True}
             for m in o.members:
                 if m.type == "w":
                     rel_ways.add(m.ref)
@@ -473,7 +486,9 @@ def _scan_pbf_into(pbf: str, target_list, out_dir: str, z: int, stop_path):
         seen = 0
         for o in osmium.FileProcessor(pbf).with_locations():
             seen += 1
-            if (seen & 0x1FFFFF) == 0 and stopped():
+            # ~260k elements between checks: a fraction of a second, versus the 2M
+            # (tens of seconds) this used to wait before noticing.
+            if (seen & 0x3FFFF) == 0 and stopped():
                 for w in writers.values():
                     w.abort()
                 return {"written": [], "elements": 0, "ok": True, "stopped": True}
@@ -616,19 +631,30 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
             futs = {ex.submit(_scan_pbf_into, pbf, target_list, str(tmp_root / f"p{i}"), z, stop_path):
                     (i, pbf) for i, pbf in enumerate(pbfs)}
             done_p = 0
-            for fut in _cf.as_completed(futs):
-                i, pbf = futs[fut]
-                if should_stop and should_stop():
+            pending = set(futs)
+            stopped_now = False
+            while pending:
+                # Poll the stop flag on a TIMER, not once per finished .pbf: one country .pbf
+                # runs for minutes, so waiting for a completion made "Stop bake" look dead.
+                # The workers watch `stop_path`, so writing it is what actually stops them.
+                done_set, pending = _cf.wait(pending, timeout=1.0,
+                                             return_when=_cf.FIRST_COMPLETED)
+                if not stopped_now and should_stop and should_stop():
+                    stopped_now = True
                     open(stop_path, "w").close()
-                res = fut.result()
-                res["dir"] = str(tmp_root / f"p{i}")
-                results.append(res)
-                done_p += 1
-                _log(f"  [OSM bake] baked {Path(pbf).name} ({done_p}/{len(pbfs)}) — "
-                     f"{len(res['written'])} tile(s)" + ("" if res["ok"] else " (SKIPPED, unreadable)"))
-                if on_progress:
-                    on_progress(skip + int(len(todo) * 0.85 * done_p / len(pbfs)),
-                                total, done_p, skip, 0, 0)
+                    _log("  [OSM bake] stop requested — asking the bake workers to abort…")
+                for fut in done_set:
+                    i, pbf = futs[fut]
+                    res = fut.result()
+                    res["dir"] = str(tmp_root / f"p{i}")
+                    results.append(res)
+                    done_p += 1
+                    _log(f"  [OSM bake] baked {Path(pbf).name} ({done_p}/{len(pbfs)}) — "
+                         f"{len(res['written'])} tile(s)"
+                         + ("" if res["ok"] else " (SKIPPED, unreadable)"))
+                    if on_progress:
+                        on_progress(skip + int(len(todo) * 0.85 * done_p / len(pbfs)),
+                                    total, done_p, skip, 0, 0)
     except Exception as ex:  # noqa: BLE001
         shutil.rmtree(tmp_root, ignore_errors=True)
         _log(f"  [OSM bake] parallel pool failed ({ex}) — falling back to sequential")

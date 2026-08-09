@@ -4,6 +4,57 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.8.2] - 2026-08-10 - "Field reports"
+
+Everything in this release came from people hitting it: a selection that took the server
+down, a dependency that failed to install, a Stop button that looked dead, estimates that
+read low, and the same four questions asked over and over. No behaviour changes to what
+gets generated.
+
+### Fixed
+- **Selecting the whole world at 1:1 killed Meld.** Planning built the cell list before
+  anyone counted it — about 200 million cells for the planet at 4-region cells, tens of
+  gigabytes of dicts — and the process died mid-allocation. The count is now arithmetic
+  and checked first: past ~20,000 cells the plan is refused with what to change (bigger
+  cells, smaller scale, smaller area) instead of dying. Raise it with
+  `MELD_MAX_PLAN_CELLS` if you know what you are asking for.
+- **`zstd` in `requirements.txt` was never used.** Meld imports `zstandard`; the similarly
+  named `zstd` package was pinned by mistake at a version with no wheel on some platforms,
+  which failed the install for anyone whose Python did not have one. Removed.
+- **"Stop bake" did nothing for minutes.** The parallel OSM bake only checked the stop flag
+  when a whole `.pbf` finished, and the workers only polled it every 2M elements — a
+  country file runs for minutes either way. The pool now polls on a timer and writes the
+  stop sentinel immediately, both bake passes check roughly every 260k elements, and the
+  relation pre-pass (previously uninterruptible) honours it too. Stop now lands in about a
+  second, and tiles already written are kept.
+- **The worker recommendation was capped at 8 regardless of CPU.** A 16-core / 32-thread
+  machine was told to use 8 workers and left half idle, which is why people found a manual
+  setting roughly twice as fast. The ceiling now scales with the core count; RAM and
+  save-disk speed remain the secondary caps.
+- **Size and time estimates ignored build height and caves.** Both used a flat figure per
+  region measured on a vanilla-height, cave-less world, so a tall or cave-carved build read
+  several times low. Estimates now scale with the declared world height, caves and baked
+  lighting — and once a run finishes, Meld measures what actually landed on disk per region
+  and uses that measurement for the project from then on.
+
+### Added
+- **Troubleshooting guide** (`docs/troubleshooting.html`, linked from the docs hub): the
+  flat-world-on-a-server sequence, Overpass rate limits and going fully offline, what bake
+  lighting actually does, why an estimate read low, selections too big to plan, worker and
+  thread tuning, install problems, and the world artefacts people ask about.
+- **Server hand-off steps** in the finished-world dialog: open it in single-player once,
+  stop the server, move the whole folder (`level.dat` and `datapacks/` included, not just
+  `region/`), match the version. Pasting a world over a running server is the single most
+  common support question.
+- **Minecraft 1.21.10, 1.21.11, 26.1 and 26.1.1** in the version selector, and **extended
+  build height on 26.2**, which the fork previously refused for want of a verified pack
+  format. A note under the selector states the one-way rule: a newer client opens an older
+  world, not the reverse — use chunker.app to go backwards.
+- **Plain-language notes in the UI** where the questions keep coming: bake lighting is for
+  LOD mods and map renderers only (Minecraft re-lights on load, so it is not a fix for a
+  dark world), and the OSM panel now explains Overpass rate limits, what Meld does about
+  them, and that a local `.pbf` bake removes them entirely.
+
 ## [1.8.1] - 2026-08-06 - "Height"
 
 Pick the Minecraft version you are building for, and let a world's vertical range follow

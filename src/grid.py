@@ -9,17 +9,54 @@ the world with no gaps at region granularity (light-docs/02).
 from __future__ import annotations
 
 import math
+import os
 
 from .coords import job_cell_deg, cell_bbox
 
+# A plan is a list of dicts held in RAM and sent to the browser as JSON, so an absurd
+# selection (the whole planet at 1:1 is ~2e8 cells) has to be refused BEFORE the list is
+# built — materialising it first is what killed the server. Override for real monsters.
+MAX_PLAN_CELLS = max(100, int(os.environ.get("MELD_MAX_PLAN_CELLS", "20000")))
 
-def cells_for_bbox(bbox: dict, origin: dict, scale: float, size: int) -> list[dict]:
+
+class TooManyCells(ValueError):
+    """Selection would plan more cells than `limit`. Carries the numbers for the UI."""
+
+    def __init__(self, count: int, limit: int, size: int, scale: float):
+        self.count, self.limit, self.size, self.scale = count, limit, size, scale
+        bigger = min(64, max(size * 2, 8))
+        super().__init__(
+            f"That selection plans about {count:,} cells (limit {limit:,}). "
+            f"At scale {scale:g} with {size}-region cells it would not fit in memory or on disk. "
+            f"Try: a bigger cell size (e.g. {bigger} regions, ~{(bigger / size) ** 2:.0f}x fewer cells), "
+            f"a smaller scale, or a smaller area."
+        )
+
+
+def count_cells_for_bbox(bbox: dict, origin: dict, scale: float, size: int) -> int:
+    """How many cells `cells_for_bbox` would produce — arithmetic only, no allocation."""
+    olat, olon = float(origin["lat"]), float(origin["lon"])
+    d_lat, d_lon = job_cell_deg(size, olat, scale)
+    if d_lat <= 0 or d_lon <= 0:
+        return 0
+    south, north = float(bbox["south"]), float(bbox["north"])
+    west, east = float(bbox["west"]), float(bbox["east"])
+    nz = math.ceil((north - olat) / d_lat) - math.floor((south - olat) / d_lat)
+    nx = math.ceil((east - olon) / d_lon) - math.floor((west - olon) / d_lon)
+    return max(0, nz) * max(0, nx)
+
+
+def cells_for_bbox(bbox: dict, origin: dict, scale: float, size: int,
+                   max_cells: int | None = MAX_PLAN_CELLS) -> list[dict]:
     """
     Return a list of cells covering `bbox`:
         [{ "cell_key": "rx,rz,size", "bbox": {south,west,north,east} }, ...]
 
     Indices are integer steps from the origin; a cell is included when it
     overlaps the selection bbox at all.
+
+    Raises `TooManyCells` when the grid would exceed `max_cells` (checked by arithmetic
+    before anything is allocated). Pass max_cells=None to skip the guard.
     """
     olat, olon = float(origin["lat"]), float(origin["lon"])
     d_lat, d_lon = job_cell_deg(size, olat, scale)
@@ -28,6 +65,11 @@ def cells_for_bbox(bbox: dict, origin: dict, scale: float, size: int) -> list[di
 
     south, north = float(bbox["south"]), float(bbox["north"])
     west, east = float(bbox["west"]), float(bbox["east"])
+
+    if max_cells is not None:
+        n = count_cells_for_bbox(bbox, origin, scale, size)
+        if n > max_cells:
+            raise TooManyCells(n, max_cells, size, scale)
 
     rz_start = math.floor((south - olat) / d_lat)
     rz_end = math.ceil((north - olat) / d_lat)
@@ -108,7 +150,8 @@ def _simplify_ring(points, eps: float):
     return out if len(out) >= 3 else points
 
 
-def cells_for_polygons(rings, origin: dict, scale: float, size: int) -> list[dict]:
+def cells_for_polygons(rings, origin: dict, scale: float, size: int,
+                       max_cells: int | None = MAX_PLAN_CELLS) -> list[dict]:
     """Tile the bounding box of one or more polygon rings, then keep only cells whose
     CENTER falls inside ANY ring. Lets the selection follow a region/country shape
     (incl. multi-polygon island nations), not just a square. Each ring is a list of
@@ -132,16 +175,22 @@ def cells_for_polygons(rings, origin: dict, scale: float, size: int) -> list[dic
     lats = [p[0] for r in norm for p in r]
     lons = [p[1] for r in norm for p in r]
     bbox = {"south": min(lats), "north": max(lats), "west": min(lons), "east": max(lons)}
+    # A country's bbox holds more cells than the country does (Chile, island nations), so the
+    # SCAN is allowed a few times the cap; the kept set still has to respect it.
+    scan_cap = None if max_cells is None else max_cells * 4
     out: list[dict] = []
-    for c in cells_for_bbox(bbox, origin, scale, size):
+    for c in cells_for_bbox(bbox, origin, scale, size, max_cells=scan_cap):
         b = c["bbox"]
         clat = (b["south"] + b["north"]) / 2.0
         clon = (b["west"] + b["east"]) / 2.0
         if any(_point_in_poly(clat, clon, r) for r in norm):
             out.append(c)
+    if max_cells is not None and len(out) > max_cells:
+        raise TooManyCells(len(out), max_cells, size, scale)
     return out
 
 
-def cells_for_polygon(poly, origin: dict, scale: float, size: int) -> list[dict]:
+def cells_for_polygon(poly, origin: dict, scale: float, size: int,
+                      max_cells: int | None = MAX_PLAN_CELLS) -> list[dict]:
     """Single-ring convenience wrapper around cells_for_polygons."""
-    return cells_for_polygons([poly], origin, scale, size)
+    return cells_for_polygons([poly], origin, scale, size, max_cells=max_cells)

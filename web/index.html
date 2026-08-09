@@ -662,9 +662,16 @@
           <option value="">Default</option>
           <option value="1.21.4">1.21.4</option>
           <option value="1.21.5">1.21.5</option>
+          <option value="1.21.10">1.21.10</option>
+          <option value="1.21.11">1.21.11</option>
+          <option value="26.1">26.1</option>
+          <option value="26.1.1">26.1.1</option>
           <option value="26.1.2">26.1.2</option>
           <option value="26.2">26.2</option>
         </select></label>
+      <div class="stat" style="margin:-2px 0 4px 2px;color:var(--mut)">
+        The world targets the version you pick. A NEWER client opens it fine; an OLDER one
+        does not — convert it with chunker.app instead.</div>
       <label>Extend build height
         <span class="i" title="Fit the world's vertical range to the terrain instead of vanilla's -64..319, via a generated datapack. Experimental: Minecraft prompts for 'Experimental Features' on first load and the pack can never be removed from that world. Needs 1.17+. If the terrain already fits vanilla, no datapack is written.">i</span>
         <input id="heightlimit" type="checkbox"></label>
@@ -687,6 +694,10 @@
       <label>Bake lighting (LOD mods)
         <span class="i" title="Pre-bake per-chunk light so Voxy / Distant Horizons render distant chunks lit without visiting them (Arnis issue #1071). On by default; slower to generate and bigger region files.">i</span>
         <input id="bakelight" type="checkbox"></label>
+      <div class="stat" style="margin:-2px 0 4px 2px;color:var(--mut)">
+        For LOD mods (Voxy, Distant Horizons) and map renderers only. Minecraft itself
+        re-lights chunks as you load them, so in normal play you will not see a difference —
+        it is not a fix for a world that looks dark, and it does not affect buildings.</div>
       <label>Stream to disk (big tiles)
         <span class="i" title="Evict generated regions to disk during generation instead of holding the whole world in RAM (upstream Arnis --stream-to-disk). Needed for 8x8 / 16x16 test tiles without running out of memory. Ignored automatically if this arnis.exe doesn't support it yet.">i</span>
         <input id="streamdisk" type="checkbox"></label>
@@ -1018,6 +1029,12 @@
     <div class="card">
       <h2>OSM data pack <span class="i" title="Bake a local OpenStreetMap .pbf (e.g. romania-latest.osm.pbf from Geofabrik) into the shared OSM grid, so generation reads buildings/roads OFFLINE with ZERO Overpass calls, and every overlapping selection reuses it instead of re-downloading. Draw/search an area, point at your .pbf folder, then Bake. Needs pyosmium on the server (pip install osmium).">i</span></h2>
       <div class="stat" id="osmCov" style="margin-bottom:4px">Draw or search an area, then check OSM coverage.</div>
+      <div class="stat" style="margin-bottom:6px;color:var(--mut)">
+        Live map data comes from Overpass, a free shared service with per-IP limits. A big or
+        repeated fetch can come back <b>rate limited (429)</b> or <b>server overloaded (403)</b>;
+        Meld rotates mirrors and retries, and everything it fetched is cached on the shared grid
+        so a re-run costs nothing. If your network blocks Overpass, or you fetch the same region
+        often, bake a local .pbf below and generation never calls out at all.</div>
       <div class="row">
         <button class="sec" id="btnOsmCoverage" title="Check how much of the selection's OSM is baked/cached on the stable grid. Any red tiles are edge/sea tiles outside your .pbf (the seam ring + the Black Sea), not errors; generation fetches each live once and caches it.">Check OSM coverage</button>
         <button class="sec" id="btnOsmBake" title="Slice the .pbf folder below into the selection's missing OSM tiles. Offline, uses your CPU/RAM/disk, no Overpass calls.">⤓ Bake from .pbf</button>
@@ -1108,6 +1125,8 @@ let retrySelect = false;       // when on, drag to mark cells for retry (a separ
 let RAM_GB = null;             // detected RAM, drives the worker-count warning threshold
 let projOrigin = null;         // {lat,lon} for recomputing cell geometry on refresh
 let projScale = 0.3;
+let projMbPerRegion = 4;   // refreshed from /api/state (measured or modelled per project)
+let projHeightBlocks = 384, projCaves = false;   // drive the size + time estimates
 const drawnItems = new L.FeatureGroup().addTo(map);
 const prefetchGroup = L.layerGroup().addTo(map);   // cyan dashed OSM-download chunks
 const suspectGroup = L.layerGroup().addTo(map);    // amber rings on cells flagged suspect
@@ -1182,9 +1201,20 @@ map.on(L.Draw.Event.CREATED, async e => {
 });
 
 const $ = id => document.getElementById(id);
+let _tooManyShown = false;
 const api = (url, body) => fetch(url, body ? { method:'POST',
   headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : undefined)
-  .then(r => r.json());
+  .then(r => r.json())
+  .then(j => {
+    // A refused plan (too many cells) must never pass silently: every plan path goes
+    // through api(), so the explanation is raised once, here.
+    if (j && j.too_many_cells && !_tooManyShown) {
+      _tooManyShown = true;
+      modalInfo('Selection too big to plan', j.error)
+        .then(() => { _tooManyShown = false; });
+    }
+    return j;
+  });
 
 // ── themed center modal (replaces native alert/confirm so popups match the theme) ──
 function _meldModal({ title, html, buttons }) {
@@ -1535,7 +1565,12 @@ function estBuildSeconds(todoRegions, todoCells, workers, bake) {
   if (todoRegions <= 0) return 0;
   const w = Math.max(1, Math.min(64, workers || 4));
   const wf = Math.sqrt(12 / Math.max(6, Math.min(16, w)));   // mild: 8-16 workers ~ same
-  const perRegion = 0.13 * wf * (bake ? 1 : 0.82);           // ~0.19 s/region @ 8w, bake on
+  // An extended-height world writes proportionally more sections per region, and cave
+  // carving is extra work per column — the flat figure below was measured on a
+  // vanilla-height, cave-less build and read far too low for either.
+  const hf = Math.max(1, (projHeightBlocks || 384) / 384);
+  const cf = projCaves ? 1.35 : 1;
+  const perRegion = 0.13 * wf * (bake ? 1 : 0.82) * hf * cf;  // ~0.19 s/region @ 8w, bake on
   const cellOverhead = (todoCells || 0) * 8 / Math.max(1, Math.min(16, w)); // fetch+prep per cell, shared across workers
   return 120 + todoRegions * perRegion + cellOverhead;        // +120 spin-up/prefetch
 }
@@ -1557,7 +1592,7 @@ function updateStats(grid) {
   const workers = parseInt($('workers').value) || 4;
   const bake = $('bakelight') ? $('bakelight').checked : true;
   const timeStr = todo > 0 ? `~${fmtDur(estBuildSeconds(todo, todoCells, workers, bake))} @ ${workers}w` : 'all merged';
-  $('estSize').textContent = '~' + fmtMB(regions * 4);
+  $('estSize').textContent = '~' + fmtMB(regions * projMbPerRegion);
   $('estSub').innerHTML =
     `${keys.length} cells · ${regions.toLocaleString()} regions · ${wBlk.toLocaleString()}×${hBlk.toLocaleString()} blocks`
     + `<br>${km(kmW)}×${km(kmH)} km · build ${timeStr}`;
@@ -1688,7 +1723,17 @@ function showRunDone(run, elapsed) {
     + r('Regions', run.est_regions || 0)
     + r('On disk', size)
     + `</table>`
-    + `<div style="font-size:11.5px;color:var(--mut);margin-top:10px">Open it in Minecraft from the save location in the World panel.</div>`;
+    + `<div style="font-size:11.5px;color:var(--mut);margin-top:10px">Open it in Minecraft from the save location in the World panel.</div>`
+    // Putting a generated world on a server trips people up constantly: pasting it over a
+    // running server's world folder gives a flat world, because the server never re-reads
+    // level.dat and the extended-height datapack is not registered.
+    + `<div style="font-size:11.5px;color:var(--mut);margin-top:8px;border-top:1px solid var(--line);padding-top:8px">`
+    + `<b style="color:var(--acc2)">Putting it on a server?</b><br>`
+    + `1. Open it once in single-player first (accept the experimental-features prompt if it appears) and check it looks right.<br>`
+    + `2. Stop the server. Never overwrite a world folder while it runs.<br>`
+    + `3. Either import it with a plugin like Multiverse-Core, or copy the whole folder in — including <code>level.dat</code> and <code>datapacks/</code>, not just <code>region/</code>.<br>`
+    + `4. Run the server on the same Minecraft version you generated for. An older server cannot read a newer world.`
+    + `</div>`;
   _meldModal({ title: run.failed ? 'Finished, with failures' : 'World ready',
     html, buttons: [{ label: 'View benchmark', value: 'report', kind: 'gold' },
                     { label: run.failed ? 'Review' : 'Open Minecraft folder', value: 'open', kind: 'ghost' },
@@ -1903,6 +1948,12 @@ async function refreshState() {
   // settings
   const st = s.settings || {};
   projScale = parseFloat(st.scale) || 0.1;
+  // Server-side MB/region: measured from finished runs when there is one, otherwise
+  // modelled from build height + caves + baked lighting. Beats a flat constant, which
+  // under-read a tall or cave-carved world by several times.
+  projMbPerRegion = parseFloat(s.mb_per_region) || projMbPerRegion;
+  projHeightBlocks = parseInt(s.world_height_blocks) || 384;
+  projCaves = !!st.caves;
   $('scale').value = st.scale; updateScaleHint();
   if (document.activeElement !== $('size')) $('size').value = snapSize(st.job_size_regions);
   $('ground').value = st.ground_level; $('road').value = st.road_detail_level;
@@ -2400,7 +2451,9 @@ function estWorldMb(areaKm2, scale, fmt) {
   if (areaKm2 <= 0) return 0;
   const regionKm2 = Math.pow(512 / scale, 2) / 1e6;
   const regions = Math.max(1, areaKm2 / regionKm2);
-  return regions * 3.5 / (_FMT_RATIO[fmt] || 1.0);
+  // Same per-region figure the map estimate uses, so both agree (and both react to a
+  // tall/cave-carved world instead of assuming a vanilla-height surface build).
+  return regions * projMbPerRegion / (_FMT_RATIO[fmt] || 1.0);
 }
 function fmtSize(mb) {
   if (!mb) return '?';

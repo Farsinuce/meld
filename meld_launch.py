@@ -36,8 +36,8 @@ PORT = int(os.environ.get("PORT", "5630"))
 FORK = os.environ.get("MELD_ARNIS_REPO", "Teddy563/arnis")
 IS_WIN = os.name == "nt"
 
-# Core deps Meld cannot run without; the rest of requirements.txt (osmium, zstd) are
-# optional features that are allowed to fail on platforms without a prebuilt wheel.
+# Core deps Meld cannot run without; the rest of requirements.txt (osmium) is an
+# optional feature that is allowed to fail on platforms without a prebuilt wheel.
 CORE_DEPS = ["Flask>=3.0", "Pillow>=10.0", "psutil>=5.9", "shapely>=2.1", "zstandard>=0.22"]
 
 

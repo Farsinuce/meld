@@ -39,7 +39,7 @@ BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))
 
 from src.project import Project, default_settings
-from src.grid import cells_for_bbox, cells_for_polygons, _point_in_poly
+from src.grid import cells_for_bbox, cells_for_polygons, _point_in_poly, TooManyCells
 from src.coords import expand_bbox_for_seam, cell_bbox, snap_to_region_grid
 from src.arnis_cmd import (build_arnis_cmd, run_arnis, find_world_dir, clean_output_dir,
                            parse_progress, effective_elev_zoom)
@@ -174,13 +174,82 @@ _RQ_LOCK = threading.Lock()
 _RQ = {"active": False, "stop": False, "pause": False, "slugs": [], "idx": 0, "current": None,
        "results": [], "note": ""}
 
-# Rough output-size estimate (queue + build). Built-world .mca is ~this per 512-block region;
-# the export formats divide it by their measured ratio (from MELD_EXPORT_PLAN.md).
+# Rough output-size estimate (queue + build). Built-world .mca is ~this per 512-block region
+# for a VANILLA-height, cave-less, unbaked world; the modifiers below scale it for what the
+# project actually builds, and the export formats divide it by their measured ratio (from
+# MELD_EXPORT_PLAN.md). A finished run replaces the guess with a measurement — see
+# `_record_size_calibration`.
 _MB_PER_REGION = 3.5
+_VANILLA_HEIGHT = 384          # -64..319, the height the base figure was measured at
+_CAVES_SIZE_FACTOR = 1.15      # carved air + ores + decoration widen the palette
+_BAKE_SIZE_FACTOR = 1.35       # SkyLight + BlockLight = 8 KB per section before compression
 _FMT_RATIO = {"none": 1.0, "zip": 1.85, "tarzst": 1.85, "linear": 4.8, "blinear": 4.3}
 
 
-def _estimate_world_mb(area_km2, scale, fmt: str = "none") -> float:
+def _world_height_blocks(settings: dict, elevation: dict | None) -> int:
+    """Build height this project will declare, in blocks. Vanilla unless the height limit is
+    lifted, in which case it is the locked terrain range (times the vertical exaggeration)
+    plus the head/underroom — the same inputs the fork fits the datapack to."""
+    if not settings.get("disable_height_limit"):
+        return _VANILLA_HEIGHT
+    try:
+        lo, hi = settings.get("world_min_y"), settings.get("world_max_y")
+        if str(lo).strip() != "" and str(hi).strip() != "":     # explicit floor/ceiling wins
+            return max(_VANILLA_HEIGHT, int(hi) - int(lo))
+        ev = elevation or {}
+        span_m = float(ev.get("max_m") or 0) - float(ev.get("min_m") or 0)
+        if span_m <= 0:
+            return _VANILLA_HEIGHT
+        blocks = span_m * float(settings.get("scale", 1.0) or 1.0) \
+            * float(settings.get("vertical_exaggeration", 1.0) or 1.0)
+        blocks += float(settings.get("height_headroom", 32) or 0)
+        blocks += float(settings.get("height_underroom", 16) or 0)
+        return max(_VANILLA_HEIGHT, int(blocks))
+    except (TypeError, ValueError):
+        return _VANILLA_HEIGHT
+
+
+def _mb_per_region(settings: dict | None = None, elevation: dict | None = None) -> float:
+    """MB per built region for THIS project. A measurement from finished runs when there is
+    one (`mb_per_region_observed`), otherwise the model: taller worlds hold proportionally
+    more sections, caves and baked lighting each add their own bulk."""
+    s = settings if settings is not None else PROJECT.settings()
+    try:
+        seen = float(s.get("mb_per_region_observed") or 0)
+    except (TypeError, ValueError):
+        seen = 0.0
+    if seen > 0:
+        return seen
+    mb = _MB_PER_REGION * (_world_height_blocks(s, elevation) / _VANILLA_HEIGHT)
+    if s.get("caves"):
+        mb *= _CAVES_SIZE_FACTOR
+    if s.get("bake_lighting"):
+        mb *= _BAKE_SIZE_FACTOR
+    return mb
+
+
+def _record_size_calibration() -> None:
+    """After a run: divide what is actually on disk by the regions actually merged, and keep
+    it as this project's MB/region. Whole-world size over whole-world regions, so incremental
+    runs calibrate correctly too. Best-effort — never breaks a finished run."""
+    try:
+        mb = _dir_size_mb(master_world_path(create=False))
+        regions = 0
+        for key, status in (PROJECT.load_grid() or {}).items():
+            if status != "merged":
+                continue
+            try:
+                regions += int(key.split(",")[2]) ** 2
+            except (IndexError, ValueError):
+                continue
+        if mb and regions >= 4:      # a couple of cells is not a sample worth trusting
+            PROJECT.update_settings({"mb_per_region_observed": round(mb / regions, 3)})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _estimate_world_mb(area_km2, scale, fmt: str = "none", settings: dict | None = None,
+                       elevation: dict | None = None) -> float:
     """Rough finished-size estimate in MB for an area at a scale, after the export format's ratio."""
     try:
         area_km2 = float(area_km2 or 0.0)
@@ -191,7 +260,7 @@ def _estimate_world_mb(area_km2, scale, fmt: str = "none") -> float:
         return 0.0
     region_km2 = (512.0 / scale) ** 2 / 1_000_000.0     # km2 one region covers at this scale
     regions = max(1.0, area_km2 / region_km2)
-    return regions * _MB_PER_REGION / _FMT_RATIO.get(fmt, 1.0)
+    return regions * _mb_per_region(settings, elevation) / _FMT_RATIO.get(fmt, 1.0)
 
 # ── post-generation export/compression status (drives the progress view) ──────
 # Populated by the export post-pass that runs once all cells are merged. See
@@ -2144,6 +2213,7 @@ def _on_complete(job, ok, err):
             write_world_meta()
             run_done = True
     if run_done:
+        _record_size_calibration()  # what a region ACTUALLY costs here, for the next estimate
         _write_run_report()   # benchmark JSON + HTML into the world folder (best-effort)
         _maybe_write_map_item()  # add the world map item (before export may convert regions)
         _scan_missing_regions()  # ⚠️ flag interior holes (before export converts .mca -> .linear)
@@ -2207,6 +2277,13 @@ def api_state():
         "save_location": (PROJECT.settings().get("master_world_dir") or "").strip() or str(PROJECT.root),
         "world_icon": _world_icon_src() is not None,
         "ram_gb": _total_ram_gb(),   # lets the UI set RAM-based worker warning thresholds
+        # MB per built region for THIS project (measured once a run has finished, modelled
+        # from height/caves/baked-lighting before that) so the UI's size estimate matches
+        # what actually lands on disk instead of a flat 4 MB.
+        "mb_per_region": round(_mb_per_region(PROJECT.settings(), PROJECT.elevation()), 3),
+        # Build height this project will declare. The UI scales its TIME estimate by it:
+        # a 2000-block world writes several times the sections a vanilla one does.
+        "world_height_blocks": _world_height_blocks(PROJECT.settings(), PROJECT.elevation()),
     })
 
 
@@ -2729,10 +2806,17 @@ def api_grid():
     # disk at the end of each cell, auto stream-to-disk for 8+), but the user owns the trade-off.
     size = max(1, min(64, int(d.get("size") or settings.get("job_size_regions") or 4)))
     scale = float(settings.get("scale", 1.0))
-    if has_rings:
-        cells = cells_for_polygons(rings, origin, scale, size)   # follow the drawn/searched shape
-    else:
-        cells = cells_for_bbox(bbox, origin, scale, size)
+    try:
+        if has_rings:
+            cells = cells_for_polygons(rings, origin, scale, size)  # follow the drawn/searched shape
+        else:
+            cells = cells_for_bbox(bbox, origin, scale, size)
+    except TooManyCells as ex:
+        # Refused BEFORE the list exists: planning the whole planet at 1:1 used to allocate
+        # ~2e8 cells and take the server down with it.
+        log(f"[plan] refused: {ex}")
+        return jsonify({"ok": False, "error": str(ex), "too_many_cells": True,
+                        "count": ex.count, "limit": ex.limit}), 400
     grid = PROJECT.load_grid()
     if mode == "remove":
         removed = []
@@ -3011,7 +3095,7 @@ def _submit_cells(cells: list[dict], osm_files: dict | None = None,
         # OSM/terrain warm-up too (the prefetch DOES cost wall time). Otherwise start now.
         started = _RUN.get("started") if (keep_started and _RUN.get("started")) else time.time()
         _RUN.update(started=started, ended=None, total=len(cells), done=0, failed=0,
-                    est_regions=est_regions, est_mb=est_regions * MB_PER_REGION,
+                    est_regions=est_regions, est_mb=est_regions * _mb_per_region(),
                     actual_mb=None, phase="generating")
     _reset_export_status()   # a fresh run resets the export progress + the one-pass guard
     queued = []
@@ -3062,7 +3146,7 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
     est_regions = sum(int(c["cell_key"].split(",")[2]) ** 2 for c in cells)
     with _RUN_LOCK:
         _RUN.update(started=time.time(), ended=None, total=len(cells), done=0, failed=0,
-                    est_regions=est_regions, est_mb=est_regions * MB_PER_REGION,
+                    est_regions=est_regions, est_mb=est_regions * _mb_per_region(),
                     actual_mb=None, phase="prefetch")
     with _PREFETCH_LOCK:
         _PREFETCH.update(active=True, done=False, chunks=[], started=time.time(), phase="osm",
@@ -3277,7 +3361,11 @@ def api_queue():
             if not bbox:
                 return jsonify({"ok": False, "error": "cells or bbox required"}), 400
             size = int(d.get("size") or settings.get("job_size_regions") or 4)
-            cells = cells_for_bbox(bbox, origin, scale, size)
+            try:
+                cells = cells_for_bbox(bbox, origin, scale, size)
+            except TooManyCells as ex:
+                return jsonify({"ok": False, "error": str(ex), "too_many_cells": True,
+                                "count": ex.count, "limit": ex.limit}), 400
 
     # Continue-where-left-off: skip cells already merged unless force=true.
     if not d.get("force"):
@@ -3501,7 +3589,8 @@ def _project_info(slug: str) -> dict:
         "scale": s.get("scale"), "active": slug == ACTIVE_SLUG,
         "bbox": bbox, "center": center, "area_km2": area_km2,
         "export_format": s.get("export_format", "none"),
-        "est_mb": round(_estimate_world_mb(area_km2, s.get("scale"), s.get("export_format", "none")), 1),
+        "est_mb": round(_estimate_world_mb(area_km2, s.get("scale"), s.get("export_format", "none"),
+                                           settings=s, elevation=data.get("elevation")), 1),
         "has_origin": origin.get("lat") is not None,
     }
 
@@ -3771,7 +3860,7 @@ def _render_queue_worker() -> None:
             scale = float(settings.get("scale", 1.0) or 1.0)
             grid = PROJECT.load_grid()
             plan_keys = [k for k, v in grid.items() if v != "merged"]
-            cells = None
+            cells, refused = None, False
             if origin.get("lat") is None:
                 record(slug, "skipped (no origin — set a selection first)")
             else:
@@ -3782,8 +3871,14 @@ def _render_queue_worker() -> None:
                     sel = PROJECT.load_selection()
                     if sel and sel.get("bbox"):
                         size = int(settings.get("job_size_regions") or 4)
-                        cells = cells_for_bbox(sel["bbox"], origin, scale, size)
-                if cells is None:
+                        try:
+                            cells = cells_for_bbox(sel["bbox"], origin, scale, size)
+                        except TooManyCells as ex:   # skip this project, keep the queue alive
+                            record(slug, f"skipped ({ex})")
+                            refused = True
+                if refused:
+                    pass
+                elif cells is None:
                     record(slug, "skipped (no plan or selection)")
                 else:
                     cells = [c for c in cells if grid.get(c["cell_key"]) != "merged"]
@@ -3936,6 +4031,7 @@ def api_stop():
             finalize = True
     if finalize:
         write_world_meta()
+        _record_size_calibration()   # a stopped run still measured real regions
         _write_run_report()
     return jsonify({"ok": True, "terminated": n})
 
@@ -4269,7 +4365,11 @@ def api_recommend():
     by_cpu = max(2, cores // 2)        # leave room for >= 2 threads per worker (workers x threads ~ cores)
     by_ram = max(2, int(ram // 3))     # ~3 GB per concurrent heavy (baked) save
     by_disk = max(2, int(disk // 90))  # ~90 MB/s sustained per worker during save bursts
-    rec_workers = max(2, min(8, by_cpu, by_ram, by_disk))
+    # The worker count scales with the machine. A flat cap of 8 left big CPUs half idle:
+    # 8w x 4t = 32 of 32 threads on a 16-core box only if threads land perfectly, and users
+    # measured ~2x by raising workers by hand. Ceiling still respects the pool's hard cap.
+    cap = max(4, min(WorkerPool.MAX_WORKERS_HARD_CAP, cores // 2))
+    rec_workers = max(2, min(cap, by_cpu, by_ram, by_disk))
     rec_threads = max(1, min(8, cores // max(1, rec_workers)))   # fill the cores: workers x threads ~ cores
     rec_cell = 4 if (disk < 600 or ram < 16) else 6
     rec_bake = ram >= 16

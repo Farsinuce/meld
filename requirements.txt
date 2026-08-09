@@ -4,5 +4,6 @@ psutil>=5.9
 osmium>=4.0    # optional: only needed to BAKE a local .pbf into the OSM data pack (offline OSM).
                # Everything else — incl. the OSM grid cache + live Overpass prefetch — runs without it.
 shapely>=2.1.2
-zstd>=1.5.7.3
-zstandard>=0.25.0
+zstandard>=0.25.0   # the ONLY zstd binding Meld imports (src/export.py). The similarly named
+                    # `zstd` package is NOT used: it was pinned here by mistake and its wheel is
+                    # missing on some platforms, which failed the whole install.

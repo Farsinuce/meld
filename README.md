@@ -7,12 +7,12 @@
 From a single city block to a whole continent, in one build.
 Built on a fork of [Arnis](https://github.com/louis-e/arnis) by louis-e.
 
-&nbsp;![version](https://img.shields.io/badge/version-1.8.1-blue)
+&nbsp;![version](https://img.shields.io/badge/version-1.8.2-blue)
 &nbsp;![Minecraft](https://img.shields.io/badge/Minecraft%20Java-1.21%2B-brightgreen)
 &nbsp;![Python](https://img.shields.io/badge/Python-3.10%2B-yellow)
 &nbsp;![built on](https://img.shields.io/badge/built%20on-Arnis%20fork-orange)
 
-**Windows · macOS · Linux** &nbsp;·&nbsp; Latest: **[1.8.1 Height](CHANGELOG.md)** &nbsp;·&nbsp;
+**Windows · macOS · Linux** &nbsp;·&nbsp; Latest: **[1.8.2 Field reports](CHANGELOG.md)** &nbsp;·&nbsp;
 [Docs](https://meldmc.com/docs) &nbsp;·&nbsp; [Live demo](https://meldmc.com/demo)
 
 </div>
@@ -92,6 +92,7 @@ Then: draw an area, set the cell size, press **Generate world**.
 | Export and compression | zip and tar.zst (~1.85x), Linear (~4.85x, servers), or B_Linear. The raw world is never deleted before the copy verifies. |
 | Server setup | World to a running Leaf server in five confirmed steps, with hash-verified downloads, a live console and a crash watchdog. [docs](https://meldmc.com/docs/server-setup) |
 | Border and zones | Turn a country into WorldGuard regions, point files and a ready Skript, then trim the world to that border. [docs](https://meldmc.com/docs/border-zones) |
+| Getting it onto a server | Open it in single-player once, stop the server, then move the whole folder or import it with Multiverse. Never paste over a running world. [docs](https://meldmc.com/docs/troubleshooting) |
 
 ---
 

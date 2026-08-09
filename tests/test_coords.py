@@ -76,6 +76,25 @@ def test_grid_covers_bbox():
     assert len(cells) == 9
 
 
+def test_whole_planet_is_refused_before_it_allocates():
+    """The whole world at 1:1 is ~2e8 cells. It has to raise, not build the list — that
+    allocation is what took the server down."""
+    import pytest
+
+    from src.grid import TooManyCells, count_cells_for_bbox
+
+    origin = {"lat": 0.0, "lon": 0.0}
+    whole = {"south": -85.0, "west": -180.0, "north": 85.0, "east": 180.0}
+    assert count_cells_for_bbox(whole, origin, 1.0, 4) > 1_000_000
+    with pytest.raises(TooManyCells):
+        cells_for_bbox(whole, origin, 1.0, 4)
+    # A sane selection is unaffected, and an explicit opt-out still works.
+    d_lat, d_lon = job_cell_deg(4, ORIGIN_LAT, 0.3)
+    small = {"south": ORIGIN_LAT, "west": ORIGIN_LON,
+             "north": ORIGIN_LAT + 2.5 * d_lat, "east": ORIGIN_LON + 2.5 * d_lon}
+    assert len(cells_for_bbox(small, {"lat": ORIGIN_LAT, "lon": ORIGIN_LON}, 0.3, 4)) == 9
+
+
 def test_snap_is_idempotent_on_grid_lines():
     origin = {"lat": ORIGIN_LAT, "lon": ORIGIN_LON}
     bbox = cell_bbox(3, 2, 4, ORIGIN_LAT, ORIGIN_LON, 0.3)
