@@ -513,10 +513,17 @@ def run_arnis(cmd: list[str], cwd: str, on_line=None, on_proc=None,
     if on_proc:
         on_proc(proc)
     try:
+        lines = 0
         for raw in proc.stdout:                       # type: ignore[union-attr]
+            lines += 1
             if on_line:
                 on_line(raw.rstrip())
         proc.wait()
+        if proc.returncode != 0 and on_line:
+            # The exit code is the one fact every failure has. Without it a cell that clap
+            # rejected, that panicked, and that was killed all looked identical downstream.
+            on_line(f"[meld] arnis exited with code {proc.returncode} "
+                    f"after {lines} line(s) of output")
         return proc.returncode == 0
     except Exception as e:                            # noqa: BLE001
         # Never swallow this silently: a reader-side failure looks exactly like an Arnis

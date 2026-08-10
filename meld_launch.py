@@ -271,12 +271,15 @@ def main() -> int:
     if sys.version_info < (3, 9):
         log(f"Python 3.9+ is required (found {platform.python_version()}).")
         return 1
+    # UTF-8 mode for every interpreter Meld starts from here on. It has to travel as an
+    # ENVIRONMENT variable, not as `-X utf8`: the venv re-exec below rebuilds argv from
+    # scratch, so a `-X` flag given on the command line is silently dropped and the server
+    # ends up back on the locale code page. Setting it in os.environ survives both the
+    # execv and every subprocess.
+    os.environ["PYTHONUTF8"] = "1"
     ensure_venv_and_deps()
     # Re-launch inside the venv so server.py imports the freshly installed dependencies.
-    # UTF-8 mode is set here too (execv inherits this environment) so the launcher's own
-    # subprocess reads are locale-proof as well; see start_server() for why.
     if not in_target_venv():
-        os.environ["PYTHONUTF8"] = "1"
         os.execv(str(venv_python()), [str(venv_python()), str(HERE / "meld_launch.py")])
     ensure_arnis()
     return start_server()

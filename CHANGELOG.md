@@ -29,6 +29,16 @@ language is not Western European. Nothing about generation changed.
 - **A failure to read Arnis's output was reported as nothing at all.** That path caught
   the exception and returned silently, which is why the cause never reached the log. It
   now writes the exact error into the cell log and the Meld log.
+- **A failed cell now shows what Arnis said.** All Arnis output already went to
+  `logs/cell-<x>_<z>_<n>.log`, but a failure printed one guessed word and nothing else, so
+  a rejected argument, a panic and a binary that never started were indistinguishable. The
+  last lines of the log are now echoed into the Meld log, with the exit code, and "no
+  output at all" is reported as its own diagnosis instead of being labelled a network
+  problem.
+- **`-X utf8` on the launcher command line was silently discarded.** The launcher re-execs
+  itself inside `.venv` with a freshly built argument list, which drops any `-X` flag, so
+  starting Meld that way put the server back on the locale code page. UTF-8 mode now
+  travels as an environment variable, which survives the re-exec and every subprocess.
 - **Other locale-sensitive reads hardened.** The Overture pre-warm (which surfaced the
   same crash as a raw traceback in the console), the map-item pass, the folder picker
   and the world-linking and Java probes can no longer raise on a byte their locale does

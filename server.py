@@ -730,6 +730,34 @@ def _record_fail(cell_key: str, reason: str, out: str | None = None) -> None:
         _CELL_FAIL[cell_key] = label[:120]
 
 
+def _surface_failure_tail(cell_key: str, out: str, max_lines: int = 12) -> None:
+    """Echo the end of a failed cell's Arnis log into the Meld log.
+
+    A failed cell used to print one guessed word ("network timeout") while everything Arnis
+    actually said stayed in a file nobody knew about, so unrelated failures were all reported
+    as the same thing. The last lines are almost always the real cause (a rejected argument,
+    a panic, a missing pack), and no output AT ALL is itself the diagnosis: the binary never
+    started, or Meld could not read it."""
+    tag = (cell_key or "").replace(",", "_")
+    try:
+        raw = (Path(out).parent.parent / "logs" / f"cell-{tag}.log").read_text(
+            encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return
+    body = [ln.rstrip() for ln in raw.splitlines()
+            if ln.strip() and not ln.lstrip().lower().startswith("run ")
+            and not ln.startswith("=== arnis exit")]
+    if not body:
+        log(f"  [{cell_key}] arnis produced no output before it exited — the binary could not "
+            f"start (missing runtime, blocked by antivirus, wrong architecture) or its output "
+            f"could not be read. Full log: logs/cell-{tag}.log")
+        return
+    log(f"  [{cell_key}] last {min(len(body), max_lines)} line(s) from arnis "
+        f"(full log: logs/cell-{tag}.log):")
+    for ln in body[-max_lines:]:
+        log(f"      | {ln[:300]}")
+
+
 def _clear_fail(cell_key: str) -> None:
     with _CELL_HEALTH_LOCK:
         _CELL_FAIL.pop(cell_key, None)
@@ -1811,6 +1839,7 @@ def _runner(job: dict, state: dict) -> bool:
     if not ok:
         PROJECT.set_cell_status(cell_key, "failed")
         _record_fail(cell_key, "Arnis generation failed", out=out)
+        _surface_failure_tail(cell_key, out)
         state.update(message="Arnis generation failed.")
         return False
 
