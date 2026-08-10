@@ -369,8 +369,13 @@ def _place_world(dest: Path, src: Path, link: bool) -> None:
         os.symlink(src, dest, target_is_directory=True)           # unix, or Windows developer mode
     except (OSError, NotImplementedError, AttributeError):
         if os.name == "nt":
+            # directory junction: no admin needed. errors="replace" because cmd.exe writes its
+            # message in the OEM code page (cp852 on a Polish console) while text=True decodes
+            # with the ANSI one — a localized "cannot create a file..." would otherwise raise
+            # UnicodeDecodeError straight past the handler above instead of reporting the link
+            # failure.
             r = subprocess.run(["cmd", "/c", "mklink", "/J", str(dest), str(src)],
-                               capture_output=True, text=True)     # directory junction: no admin needed
+                               capture_output=True, text=True, errors="replace")
             if r.returncode != 0:
                 raise RuntimeError("could not link the world in place ("
                                    + (r.stderr.strip() or r.stdout.strip() or "mklink failed")
@@ -496,7 +501,8 @@ def required_java(version: str) -> int:
 
 def _java_major(exe: str) -> int | None:
     try:
-        out = subprocess.run([exe, "-version"], capture_output=True, text=True, timeout=15)
+        out = subprocess.run([exe, "-version"], capture_output=True, text=True,
+                             errors="replace", timeout=15)
         m = re.search(r'version "(\d+)', (out.stderr or "") + (out.stdout or ""))
         return int(m.group(1)) if m else None
     except Exception:  # noqa: BLE001

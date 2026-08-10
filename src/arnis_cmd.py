@@ -498,9 +498,17 @@ def run_arnis(cmd: list[str], cwd: str, on_line=None, on_proc=None,
     and ARNIS_STREAM_TO_DISK=1 for big cells). The post-merge Arnis reads both;
     an older binary harmlessly ignores them."""
     child_env = {**os.environ, **(env or {})}
+    # encoding is PINNED to UTF-8: Arnis writes UTF-8 (the startup banner alone is
+    # solid-block characters), while `text=True` with no encoding decodes using the
+    # machine's locale code page. On a Central-European Windows (cp1250) that page has
+    # no mapping for 0x88 — the third byte of "█" — so the very first read raised
+    # UnicodeDecodeError, the process was killed, and every cell "failed" in 0s on
+    # locales outside cp1252. errors="replace" keeps any future odd byte from ever
+    # taking a cell down again.
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1, cwd=str(cwd), env=child_env,
+        text=True, encoding="utf-8", errors="replace",
+        bufsize=1, cwd=str(cwd), env=child_env,
     )
     if on_proc:
         on_proc(proc)
@@ -510,7 +518,15 @@ def run_arnis(cmd: list[str], cwd: str, on_line=None, on_proc=None,
                 on_line(raw.rstrip())
         proc.wait()
         return proc.returncode == 0
-    except Exception:
+    except Exception as e:                            # noqa: BLE001
+        # Never swallow this silently: a reader-side failure looks exactly like an Arnis
+        # failure from the outside, and with no line the log tail is guessed at instead
+        # (that is how a decode crash got reported as a "network timeout").
+        if on_line:
+            try:
+                on_line(f"[meld] arnis output could not be read: {type(e).__name__}: {e}")
+            except Exception:
+                pass
         try:
             proc.kill()
         except Exception:

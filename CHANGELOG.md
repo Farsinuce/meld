@@ -4,6 +4,36 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.8.3] - 2026-08-10
+
+A single-cause release: Meld could not generate anything at all on a Windows whose
+language is not Western European. Nothing about generation changed.
+
+### Fixed
+- **Every cell failed instantly on non-Western Windows locales, blamed on "network
+  timeout".** Meld read Arnis's console output using the machine's locale code page
+  instead of UTF-8. Arnis prints its logo in solid-block characters (`█` = `E2 96 88`
+  in UTF-8), and code page 1250 — Polish, Czech, Slovak, Hungarian, Romanian and the
+  rest of Central Europe — has no character at `0x88`. The first line Arnis printed
+  therefore raised a decode error, Meld killed the process, and the cell "failed" in
+  0 seconds; both retries died the same way, so a fully cached, fully offline build
+  still produced an empty world. Reading Arnis is now pinned to UTF-8, and the whole
+  Meld process runs in Python's UTF-8 mode so no unpinned read anywhere can repeat it.
+  Affected cp1250, cp1251, cp932 and similar; cp1252 machines happened to survive
+  because `0x88` is mapped there.
+- **The failure reason was read off the command line, not the output.** The cause shown
+  on a red cell came from scanning the cell log — including the echoed `RUN arnis.exe
+  … --timeout 600 …` line, so the word "timeout" in Arnis's *own flags* labelled
+  unrelated failures "network timeout". The scan now skips the command line, and a real
+  timeout in the output is still reported as one.
+- **A failure to read Arnis's output was reported as nothing at all.** That path caught
+  the exception and returned silently, which is why the cause never reached the log. It
+  now writes the exact error into the cell log and the Meld log.
+- **Other locale-sensitive reads hardened.** The Overture pre-warm (which surfaced the
+  same crash as a raw traceback in the console), the map-item pass, the folder picker
+  and the world-linking and Java probes can no longer raise on a byte their locale does
+  not map.
+
 ## [1.8.2] - 2026-08-10 - "Field reports"
 
 Everything in this release came from people hitting it: a selection that took the server

@@ -211,7 +211,12 @@ def _port_open() -> bool:
 
 
 def start_server() -> int:
-    env = {**os.environ, "PORT": str(PORT)}
+    # PYTHONUTF8=1 puts the server in UTF-8 mode, so anything that reads a child process or
+    # a file WITHOUT naming an encoding uses UTF-8 instead of the machine's locale code page.
+    # Meld pins UTF-8 explicitly where it matters, but on a non-cp1252 Windows (cp1250,
+    # cp1251, cp932, ...) a single unpinned read of Arnis's output is enough to kill a cell,
+    # so the whole process is put on UTF-8 as the floor rather than relying on every call site.
+    env = {**os.environ, "PORT": str(PORT), "PYTHONUTF8": "1"}
     url = f"http://127.0.0.1:{PORT}"
     log(f"starting Meld -> {url}")
     proc = subprocess.Popen([str(venv_python()), str(HERE / "server.py")], env=env)
@@ -268,7 +273,10 @@ def main() -> int:
         return 1
     ensure_venv_and_deps()
     # Re-launch inside the venv so server.py imports the freshly installed dependencies.
+    # UTF-8 mode is set here too (execv inherits this environment) so the launcher's own
+    # subprocess reads are locale-proof as well; see start_server() for why.
     if not in_target_venv():
+        os.environ["PYTHONUTF8"] = "1"
         os.execv(str(venv_python()), [str(venv_python()), str(HERE / "meld_launch.py")])
     ensure_arnis()
     return start_server()

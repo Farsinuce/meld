@@ -712,8 +712,14 @@ def _record_fail(cell_key: str, reason: str, out: str | None = None) -> None:
     if out is not None:
         tag = (cell_key or "").replace(",", "_")
         try:
-            txt = (Path(out).parent.parent / "logs" / f"cell-{tag}.log").read_text(
-                encoding="utf-8", errors="replace")[-6000:].lower()
+            raw = (Path(out).parent.parent / "logs" / f"cell-{tag}.log").read_text(
+                encoding="utf-8", errors="replace")[-6000:]
+            # The echoed "RUN <cmd>" line is not output, it is the command: it carries
+            # Arnis's own flags (--timeout 600, --connection..., ...) and matched markers
+            # here, so a cell that died instantly for an unrelated reason was labelled
+            # "network timeout". Scan what Arnis PRINTED, not what it was asked to do.
+            txt = "\n".join(ln for ln in raw.splitlines()
+                            if not ln.lstrip().lower().startswith("run ")).lower()
             for marker, lab in _FAIL_MARKERS:
                 if marker in txt:
                     label = lab
@@ -1495,7 +1501,8 @@ def api_overture_prewarm():
         cmd = [str(exe), "--prewarm-overture", "--scale", str(scale),
                "--bbox", f"{sub['south']},{sub['west']},{sub['north']},{sub['east']}"]
         try:
-            p = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=600,
                                env={**os.environ, "ARNIS_CACHE_ROOT": root})
             return p.returncode == 0
         except Exception:  # noqa: BLE001
@@ -2100,7 +2107,8 @@ def _maybe_write_map_item() -> None:
         cmd = [str(exe), "--bbox", "0.0,0.0,0.001,0.001",
                "--output-dir", str(world), "--map-item-only"]
         log("[MapItem] writing world map item into the player inventory…")
-        r = subprocess.run(cmd, cwd=str(BASE_DIR), capture_output=True, text=True, timeout=1800)
+        r = subprocess.run(cmd, cwd=str(BASE_DIR), capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=1800)
         if r.returncode == 0:
             log("[MapItem] done — locked filled-map added to the world")
         else:
@@ -2441,8 +2449,12 @@ def api_pick_folder():
         "print(p or '')\n"
     )
     try:
+        # PYTHONIOENCODING pins the child's side of the pipe so a picked folder with
+        # non-ASCII characters survives on any locale (both ends UTF-8, not the code page).
         out = subprocess.run([sys.executable, "-c", code],
-                             capture_output=True, text=True, timeout=180)
+                             capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=180,
+                             env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         lines = [ln for ln in (out.stdout or "").splitlines() if ln.strip()]
         return jsonify({"ok": True, "path": lines[-1].strip() if lines else ""})
     except Exception as e:  # noqa: BLE001
@@ -4266,8 +4278,11 @@ def _hw_specs(drive_hint: str | None = None) -> dict:
             "[pscustomobject]@{cpu=$cpu;mem=@($mem);media=\"$media\";bus=\"$bus\"}|ConvertTo-Json -Compress -Depth 4"
         )
         try:
+            # PowerShell writes in the console code page, not UTF-8, so the locale default
+            # is right here — but errors="replace" so an accented CPU/disk name can only
+            # ever come back mojibake, never as an exception.
             r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                               capture_output=True, text=True, timeout=12)
+                               capture_output=True, text=True, errors="replace", timeout=12)
             data = json.loads((r.stdout or "").strip() or "{}")
             if data.get("cpu"):
                 out["cpu_model"] = str(data["cpu"]).strip()
