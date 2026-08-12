@@ -67,6 +67,16 @@ def pick_port(preferred: int = DEFAULT_PORT) -> int:
     return preferred
 
 
+def _arg_value(argv: list[str], flag: str) -> str:
+    """--flag=value or --flag value, whichever the caller used."""
+    for i, a in enumerate(argv):
+        if a == flag and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith(flag + "="):
+            return a.split("=", 1)[1]
+    return ""
+
+
 def version() -> str:
     """Read the version out of the changelog heading; cosmetic, never fatal."""
     for name in ("CHANGELOG.md",):
@@ -107,6 +117,19 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--check" in argv:
         return check()
+    if "--statusbar" in argv:
+        # A second process on purpose: tkinter and the tray icon both want the main thread, and
+        # macOS *requires* AppKit to have it. Separate processes is the only arrangement where
+        # neither has to give way - and a crash in the HUD cannot take a running render with it.
+        from src import statusbar
+        from src.single_instance import read_session
+        # It is launched with pythonw / a windowed exe, so sys.stdout is None and the first
+        # print() would take it down before it drew anything. Same guard the main app uses.
+        applog.setup()
+        sess = read_session() or {}
+        url = _arg_value(argv, "--url") or sess.get("url") or f"http://127.0.0.1:{DEFAULT_PORT}"
+        token = _arg_value(argv, "--token") or sess.get("token") or ""
+        return statusbar.main(url, token)
     want_tray = "--no-tray" not in argv and tray.available()
 
     # UTF-8 everywhere, for this process and every child. Without it a single accented place

@@ -81,6 +81,8 @@ hiddenimports = [
     "waitress",
     "waitress.server",
     "zstandard",
+    "tkinter",               # the status bar; imported late, inside --statusbar
+    "src.statusbar",
 ]
 if IS_WIN:
     hiddenimports += ["pystray._win32"]
@@ -95,7 +97,8 @@ excludes = [
     # out keeps the packaged build buildable everywhere; that one feature stays available on a
     # source install, where osmium is already an optional dependency.
     "osmium",
-    "tkinter",
+    # tkinter is NOT excluded: src/statusbar.py draws the frameless status bar with it, and it
+    # is the reason that HUD costs no third-party dependency. Worth its ~10 MB.
     "pytest",
     "IPython",
     "matplotlib",

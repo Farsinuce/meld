@@ -55,7 +55,8 @@ a render, because the browser was never doing the work.
 | | |
 |---|---|
 | Its own window | Meld opens in an application window — no tabs, no address bar, its own taskbar entry and icon. The browser is still one menu item away, and `MELD_UI=browser` makes it the default |
-| Tray menu | Open Meld · Preview · Open in browser · **Meld console** · **Arnis console** · Stop render · Open log file · Data folder · Quit |
+| **Status bar** | A frameless strip that floats above other windows: one coloured block per worker, the current task, ETA. **No title bar, no X** — drag to move, right-click for everything, and it cannot be closed by reflex. Optional console drawer |
+| Tray menu | Open Meld · **Status bar** · Preview · Open in browser · **Meld console** · **Arnis console** · Stop render · Open log file · Data folder · Quit |
 | Preview window | 430×580, three tabs: progress/ETA/CPU/RAM, the Meld log, and the raw Arnis output |
 | No window anywhere | No console, no taskbar button. **The only way to quit is the tray's Quit** — closing the browser, the preview or a console leaves the render running |
 | No console flashing | A 3000-cell render used to pop a black window per cell; children get `CREATE_NO_WINDOW` |
@@ -63,9 +64,19 @@ a render, because the browser was never doing the work.
 | Sleep is blocked | While a render runs — hours of compute with no keypress looks idle to every power policy |
 | Desktop shortcut | `packaging\Create-Shortcut.ps1` (Windows) · `packaging/install-shortcut.sh` (macOS/Linux) |
 
-The consoles live **inside** the preview window, not in a spawned terminal. A `tail` window would
-put a console back in the taskbar — the one thing this app exists to avoid — and could only ever
-show the log file, never the raw generator output, which is filtered out before it gets there.
+The consoles live **inside** the preview window and the status bar, not in a spawned terminal. A
+`tail` window would put a console back in the taskbar — the one thing this app exists to avoid —
+and could only ever show the log file, never the raw generator output, which is filtered out
+before it gets there.
+
+**Worker colours** on the status bar, in the order a cell moves through them:
+
+| | | | | | |
+|---|---|---|---|---|---|
+| ⬛ idle | 🟦 fetch | 🟩 prepare | 🟨 **build** | 🟢 save | 🟩 merge |
+
+Gold is the one that means "generating right now". A worker that keeps its colour *and* stops
+filling its under-bar is stuck — which is the thing you want to spot from across the room.
 
 ```
 Meld.exe             tray app, no console; the UI opens in its own window

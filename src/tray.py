@@ -80,6 +80,7 @@ class Tray:
         self.token = token
         self._on_quit = on_quit
         self._icon = None
+        self._statusbar = None          # the frameless HUD, when the user has it up
 
     # ── talking to our own server ────────────────────────────────────────────
     def _post(self, path: str) -> dict:
@@ -134,6 +135,37 @@ class Tray:
         """
         preview.open_app_window(self._authed("/mini") + f"#{which}")
 
+    def toggle_statusbar(self, *_):
+        """Show or hide the frameless status strip.
+
+        Launched as our own executable with --statusbar rather than as an embedded window: see
+        src/statusbar.py for why it has to be a separate process (tkinter and the tray both want
+        the main thread; macOS insists on it for AppKit).
+        """
+        proc = self._statusbar
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            self._statusbar = None
+            return
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, "--statusbar"]
+        else:
+            # From source, prefer the windowless interpreter so no console flashes behind it.
+            exe = Path(sys.executable)
+            pyw = exe.with_name("pythonw.exe")
+            cmd = [str(pyw if pyw.is_file() else exe),
+                   str(Path(__file__).resolve().parent.parent / "meld_app.py"), "--statusbar"]
+        cmd += ["--url", self.url]
+        if self.token:
+            cmd += ["--token", self.token]
+        try:
+            self._statusbar = subprocess.Popen(cmd)
+        except Exception as ex:                                   # noqa: BLE001
+            print(f"[tray] could not start the status bar: {ex}")
+
     def stop_render(self, *_):
         self._post("/api/stop")
 
@@ -164,6 +196,12 @@ class Tray:
             print(f"[tray] could not open {d}: {ex}")
 
     def quit(self, *_):
+        proc = self._statusbar
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()          # the HUD is ours; it goes when we go
+            except Exception:
+                pass
         if self._on_quit:
             threading.Thread(target=self._on_quit, daemon=True).start()
         if self._icon is not None:
@@ -185,6 +223,7 @@ class Tray:
 
         menu = pystray.Menu(
             Item("Open Meld", self.open_ui, default=True),
+            Item("Status bar", self.toggle_statusbar),
             Item("Preview…", self.open_preview),
             Item("Open in browser", self.open_in_browser),
             pystray.Menu.SEPARATOR,

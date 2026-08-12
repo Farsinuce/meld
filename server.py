@@ -2348,6 +2348,44 @@ def mini():
     return resp
 
 
+#: Worker lifecycle, in the order a cell passes through it. The status bar colours a block per
+#: worker from this, so the pool becomes readable at a glance without any text.
+WORKER_STAGES = ("idle", "queued", "fetch", "prepare", "build", "save", "merge", "failed")
+
+
+def _worker_stage(state: dict) -> str:
+    """Which stage a worker is in, from the line Arnis last printed.
+
+    Arnis announces its phases in prose rather than as a machine-readable field, so this reads
+    the same keywords parse_progress() keys its percentage off - one source of truth for "what
+    does this line mean", even if that source is English text. Falls back to the percentage,
+    which is monotonic, when a line does not name its phase.
+    """
+    msg = (state.get("message") or "").lower()
+    if "fail" in msg or "error" in msg or "panic" in msg:
+        return "failed"
+    if "merg" in msg:
+        return "merge"
+    if "saving" in msg or "writing region" in msg:
+        return "save"
+    if "generating" in msg or "painting" in msg or "tile" in msg:
+        return "build"
+    if "processing" in msg or "ground" in msg or "elevation" in msg or "terrain" in msg:
+        return "prepare"
+    if "fetch" in msg or "download" in msg or "osm" in msg or "overpass" in msg:
+        return "fetch"
+    pct = int(state.get("progress") or 0)
+    if pct >= 90:
+        return "save"
+    if pct >= 35:
+        return "build"
+    if pct >= 15:
+        return "prepare"
+    if pct > 0:
+        return "fetch"
+    return "queued"
+
+
 def _RQ_note_safe(rq: dict) -> str:
     """'3/12 · romania-north' for the render queue, tolerating a half-filled state dict."""
     bits = []
@@ -2386,15 +2424,24 @@ def api_mini():
 
     busy = 0
     tasks = []
+    workers = []
     try:
         for s in POOL.get_states():
-            if not s.get("running"):
+            running = bool(s.get("running"))
+            stage = _worker_stage(s) if running else "idle"
+            # EVERY slot, not just the busy ones: the status bar draws one block per worker, and
+            # an idle block is information - it says the pool has room, or is winding down.
+            workers.append({"id": s.get("worker_id"), "stage": stage,
+                            "cell": s.get("cell_key") if running else None,
+                            "pct": int(s.get("progress") or 0) if running else 0})
+            if not running:
                 continue
             busy += 1
             if len(tasks) < 4:
                 tasks.append({"worker": s.get("worker_id"),
                               "cell": s.get("cell_key"),
                               "message": (s.get("message") or "")[:90],
+                              "stage": stage,
                               "pct": int(s.get("progress") or 0)})
     except Exception:
         pass
@@ -2464,6 +2511,7 @@ def api_mini():
         "awake": power.active(),
         "task": task,
         "tasks": tasks,
+        "workers": workers,
         "stats": {"cpu_pct": st.get("cpu_pct"), "ram_pct": ram_pct,
                   "disk_free_gb": st.get("disk_free_gb")},
         "log": _LOG[-6:],

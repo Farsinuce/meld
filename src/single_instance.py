@@ -45,12 +45,13 @@ class SingleInstance:
             other = read_session()   # -> open other["url"] and exit
     """
 
-    def __init__(self) -> None:
+    def __init__(self, name: str = LOCK_NAME) -> None:
         self._fh = None
+        self._name = name
 
     def acquire(self) -> bool:
         try:
-            path = lock_path()
+            path = data_dir() / self._name
             path.parent.mkdir(parents=True, exist_ok=True)
             # Opened r+ (not w) so an existing lock file is never truncated before we know
             # whether we can actually take the lock.
@@ -90,10 +91,13 @@ class SingleInstance:
             fh.close()
         except Exception:
             pass
-        try:
-            session_path().unlink(missing_ok=True)
-        except Exception:
-            pass
+        if self._name == LOCK_NAME:
+            # Only the app itself publishes a session; a secondary holder (the status bar) must
+            # not delete the running app's session file when it exits.
+            try:
+                session_path().unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def __enter__(self):
         return self
