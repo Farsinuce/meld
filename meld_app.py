@@ -100,6 +100,10 @@ def check() -> int:
     if paths.is_frozen():
         applog.attach_console()
         applog.setup()
+        # Unpack first, then look. --check ran BEFORE the unpack step in main(), so a
+        # single-file build carrying the generator inside itself reported "arnis NOT FOUND" and
+        # exited 1 - a diagnostic that failed the thing it was diagnosing.
+        paths.unpack_embedded_arnis()
     import server  # noqa: PLC0415 - imported late; it is the expensive import
     print(f"Meld {version() or '(unknown version)'}")
     print(f"python      {platform.python_version()} ({'frozen' if paths.is_frozen() else 'source'})")
