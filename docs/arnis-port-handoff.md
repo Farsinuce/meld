@@ -61,6 +61,58 @@ the right answer rather than merging per-cell map data, since per-cell map ids c
    implementations — upstream's `src/trees/` and `src/land_cover/` directories are a different
    codebase, not a rename. The non-goals section of the port plan lists the rest.
 
+## The generator auto-download is broken, and the frozen app has none
+
+Measured 2026-08-13 against the GitHub API, not inferred.
+
+**Two separate paths.** `meld_launch.py` → `ensure_arnis()` downloads the right asset for this
+OS/CPU from `Teddy563/arnis` `releases/latest`, else builds from source, else warns.
+`meld_app.py` (the frozen build) → `paths.unpack_embedded_arnis()` copies the binary **baked in at
+build time** and never touches the network. So a packaged Meld ships a pinned generator and can
+never pick up a newer one.
+
+**Three defects in the download path:**
+
+1. `releases/latest` was **v3.0.3 with zero assets** — tags v3.0.4/3.0.5/3.0.6 existed but no
+   GitHub Release was ever created for them, so the download failed on every OS. Fixed by cutting
+   a real Release: `release.yml` fires on `release: created` and attaches all four assets.
+   **v3.0.7 is tagged and pushed; someone with repo access still has to publish the Release**
+   (GitHub UI → Draft a new release → pick `v3.0.7` → Publish, or `gh release create v3.0.7`).
+2. **macOS asset names do not match.** `_arnis_asset()` asks for `arnis-mac-arm64.tar.gz` /
+   `arnis-mac-intel.tar.gz`; `release.yml` attaches only `arnis-mac-universal.tar.gz` (the
+   per-arch tarballs are internal CI artifacts). Mac fails even against a healthy release. Fix is
+   one line: return `arnis-mac-universal.tar.gz` for Darwin on both arches.
+3. **The frozen app cannot self-update.** If it should, note the resolution order in
+   `server.resolve_arnis_exe()`: `[APP_DIR, APP_DIR.parent, BASE_DIR, BASE_DIR.parent,
+   arnis-source/target/release, bin_dir()]`. `bin_dir()` is **last**, so a freshly downloaded
+   binary loses to the bundled copy next to the exe. Either write the download over the unpacked
+   copy in `bin_dir()`, or move `bin_dir()` ahead of the bundled location — and gate it on a
+   version probe so it only downloads when the release is actually newer.
+
+`MELD_ARNIS_REPO` overrides the repo for testing.
+
+## Closing the wave: the `-s ours` merge
+
+The fork shows "N commits behind louis-e/arnis:main" because GitHub compares a fork to its parent.
+Porting rewrites commits under new SHAs, so that number never falls by porting — only a merge that
+makes upstream an ancestor clears it. There is a precedent: `1453eeb`, *"merge: mark upstream v3.0.0
+(af521c9) as incorporated (ours strategy)"* — two parents, **empty diff against the first**.
+
+Repeat it only when **no `plan:*` row is left** in `UPSTREAM-TRIAGE.tsv`. `upstream-triage.sh`
+derives its base from `git merge-base`, so it self-heals after the merge and starts a fresh queue —
+which is exactly the danger: anything still unresolved at merge time drops out of the queue forever
+and survives only in the TSV. Skip and defer rows count as resolved; flip them to their terminal
+status first.
+
+```bash
+git merge -s ours upstream/main -m "merge: mark upstream wave 1 (<sha>) as incorporated (ours strategy)"
+git diff --stat HEAD^1 HEAD    # MUST be empty
+```
+
+Never press GitHub's **Sync fork** button. That is a real merge and would pull in the `--mode`
+terrain-on default, the canopy network fetch and upstream's `src/trees/` + `src/land_cover/` layout,
+straight over the fork's work.
+
 ## Current binaries
 
 `light-meld/arnis.exe` and `Meld/arnis.exe` are the 2026-08-10 build of v3.0.6 and have not been
