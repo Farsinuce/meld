@@ -46,6 +46,44 @@ Then: draw an area, set the cell size, press **Generate world**.
 
 ---
 
+## ArnisXL — the background app
+
+`ArnisXL` is the same engine as a desktop app: a portable folder, no installer, no Python
+required. Extract it anywhere and run it. It starts **in the tray with no window** — closing the
+browser does not stop a render, because the browser was never doing the work.
+
+| | |
+|---|---|
+| Tray menu | Open · Preview · Stop render · Show log · Data folder · Quit |
+| Preview window | A 430×580 always-there panel: progress, ETA, CPU/RAM, live log tail |
+| No console flashing | A 3000-cell render used to pop a black window per cell; children are spawned with `CREATE_NO_WINDOW` |
+| No orphans | Every `arnis` child sits in a job that dies with the app, however the app dies |
+| Sleep is blocked | While a render runs — hours of compute with no keypress looks idle to every power policy |
+| Desktop shortcut | `packaging\Create-Shortcut.ps1` (Windows) · `packaging/install-shortcut.sh` (macOS/Linux) |
+
+```
+ArnisXL.exe             tray app, no console, no taskbar button
+ArnisXL-console.exe     same app with the banner and a live log
+ArnisXL.exe --check     what is installed, where the data lives
+ArnisXL.exe --no-tray   headless: server only
+```
+
+**Where your data goes.** A source checkout is unchanged — `projects/` and `cache/` stay in the
+repo. A packaged install keeps them in `ArnisXL/data/` next to the app, or in the OS user-data
+folder if the app folder is read-only. Point it anywhere by putting a path in
+`arnisxl-data.txt` next to the executable, or by setting `ARNISXL_DATA_DIR`. A packaged install
+never adopts caches it did not create.
+
+**Building it yourself:** `pip install -r requirements.txt -r requirements-build.txt` then
+`python packaging/build.py --archive`. About 150 MB, arnis binary included so it works offline.
+
+**Unsigned.** Signing costs money and nothing else fixes these: Windows shows SmartScreen on
+first run (*More info* → *Run anyway*); macOS blocks it until notarised (*System Settings →
+Privacy & Security* → *Open Anyway*). Linux does not care. GNOME has no system tray without the
+AppIndicator extension — `--no-tray` works everywhere regardless.
+
+---
+
 ## What it does
 
 **Scale**

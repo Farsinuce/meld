@@ -73,3 +73,7 @@ session.json
 logs/
 user-assets/
 data/
+
+# PyInstaller output (packaging/build.py) — ~150 MB per build, rebuilt on demand.
+build/
+dist/

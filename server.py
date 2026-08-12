@@ -110,6 +110,19 @@ def _setup_shared_cache() -> None:
     sentinel = root / ".cache_migrated"
     if sentinel.exists():
         return
+    if is_frozen():
+        # A packaged ArnisXL must not adopt caches it did not create. The move made sense when
+        # there was exactly one install, editing files in place; a portable folder is copied to
+        # a second machine, run from a USB stick, or unpacked next to an existing source
+        # checkout, and any of those silently emptying %LOCALAPPDATA% into itself is theft, not
+        # migration - the first run of a test build here moved 189 MB of live tile cache out
+        # from under the source install. A packaged install that wants an existing cache points
+        # at it with MELD_CACHE_DIR or the arnisxl-data.txt pointer file.
+        try:
+            sentinel.write_text("")
+        except Exception:
+            pass
+        return
     appdata = os.environ.get("LOCALAPPDATA")
     if not appdata:
         try: sentinel.write_text("")
