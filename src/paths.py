@@ -193,6 +193,24 @@ def user_assets_dir() -> Path:
     return data_dir() / "user-assets"
 
 
+def build_info() -> dict:
+    """Which build this is: version, when it was packaged, which commit from.
+
+    Written by packaging/build.py into the bundle. A source checkout has no stamp, and says so
+    rather than inventing one - "source" is the honest answer when the files on disk are the
+    build.
+    """
+    import json
+    try:
+        data = json.loads((resource_dir() / "assets" / "build-info.json")
+                          .read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {"version": "", "built": "source", "commit": ""}
+
+
 def describe() -> dict:
     """Resolved paths, for the banner / diagnostics / the About panel."""
     return {

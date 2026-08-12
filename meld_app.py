@@ -105,7 +105,10 @@ def check() -> int:
         # exited 1 - a diagnostic that failed the thing it was diagnosing.
         paths.unpack_embedded_arnis()
     import server  # noqa: PLC0415 - imported late; it is the expensive import
+    bi = paths.build_info()
     print(f"Meld {version() or '(unknown version)'}")
+    print(f"build       {bi.get('built') or 'source'}"
+          + (f"  ({bi['commit']})" if bi.get("commit") else ""))
     print(f"python      {platform.python_version()} ({'frozen' if paths.is_frozen() else 'source'})")
     for k, v in paths.describe().items():
         print(f"{k:<11} {v}")
@@ -169,10 +172,14 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("MELD_REQUIRE_TOKEN", "1")
         childproc.install()
 
+        bi = paths.build_info()
+        stamp = bi.get("built") or "source"
+        if bi.get("commit"):
+            stamp += f" ({bi['commit']})"
         banner.show(version=version(), url=url, data_dir=str(paths.data_dir()),
-                    extra=[f"log: {log_path}"] +
-                          (["tray icon active — right-click it for controls"] if want_tray
-                           else ["no tray (headless) — Ctrl+C to stop"]))
+                    extra=[f"build: {stamp}", f"log: {log_path}"] +
+                          (["tray icon active, right-click it for controls"] if want_tray
+                           else ["no tray (headless), Ctrl+C to stop"]))
 
         import server  # noqa: PLC0415 - after the banner, so the slow import is visible as a pause
 

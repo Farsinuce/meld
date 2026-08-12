@@ -1099,6 +1099,9 @@
     <div class="stat railfoot" style="text-align:center;margin-top:16px">
       <a href="https://meldmc.com" target="_blank" rel="noopener"
          style="color:var(--acc2);text-decoration:none;letter-spacing:.08em;font-weight:600">meldmc.com</a>
+      <!-- Which build is serving this page. The UI is baked into the frozen app, so a stale
+           binary serves a stale page with no other outward sign; this makes that visible. -->
+      <div id="buildStamp" style="opacity:.5;margin-top:4px;font-size:10px"></div>
       <div style="opacity:.6;margin-top:6px">Not affiliated with Mojang AB or Minecraft. Built on the open source Arnis generator.</div>
     </div>
   </div>
@@ -5556,6 +5559,18 @@ refreshState();
 loadProjects();
 loadCache();      // async; fills the Cache card sizes without blocking boot
 poll();
+
+// Build stamp in the footer. Fetched once, not polled: it cannot change while the page is open,
+// because changing it means a different binary is serving.
+fetch('/api/build', { cache: 'no-store' }).then(r => r.json()).then(b => {
+  const el = $('buildStamp');
+  if (!el) return;
+  const bits = [];
+  if (b.version) bits.push('v' + b.version);
+  bits.push(b.built || 'source');
+  if (b.commit) bits.push(b.commit);
+  el.textContent = bits.join(' · ');
+}).catch(() => {});
 </script>
 </body>
 </html>

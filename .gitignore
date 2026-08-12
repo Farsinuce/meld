@@ -84,3 +84,4 @@ dist/
 # Edge state each). Without a profile of its own, --app= hands the URL to the user's own browser.
 ui-profiles/
 preview-profile/
+assets/build-info.json

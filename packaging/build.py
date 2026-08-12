@@ -139,6 +139,40 @@ def version() -> str:
     return "dev"
 
 
+def write_build_info() -> dict:
+    """Stamp the build so a running Meld can say WHICH build it is.
+
+    Without this there is no way to tell a fresh binary from last week's: the version in the
+    changelog only moves on a release, the exe's timestamp is invisible once it is running, and
+    "it still looks the same" is impossible to diagnose when the UI is baked into the bundle.
+    The stamp is shown by --check, in the console banner and in the UI footer.
+    """
+    import datetime
+    info = {
+        "version": version(),
+        "built": datetime.datetime.now(datetime.timezone.utc)
+                          .strftime("%Y-%m-%d %H:%M UTC"),
+        "commit": "",
+    }
+    try:
+        r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT),
+                           capture_output=True, text=True, timeout=15)
+        if r.returncode == 0:
+            info["commit"] = r.stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(ROOT),
+                               capture_output=True, text=True, timeout=15)
+        if dirty.returncode == 0 and dirty.stdout.strip():
+            info["commit"] += "+"          # built from a working tree with uncommitted edits
+    except Exception:
+        pass
+    target = ROOT / "assets" / "build-info.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(info, indent=1), encoding="utf-8")
+    log(f"build stamp: {info['version']} · {info['built']}"
+        + (f" · {info['commit']}" if info["commit"] else ""))
+    return info
+
+
 def archive(folder: Path) -> Path:
     osname, arch = os_tag()
     base = ROOT / "dist" / f"Meld-{version()}-{osname}-{arch}"
@@ -170,6 +204,7 @@ def main() -> int:
     args = ap.parse_args()
 
     run([sys.executable, str(ROOT / "packaging" / "make_icons.py")])
+    write_build_info()
 
     if not args.no_clean:
         for d in (ROOT / "build", ROOT / "dist"):

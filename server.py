@@ -2545,6 +2545,20 @@ def api_open_ui():
     return jsonify({"ok": bool(ok)})
 
 
+@app.route("/api/build")
+def api_build():
+    """Which build is serving this page.
+
+    Shown in the UI footer so "is this the new one?" is answerable by looking, rather than by
+    comparing file timestamps against a bundle you cannot see into. The UI is baked into the
+    frozen app, so a stale binary serves a stale page with no other outward sign.
+    """
+    from src.paths import build_info
+    info = dict(build_info())
+    info["frozen"] = is_frozen()
+    return jsonify(info)
+
+
 @app.route("/manifest.webmanifest")
 def manifest():
     """Web-app manifest.
