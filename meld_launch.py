@@ -24,6 +24,7 @@ import ssl
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.request
 import webbrowser
@@ -176,6 +177,27 @@ def download_arnis() -> Path | None:
     return target
 
 
+def _source_provenance(src: Path) -> str:
+    """Cargo version + git description of a fork checkout, for the build log."""
+    ver = ""
+    try:
+        for line in (src / "Cargo.toml").read_text(encoding="utf-8").splitlines():
+            if line.startswith("version"):
+                ver = line.split("=", 1)[1].strip().strip('"')
+                break
+    except OSError:
+        pass
+    desc = ""
+    try:
+        r = subprocess.run(["git", "describe", "--tags", "--always", "--dirty"],
+                           cwd=src, capture_output=True, text=True, timeout=15)
+        if r.returncode == 0:
+            desc = r.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return " ".join(p for p in (ver, f"({desc})" if desc else "") if p) or "unknown"
+
+
 def build_arnis() -> Path | None:
     if not shutil.which("cargo"):
         return None
@@ -183,19 +205,31 @@ def build_arnis() -> Path | None:
                             HERE.parent / "arnis") if (c / "Cargo.toml").is_file()), None)
     if not src:
         return None
-    log(f"building arnis from source ({src}) — this can take a few minutes the first time ...")
+    prov = _source_provenance(src)
+    log(f"building arnis from source ({src}) at {prov} — this can take a few minutes the "
+        "first time ...")
+    if prov.endswith("-dirty)"):
+        log("NOTE: that checkout has uncommitted changes, so this binary is an unreleased "
+            "build. Delete arnis.exe and re-run the launcher to fall back to a published "
+            "release.")
+    # Build into a launcher-owned target dir outside the checkout. The fork's own target/
+    # belongs to whoever is developing it; writing there would hand them a binary they did not
+    # build, and hand us one from a half-finished edit. Keeping it out of the repo also leaves
+    # `git status` there clean.
     flags = [] if IS_WIN else ["--no-default-features"]   # headless CLI build (no desktop GUI)
-    if subprocess.run(["cargo", "build", "--release", *flags], cwd=src).returncode != 0:
+    target_dir = Path(tempfile.gettempdir()) / "meld-arnis-build"
+    cmd = ["cargo", "build", "--release", "--target-dir", str(target_dir), *flags]
+    if subprocess.run(cmd, cwd=src).returncode != 0:
         return None
     binname = "arnis.exe" if IS_WIN else "arnis"
-    built = src / "target" / "release" / binname
+    built = target_dir / "release" / binname
     if not built.is_file():
         return None
     target = HERE / binname
     shutil.copy2(built, target)
     if not IS_WIN:
         os.chmod(target, 0o755)
-    log(f"arnis built: {target}")
+    log(f"arnis built: {target} ({prov})")
     return target
 
 

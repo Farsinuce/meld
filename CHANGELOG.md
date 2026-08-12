@@ -4,6 +4,38 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.8.4] - unreleased
+
+Groundwork for the Arnis fork's 3.0.7 upstream-port wave. Nothing about generation
+changes in this release; it makes the generator binary Meld runs traceable, and states
+where Meld has to move once the fork's CLI does.
+
+### Fixed
+- **The launcher could build and deploy a half-finished generator without saying so.**
+  `build_arnis()` — the fallback that runs when no `arnis.exe` is present — ran a bare
+  `cargo build --release` inside the fork checkout and copied `target/release/arnis.exe`
+  over Meld's own tracked `arnis.exe`. In a checkout that is mid-development that silently
+  ships an unreleased build, and it clobbers the `target/` directory of whoever is working
+  on the fork. The build now goes to a launcher-owned directory outside the checkout, so
+  the fork's `target/` and `git status` are left alone, and the log names the exact source
+  it built: Cargo version plus `git describe --tags --always --dirty`. A dirty checkout
+  additionally logs that the result is an unreleased build and how to fall back to a
+  published release.
+
+### Changed
+- `src/__init__.py` carried `__version__ = "0.1.0"` while the project shipped 1.8.x. It now
+  tracks the real version, so the tray/banner can report it instead of a literal.
+
+### Notes
+- The fork is at **3.0.7 (unreleased)** — see `arnis-283-src/CHANGELOG.md`. Everything landed
+  there so far is gated on producing a byte-identical render, so no Meld change is required
+  to run it.
+- One Meld change *is* coming and is deliberately not in this release: upstream replaces
+  `--terrain` with `--mode geo-terrain|geo-only|terrain-only`. When the fork lands that,
+  `src/arnis_cmd.py` switches to `--mode` and the saved-project key stays `"terrain": bool`
+  (no settings migration). The fork keeps a hidden `--terrain` alias, so the two sides can
+  be updated in either order. Details: `docs/arnis-port-handoff.md`.
+
 ## [1.8.3] - 2026-08-10
 
 A single-cause release: Meld could not generate anything at all on a Windows whose
