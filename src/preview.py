@@ -29,8 +29,9 @@ from pathlib import Path
 
 from .paths import data_dir
 
-# The preview: a panel meant to sit in a corner of the screen.
-PREVIEW_SIZE = (430, 640)
+# The preview: a panel meant to sit in a corner of the screen. Wide enough for a full Arnis line
+# without wrapping it into unreadable ribbons, tall enough for two log panes to be worth having.
+PREVIEW_SIZE = (470, 720)
 # The full UI: a map, a sidebar and a log. Smaller than this and the map is not worth having.
 APP_SIZE = (1360, 880)
 

@@ -8,107 +8,120 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/meld-32.png">
 <meta name="theme-color" content="#e3a417">
 <style>
-  /* Deliberately self-contained: no shared stylesheet, no fonts to fetch, no framework. This
-     page is opened as a chrome-less window that must paint instantly and keep working when the
-     network is gone, which it always is - everything here is local.
+  /* Self-contained on purpose: no shared stylesheet, no web font, no framework. This window is
+     opened chrome-less and has to paint instantly; index.html pulls Monocraft off a CDN, which
+     would leave this panel showing a fallback face for a second - or forever, offline - so the
+     pixel feel is carried by uppercase + letter-spacing on a system face instead.
 
-     The palette is lifted from index.html so the preview reads as the same product rather than
-     as a debug panel that happens to be next to it: the same warm stone-black, the same gold. */
+     Palette and glass panels are index.html's own values, so the panel reads as part of Meld
+     rather than as a debug window parked beside it. */
   :root {
-    --bg: #0b0a08; --panel: #16130d; --line: rgba(255,255,255,.10);
-    --fg: #f0e9da; --dim: #9a9079; --accent: #e3a417; --accent2: #f0bf3a;
-    --ok: #86b45a; --warn: #cf9f3c; --bad: #cf5a3e;
-    --glass: rgba(28,26,21,.72); --hair: rgba(255,255,255,.09);
+    --bg:#0b0a08; --panel:#16130d; --fg:#f0e9da; --mut:#9a9079;
+    --acc:#e3a417; --acc2:#f0bf3a; --ok:#86b45a; --run:#cf9f3c; --bad:#cf5a3e;
+    --glass:rgba(28,26,21,.72); --hair:rgba(255,255,255,.09); --hair2:rgba(255,255,255,.05);
+    --ring:0 0 0 1px rgba(0,0,0,.45); --r:12px; --rsm:8px;
+    --mono:ui-monospace,"Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace;
   }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
   body {
-    background: var(--bg); color: var(--fg);
-    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    display: flex; flex-direction: column; padding: 10px; gap: 8px;
-    -webkit-user-select: none; user-select: none;
+    background:
+      radial-gradient(120% 60% at 50% -10%, rgba(227,164,23,.07), transparent 60%),
+      var(--bg);
+    color:var(--fg); font:13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex; flex-direction:column; padding:10px; gap:8px;
+    -webkit-user-select:none; user-select:none; overflow:hidden;
   }
-  header { display: flex; align-items: center; gap: 8px; padding: 2px 2px 0; }
-  header .mark { width: 18px; height: 18px; flex: none; }
-  h1 { font-size: 14px; margin: 0; letter-spacing: .16em; font-weight: 700; text-transform: uppercase;
-       background: linear-gradient(180deg, var(--accent2), var(--accent));
-       -webkit-background-clip: text; background-clip: text; color: transparent; }
-  /* min-width:0 is load-bearing, not tidiness: a flex item defaults to min-width:auto, so this
-     refuses to shrink below its text and pushes the whole 430px window wider than itself -
-     every card then runs off the right edge. */
-  .tag { font-size: 11px; color: var(--dim); flex: 1; min-width: 0; text-align: right;
-         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .card { background: var(--glass); border: 1px solid var(--hair); border-radius: 12px; padding: 10px;
-          box-shadow: 0 0 0 1px rgba(0,0,0,.4); min-width: 0; }
-  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
-         min-width: 0; }
-  .row > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .big { font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--accent2); }
-  .dim { color: var(--dim); }
-  .bar { height: 7px; background: rgba(0,0,0,.45); border-radius: 99px; overflow: hidden; margin-top: 7px;
-         box-shadow: inset 0 0 0 1px var(--hair); }
-  .bar > i { display: block; height: 100%; width: 0; transition: width .4s ease;
-             background: linear-gradient(90deg, var(--accent), var(--accent2)); }
-  .bar.failed > i { background: linear-gradient(90deg, var(--warn), var(--bad)); }
-  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .stat { text-align: center; }
-  .stat b { display: block; font-size: 14px; font-variant-numeric: tabular-nums; }
-  .stat span { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
 
-  /* tabs */
-  nav { display: flex; gap: 4px; }
-  nav button { flex: 1; padding: 5px 4px; font-size: 11px; border-radius: 8px 8px 0 0;
-               border: 1px solid var(--hair); border-bottom: none; background: rgba(0,0,0,.35);
-               color: var(--dim); cursor: pointer; font-family: inherit; letter-spacing: .04em; }
-  nav button:hover { color: var(--fg); }
-  nav button[aria-selected="true"] { background: var(--glass); color: var(--accent2);
-                                     box-shadow: inset 0 2px 0 var(--accent); }
-  .pane { display: none; flex: 1; min-height: 0; min-width: 0; flex-direction: column; gap: 8px; }
-  .pane.on { display: flex; }
+  /* ── header ─────────────────────────────────────────────────────────── */
+  header { display:flex; align-items:center; gap:8px; padding:0 2px; flex:none; }
+  header .mark { width:17px; height:17px; flex:none; }
+  h1 { margin:0; font-size:13px; font-weight:700; letter-spacing:.18em; text-transform:uppercase;
+       background:linear-gradient(180deg,var(--acc2),var(--acc));
+       -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .world { font-size:11px; color:var(--mut); flex:1; min-width:0; text-align:right;
+           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-  .console { flex: 1; min-height: 80px; min-width: 0; overflow: auto; background: rgba(0,0,0,.5);
-             border: 1px solid var(--hair); border-radius: 0 10px 10px 10px; padding: 8px;
-             font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 10.5px;
-             line-height: 1.4; color: #cdc4ae; white-space: pre-wrap; word-break: break-word;
-             -webkit-user-select: text; user-select: text; }
-  .console div { padding: 0; }
-  .console .sys { color: var(--dim); font-style: italic; }
-  .console .err { color: var(--bad); }
-  .console .warn { color: var(--warn); }
-  .card.activity { flex: 1; min-height: 0; min-width: 0; display: flex; padding: 8px; }
-  /* min-width:0 again, and it matters more here: a scrolling box of nowrap log lines is a flex
-     item whose automatic minimum is the width of its LONGEST LINE. Without this the box refuses
-     to be narrower than the text, the body stretches to match, and every card in the window is
-     cut off at the right edge. overflow:auto cannot save it - the element never gets small. */
-  .recent { flex: 1; min-width: 0; overflow: auto;
-            font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-            font-size: 10px; line-height: 1.5; color: var(--dim); }
-  .recent div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .recent div:last-child { color: var(--fg); }
-  .consbar { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--dim); }
-  .consbar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  /* ── the task card: the reason this window exists ───────────────────── */
+  .task { flex:none; background:var(--glass); border:1px solid var(--hair);
+          border-radius:var(--r); box-shadow:var(--ring); padding:11px 12px;
+          position:relative; overflow:hidden; }
+  .task::before { content:""; position:absolute; inset:0 auto 0 0; width:3px;
+                  background:linear-gradient(180deg,var(--acc2),var(--acc)); opacity:.85; }
+  .task .kicker { font-size:9.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--mut); }
+  .task .title { font-size:16px; font-weight:600; letter-spacing:.01em; margin-top:2px;
+                 white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .task .detail { font-family:var(--mono); font-size:10.5px; color:var(--mut); margin-top:3px;
+                  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-height:14px; }
+  .bar { height:6px; margin-top:9px; border-radius:99px; background:rgba(0,0,0,.5);
+         box-shadow:inset 0 0 0 1px var(--hair2); overflow:hidden; }
+  .bar > i { display:block; height:100%; width:0; transition:width .45s ease;
+             background:linear-gradient(90deg,var(--acc),var(--acc2)); }
+  .bar.warn > i { background:linear-gradient(90deg,var(--run),var(--bad)); }
+  .bar.idle > i { background:var(--hair); }
+  .meta { display:flex; justify-content:space-between; gap:8px; margin-top:6px;
+          font-size:10.5px; color:var(--mut); font-variant-numeric:tabular-nums; }
+  .meta b { color:var(--fg); font-weight:600; }
 
-  footer { display: flex; gap: 6px; }
-  button.act { flex: 1; padding: 8px 4px; border-radius: 8px; border: 1px solid var(--hair);
-               background: rgba(255,255,255,.05); color: var(--fg); font: inherit; font-size: 12px;
-               cursor: pointer; }
-  button.act:hover { background: rgba(255,255,255,.10); }
-  button.act.primary { background: linear-gradient(180deg, var(--accent2), var(--accent));
-                       border-color: #8a6410; color: #241b05; font-weight: 600; }
-  button.act.primary:hover { filter: brightness(1.08); }
-  button.act.danger:hover { background: rgba(207,90,62,.22); border-color: var(--bad); }
-  button.act:disabled { opacity: .35; cursor: default; filter: none; }
-  .hint { font-size: 10px; color: var(--dim); text-align: center; }
-  .dot { width: 7px; height: 7px; border-radius: 99px; background: var(--dim); display: inline-block;
-         flex: none; }
-  .dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
-  .dot.err { background: var(--bad); }
+  /* ── the strip of numbers ───────────────────────────────────────────── */
+  .strip { flex:none; display:grid; grid-template-columns:repeat(5,1fr); gap:1px;
+           background:var(--hair2); border:1px solid var(--hair); border-radius:var(--rsm);
+           overflow:hidden; }
+  .strip div { background:var(--panel); padding:6px 2px; text-align:center; }
+  .strip b { display:block; font-size:12px; font-variant-numeric:tabular-nums; }
+  .strip span { font-size:8.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--mut); }
+  .strip .hot b { color:var(--acc2); }
+  .strip .bad b { color:var(--bad); }
+
+  /* ── the two logs, both live at once ────────────────────────────────── */
+  .logs { flex:1; min-height:0; display:flex; flex-direction:column; gap:6px; }
+  .log { display:flex; flex-direction:column; min-height:0; min-width:0;
+         border:1px solid var(--hair); border-radius:var(--rsm); background:rgba(0,0,0,.42);
+         box-shadow:var(--ring); flex:1 1 50%; transition:flex-grow .18s ease; }
+  /* Focus mode: one log takes the room, the other keeps only its bar - so "both visible" is the
+     default and "one big" is always one click away, without a tab that hides the other feed. */
+  .log.min { flex:0 0 auto; }
+  .log.max { flex:1 1 100%; }
+  .log > .bar-head { display:flex; align-items:center; gap:6px; padding:5px 8px; cursor:pointer;
+                     border-bottom:1px solid var(--hair2); flex:none; }
+  .log > .bar-head:hover { background:rgba(255,255,255,.03); }
+  .log .name { font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--mut); }
+  .log.on .name { color:var(--acc2); }
+  .log .count { font-size:9.5px; color:var(--mut); font-variant-numeric:tabular-nums; margin-left:auto; }
+  .log .chev { font-size:9px; color:var(--mut); }
+  .log .body { flex:1; min-height:0; min-width:0; overflow:auto; padding:6px 8px;
+               font-family:var(--mono); font-size:10px; line-height:1.45; color:#c9c0aa;
+               white-space:pre-wrap; word-break:break-word;
+               -webkit-user-select:text; user-select:text; }
+  .log.min .body { display:none; }
+  .log .body .err { color:var(--bad); }
+  .log .body .warn { color:var(--run); }
+  .log .body .sys { color:var(--mut); font-style:italic; }
+  .log .body .cell { color:var(--acc); }
+
+  /* ── footer ─────────────────────────────────────────────────────────── */
+  footer { flex:none; display:flex; gap:6px; }
+  button.act { flex:1; padding:8px 4px; border-radius:var(--rsm); border:1px solid var(--hair);
+               background:rgba(255,255,255,.05); color:var(--fg); font:inherit; font-size:12px;
+               cursor:pointer; }
+  button.act:hover { background:rgba(255,255,255,.10); }
+  button.act.primary { background:linear-gradient(180deg,var(--acc2),var(--acc));
+                       border-color:#8a6410; color:#241b05; font-weight:600; }
+  button.act.primary:hover { filter:brightness(1.08); }
+  button.act.danger:hover { background:rgba(207,90,62,.20); border-color:var(--bad); }
+  button.act:disabled { opacity:.32; cursor:default; filter:none; }
+  .hint { flex:none; font-size:9.5px; color:var(--mut); text-align:center; }
+  .dot { width:7px; height:7px; border-radius:99px; background:var(--mut); flex:none; }
+  .dot.on { background:var(--ok); box-shadow:0 0 7px var(--ok); }
+  .dot.err { background:var(--bad); }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.45 } }
+  .dot.on { animation:pulse 2s ease-in-out infinite; }
 </style>
 </head>
 <body>
   <header>
-    <!-- The rhombus, inline rather than as an <img>: it is 300 bytes, it never 404s, and it
-         inherits the accent colour so the mark and the wordmark cannot drift apart. -->
+    <!-- Inline, not an <img>: 300 bytes, never 404s, and it inherits the accent so the mark and
+         the wordmark cannot drift apart. -->
     <svg class="mark" viewBox="0 0 100 100" aria-hidden="true">
       <polygon points="50,4 90,50 50,96 10,50" fill="#e3a417" stroke="#1a1508" stroke-width="6"/>
       <polygon points="50,4 90,50 50,50 10,50" fill="#f0bf3a"/>
@@ -116,74 +129,64 @@
     </svg>
     <h1>Meld</h1>
     <span class="dot" id="dot"></span>
-    <span class="tag" id="world">—</span>
+    <span class="world" id="world">—</span>
   </header>
 
-  <nav>
-    <button id="tab-status" aria-selected="true">Status</button>
-    <button id="tab-meld">Meld</button>
-    <button id="tab-arnis">Arnis</button>
-  </nav>
+  <section class="task">
+    <div class="kicker">Now</div>
+    <div class="title" id="taskTitle">Connecting…</div>
+    <div class="detail" id="taskDetail"></div>
+    <div class="bar idle" id="bar"><i></i></div>
+    <div class="meta">
+      <span id="counts">—</span>
+      <span id="timing"></span>
+    </div>
+  </section>
 
-  <div class="pane on" id="pane-status">
-    <div class="card">
-      <div class="row">
-        <span class="big" id="pct">0%</span>
-        <span class="dim" id="counts">idle</span>
+  <section class="strip">
+    <div id="s-workers"><b>—</b><span>workers</span></div>
+    <div id="s-cpu"><b>—</b><span>cpu</span></div>
+    <div id="s-ram"><b>—</b><span>ram</span></div>
+    <div id="s-disk"><b>—</b><span>free</span></div>
+    <div id="s-failed"><b>—</b><span>failed</span></div>
+  </section>
+
+  <div class="logs">
+    <div class="log" id="log-meld">
+      <div class="bar-head" data-for="meld">
+        <span class="dot" style="background:var(--acc)"></span>
+        <span class="name">Meld</span>
+        <span class="count" id="count-meld">0</span>
+        <span class="chev" id="chev-meld">▾</span>
       </div>
-      <div class="bar" id="bar"><i></i></div>
-      <div class="row" style="margin-top:7px">
-        <span class="dim" id="elapsed">—</span>
-        <span class="dim" id="eta"></span>
+      <div class="body" id="body-meld"></div>
+    </div>
+    <div class="log" id="log-arnis">
+      <div class="bar-head" data-for="arnis">
+        <span class="dot" style="background:var(--mut)"></span>
+        <span class="name">Arnis</span>
+        <span class="count" id="count-arnis">0</span>
+        <span class="chev" id="chev-arnis">▾</span>
       </div>
+      <div class="body" id="body-arnis"></div>
     </div>
-    <div class="card grid3">
-      <div class="stat"><b id="cpu">—</b><span>cpu</span></div>
-      <div class="stat"><b id="ram">—</b><span>ram</span></div>
-      <div class="stat"><b id="free">—</b><span>free</span></div>
-    </div>
-    <div class="card grid3">
-      <div class="stat"><b id="workers">—</b><span>workers</span></div>
-      <div class="stat"><b id="failed">—</b><span>failed</span></div>
-      <div class="stat"><b id="awake">—</b><span>sleep</span></div>
-    </div>
-    <!-- Fills what was dead space at 640px tall, and answers the question the panel is opened
-         for more often than any number does: "what is it doing right now?" -->
-    <div class="card activity"><div id="recent" class="recent"></div></div>
-  </div>
-
-  <div class="pane" id="pane-meld">
-    <div class="consbar">
-      <label><input type="checkbox" id="follow-meld" checked> follow</label>
-      <span id="stat-meld"></span>
-    </div>
-    <div class="console" id="log-meld"></div>
-  </div>
-
-  <div class="pane" id="pane-arnis">
-    <div class="consbar">
-      <label><input type="checkbox" id="follow-arnis" checked> follow</label>
-      <span id="stat-arnis"></span>
-    </div>
-    <div class="console" id="log-arnis"></div>
   </div>
 
   <footer>
     <button class="act danger" id="stop">Stop</button>
-    <button class="act primary" id="open">Open full UI</button>
+    <button class="act primary" id="open">Open Meld</button>
   </footer>
   <div class="hint">Closing this window leaves Meld running — quit from the tray icon.</div>
 
 <script>
-// Poll rather than stream: the server has no SSE/WebSocket path, and a 1 s poll of a
-// sub-kilobyte endpoint costs less than keeping a worker thread pinned to an open connection.
+// Polling, not streaming: the server has no SSE/WebSocket path, and a 1 s poll of two small
+// endpoints costs less than pinning a worker thread to an open connection for six hours.
 const $ = id => document.getElementById(id);
+const SOURCES = ['meld', 'arnis'];
+const cursors = { meld: 0, arnis: 0 };   // server hands back `next`; only new lines cross the wire
+const follow  = { meld: true, arnis: true };
 let failures = 0;
-
-// Console cursors. The server hands back `next`; sending it as `since` next time means only new
-// lines cross the wire, so a window left open through a six-hour render stays cheap.
-const cursors = { meld: 0, arnis: 0 };
-let activeTab = 'status';
+let focused = null;                      // null = both share the space
 
 function hms(s) {
   if (s == null || s < 0) return '';
@@ -192,26 +195,39 @@ function hms(s) {
   return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
 }
 
-function selectTab(name) {
-  activeTab = name;
-  for (const t of ['status', 'meld', 'arnis']) {
-    $('tab-' + t).setAttribute('aria-selected', String(t === name));
-    $('pane-' + t).classList.toggle('on', t === name);
+// Clicking a log's bar gives it the whole area; clicking again puts them back to an even split.
+// Neither state ever hides a feed completely - the other keeps its header and its line count, so
+// you can still see it is alive.
+function setFocus(which) {
+  focused = (focused === which) ? null : which;
+  for (const s of SOURCES) {
+    const el = $('log-' + s);
+    el.classList.toggle('max', focused === s);
+    el.classList.toggle('min', focused !== null && focused !== s);
+    el.classList.toggle('on', focused === s);
+    $('chev-' + s).textContent = focused === s ? '▴' : '▾';
   }
-  if (name !== 'status') pollConsole(name);
-  try { location.hash = name === 'status' ? '' : name; } catch (e) {}
 }
-for (const t of ['status', 'meld', 'arnis']) $('tab-' + t).onclick = () => selectTab(t);
+for (const s of SOURCES) {
+  $('log-' + s).querySelector('.bar-head').onclick = () => setFocus(s);
+  // Scrolling up parks the tail; scrolling back to the bottom resumes it. No checkbox needed,
+  // and it does the right thing while you are reading something that scrolled past.
+  $('body-' + s).addEventListener('scroll', ev => {
+    const el = ev.target;
+    follow[s] = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+  });
+}
 
 function classify(line) {
   const l = line.toLowerCase();
   if (l.includes('error') || l.includes('panic') || l.includes('failed')) return 'err';
   if (l.includes('warn') || l.includes('retry')) return 'warn';
+  if (/^\[[-\d_,]+\]/.test(line)) return 'cell';
   return '';
 }
 
-async function pollConsole(which) {
-  const box = $('log-' + which);
+async function pollLog(which) {
+  const box = $('body-' + which);
   try {
     const r = await fetch(`/api/console?source=${which}&since=${cursors[which]}`, { cache: 'no-store' });
     if (!r.ok) return;
@@ -223,18 +239,25 @@ async function pollConsole(which) {
       box.appendChild(el);
     }
     cursors[which] = d.next;
-    // Only ever appends. Re-rendering the whole buffer each second would fight text selection
-    // and reset the scroll position mid-read.
+    // Append only. Re-rendering the buffer each second would fight text selection and throw away
+    // the scroll position mid-read.
     for (const line of d.lines || []) {
       const el = document.createElement('div');
       el.className = classify(line);
       el.textContent = line;
       box.appendChild(el);
     }
-    while (box.childElementCount > 1500) box.removeChild(box.firstChild);
-    if ($('follow-' + which).checked) box.scrollTop = box.scrollHeight;
-    $('stat-' + which).textContent = `${box.childElementCount} lines`;
+    while (box.childElementCount > 1200) box.removeChild(box.firstChild);
+    if (follow[which]) box.scrollTop = box.scrollHeight;
+    $('count-' + which).textContent = box.childElementCount;
   } catch (e) { /* the status poll reports the outage */ }
+}
+
+function stat(id, value, hot) {
+  const el = $(id);
+  el.querySelector('b').textContent = value;
+  el.classList.toggle('hot', !!hot && hot !== 'bad');
+  el.classList.toggle('bad', hot === 'bad');
 }
 
 async function tick() {
@@ -246,44 +269,45 @@ async function tick() {
 
     $('dot').className = 'dot' + (d.active ? ' on' : '');
     $('world').textContent = d.world || d.project || '';
-    $('pct').textContent = (d.total ? d.percent : 0) + '%';
+
+    const t = d.task || {};
+    $('taskTitle').textContent = t.title || 'Idle';
+    $('taskDetail').textContent = t.detail || '';
+
+    const pct = t.pct != null ? t.pct : (d.total ? d.percent : 0);
+    const bar = $('bar');
+    bar.firstElementChild.style.width = (pct || 0) + '%';
+    bar.classList.toggle('warn', (d.failed || 0) > 0);
+    bar.classList.toggle('idle', t.pct == null && !d.active);
+
     $('counts').textContent = d.total
       ? `${d.done}/${d.total} cells` + (d.failed ? ` · ${d.failed} failed` : '')
-      : (d.phase || 'idle');
-    $('bar').firstElementChild.style.width = (d.total ? d.percent : 0) + '%';
-    $('bar').classList.toggle('failed', d.failed > 0);
-    $('elapsed').textContent = d.total ? 'elapsed ' + hms(d.elapsed_s) : '';
-    $('eta').textContent = d.eta_s != null && d.active ? 'eta ' + hms(d.eta_s) : '';
+      : (d.queue && d.queue.active ? `queue ${d.queue.idx + 1}/${d.queue.total}` : '');
+    $('timing').innerHTML = d.total
+      ? (d.eta_s != null && d.active ? `eta <b>${hms(d.eta_s)}</b> · ` : '')
+        + `ran ${hms(d.elapsed_s)}`
+      : (d.awake ? 'sleep held' : '');
 
     const s = d.stats || {};
-    $('cpu').textContent = s.cpu_pct != null ? s.cpu_pct + '%' : '—';
-    $('ram').textContent = s.ram_pct != null ? s.ram_pct + '%' : '—';
-    $('free').textContent = s.disk_free_gb != null ? Math.round(s.disk_free_gb) + 'G' : '—';
-    $('workers').textContent = `${d.workers_busy}/${d.workers_max}`;
-    $('failed').textContent = d.failed;
-    $('awake').textContent = d.awake ? 'held' : 'free';
-
-    const recent = $('recent');
-    recent.innerHTML = '';
-    for (const line of (d.log || [])) {
-      const el = document.createElement('div');
-      el.textContent = line;
-      el.title = line;                       // the full line on hover, since it is truncated
-      recent.appendChild(el);
-    }
-    recent.scrollTop = recent.scrollHeight;
+    stat('s-workers', `${d.workers_busy}/${d.workers_max}`, d.workers_busy > 0);
+    stat('s-cpu', s.cpu_pct != null ? s.cpu_pct + '%' : '—', s.cpu_pct > 85);
+    stat('s-ram', s.ram_pct != null ? s.ram_pct + '%' : '—', s.ram_pct > 85);
+    stat('s-disk', s.disk_free_gb != null ? Math.round(s.disk_free_gb) + 'G' : '—',
+         s.disk_free_gb != null && s.disk_free_gb < 20 ? 'bad' : false);
+    stat('s-failed', d.failed ?? '—', d.failed > 0 ? 'bad' : false);
 
     $('stop').disabled = !d.active;
   } catch (e) {
-    // A refused fetch means Meld quit from the tray while this window stayed open. Say so
-    // instead of freezing on stale numbers that look live.
+    // A refused fetch means Meld quit from the tray while this window stayed open. Say so rather
+    // than freezing on stale numbers that still look live.
     if (++failures > 2) {
       $('dot').className = 'dot err';
-      $('counts').textContent = 'Meld is not running';
+      $('taskTitle').textContent = 'Meld is not running';
+      $('taskDetail').textContent = 'start it from the tray icon';
       $('stop').disabled = true;
     }
   }
-  if (activeTab !== 'status') pollConsole(activeTab);
+  for (const s of SOURCES) pollLog(s);
 }
 
 $('stop').onclick = async () => {
@@ -291,15 +315,15 @@ $('stop').onclick = async () => {
   try { await fetch('/api/stop', { method: 'POST' }); } catch (e) {}
   tick();
 };
-// Asks the server to open it, rather than window.open(): this page is itself a chrome-less
-// window, and a popup from inside one inherits that frame instead of becoming a real app window.
+// Asks the server to open it: this page is itself a chrome-less window, and window.open() from
+// inside one produces a popup wearing the same frame instead of a real app window.
 $('open').onclick = async () => {
   try { await fetch('/api/open-ui', { method: 'POST' }); }
   catch (e) { window.open('/', '_blank'); }
 };
 
 const wanted = (location.hash || '').replace('#', '');
-if (['meld', 'arnis'].includes(wanted)) selectTab(wanted);
+if (SOURCES.includes(wanted)) setFocus(wanted);
 tick();
 setInterval(tick, 1000);
 </script>

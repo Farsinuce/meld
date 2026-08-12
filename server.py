@@ -2348,6 +2348,18 @@ def mini():
     return resp
 
 
+def _RQ_note_safe(rq: dict) -> str:
+    """'3/12 · romania-north' for the render queue, tolerating a half-filled state dict."""
+    bits = []
+    if rq.get("total"):
+        bits.append(f"{rq.get('idx', 0) + 1}/{rq['total']}")
+    if rq.get("current"):
+        bits.append(str(rq["current"]))
+    if rq.get("pause"):
+        bits.append("paused")
+    return " · ".join(bits) or "running"
+
+
 @app.route("/api/mini")
 def api_mini():
     """Everything the preview needs, and nothing else.
@@ -2373,8 +2385,17 @@ def api_mini():
         eta = (elapsed / finished) * remaining if remaining else 0
 
     busy = 0
+    tasks = []
     try:
-        busy = sum(1 for s in POOL.get_states() if s.get("running"))
+        for s in POOL.get_states():
+            if not s.get("running"):
+                continue
+            busy += 1
+            if len(tasks) < 4:
+                tasks.append({"worker": s.get("worker_id"),
+                              "cell": s.get("cell_key"),
+                              "message": (s.get("message") or "")[:90],
+                              "pct": int(s.get("progress") or 0)})
     except Exception:
         pass
 
@@ -2390,6 +2411,42 @@ def api_mini():
     ram_pct = st.get("ram_pct")
     if ram_pct is None and st.get("ram_used_gb") and st.get("ram_total_gb"):
         ram_pct = round(st["ram_used_gb"] / st["ram_total_gb"] * 100)
+
+    # The headline: one sentence for "what is Meld doing right now". Worked out here rather than
+    # in the page because the tray tooltip wants the same answer, and because the precedence
+    # between the phases (export beats prefetch beats generating) is a property of the pipeline,
+    # not of any one view. Ordered by what is actually happening LAST in the pipeline first, so
+    # the most advanced stage wins when two overlap.
+    with _PREFETCH_LOCK:
+        pf_active, pf_phase, pf_note = (bool(_PREFETCH.get("active")),
+                                        _PREFETCH.get("phase") or "", _PREFETCH.get("note") or "")
+    ex_phase = _EXPORT.get("phase") or "idle"
+    if ex_phase not in ("idle", "done", ""):
+        task = {"title": "Exporting", "detail": (_EXPORT.get("message")
+                                                 or f"{_EXPORT.get('format', '')} · "
+                                                    f"{_EXPORT.get('done', 0)}/{_EXPORT.get('total', 0)}"),
+                "pct": round(100.0 * (_EXPORT.get("done") or 0) / (_EXPORT.get("total") or 1), 1)}
+    elif pf_active:
+        what = {"osm": "Fetching map data", "terrain": "Fetching elevation",
+                "generating": "Preparing"}.get(pf_phase, "Preparing")
+        task = {"title": what, "detail": pf_note, "pct": None}
+    elif total and not run.get("ended"):
+        # Separated by a middot, not a comma: a cell key IS "42,-17,2", so comma-joining two of
+        # them reads as one six-number key.
+        detail = " · ".join(str(t["cell"]) for t in tasks[:2] if t.get("cell"))
+        if busy > 2:
+            detail += f"  +{busy - 2} more"
+        task = {"title": "Building the world", "detail": detail or f"{busy} worker(s) running",
+                "pct": round(100.0 * finished / total, 1)}
+    elif rq["active"]:
+        task = {"title": "Render queue", "detail": _RQ_note_safe(rq), "pct": None}
+    elif run.get("ended") and total:
+        task = {"title": "Finished", "detail": f"{done} of {total} cells"
+                                               + (f", {failed} failed" if failed else ""),
+                "pct": 100.0}
+    else:
+        task = {"title": "Idle", "detail": "nothing running", "pct": None}
+
     return jsonify({
         "ok": True,
         "app": "Meld",
@@ -2405,6 +2462,8 @@ def api_mini():
         "workers_max": POOL.max_workers,
         "queue": rq,
         "awake": power.active(),
+        "task": task,
+        "tasks": tasks,
         "stats": {"cpu_pct": st.get("cpu_pct"), "ram_pct": ram_pct,
                   "disk_free_gb": st.get("disk_free_gb")},
         "log": _LOG[-6:],
