@@ -106,16 +106,17 @@ def arnis_present() -> Path | None:
 
 
 def _arnis_asset() -> tuple[str | None, str]:
-    """(release asset name for this OS/CPU, local filename to save it as)."""
+    """(release asset name for this OS, local filename to save it as)."""
     sysname = platform.system()
-    mach = platform.machine().lower()
     if sysname == "Windows":
         return "arnis-windows.exe", "arnis.exe"
     if sysname == "Linux":
         return "arnis-linux.tar.gz", "arnis"
     if sysname == "Darwin":
-        arm = mach in ("arm64", "aarch64")
-        return ("arnis-mac-arm64.tar.gz" if arm else "arnis-mac-intel.tar.gz"), "arnis"
+        # One universal binary covers both arches, and it is the only mac asset the fork's
+        # release workflow actually attaches - the per-arch tarballs stay CI artifacts, so
+        # asking for arnis-mac-arm64/intel here failed on every mac.
+        return "arnis-mac-universal.tar.gz", "arnis"
     return None, "arnis"
 
 
