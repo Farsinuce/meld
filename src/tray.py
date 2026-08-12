@@ -18,6 +18,7 @@ calls the UI makes, already thread-safe, already the tested path.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -57,16 +58,18 @@ def _icon_image(size: int = 64):
                         return img.resize((size, size), Image.LANCZOS)
             except Exception:
                 pass
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    # Same yellow rhombus packaging/make_icons.py builds, drawn small: a diamond is one of the
+    # few silhouettes still readable at 16px, and yellow finds itself in a tray of blue circles.
+    s = size
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    m = size // 8
-    d.rounded_rectangle([m, m, size - m, size - m], radius=size // 6, fill=(28, 31, 38, 255),
-                        outline=(110, 231, 168, 255), width=max(2, size // 20))
-    # A stylised "XL" ridge: two strokes meeting, readable down to 16 px.
-    d.line([(size * 0.30, size * 0.68), (size * 0.46, size * 0.36), (size * 0.58, size * 0.58)],
-           fill=(110, 231, 168, 255), width=max(2, size // 14), joint="curve")
-    d.line([(size * 0.58, size * 0.58), (size * 0.72, size * 0.34)],
-           fill=(110, 231, 168, 255), width=max(2, size // 14))
+    cx, cy, hw, hh = s * 0.5, s * 0.5, s * 0.40, s * 0.455
+    pts = [(cx, cy - hh), (cx + hw, cy), (cx, cy + hh), (cx - hw, cy)]
+    ink, w = (26, 21, 8, 255), max(1, int(s * 0.028))
+    d.polygon(pts, fill=(245, 197, 66, 255), outline=ink, width=w)
+    d.polygon([pts[0], pts[1], (cx, cy), pts[3]], fill=(255, 224, 130, 255))
+    d.polygon([pts[3], (cx, cy), pts[1], pts[2]], fill=(196, 148, 32, 255))
+    d.polygon(pts, outline=ink, width=w)
     return img
 
 
@@ -113,37 +116,32 @@ class Tray:
     def open_preview(self, *_):
         preview.open_app_window(self._authed("/mini"))
 
+    def open_console(self, which: str = "meld"):
+        """Open the preview on a console tab.
+
+        The consoles live INSIDE the preview window rather than in a spawned terminal. A
+        `powershell -NoExit Get-Content -Wait` tail works, but it puts a console window back in
+        the taskbar - the exact thing this app exists to avoid - and it can only ever show the
+        log file, never the raw generator output, which is filtered out before anything reaches
+        that file's curated feed.
+        """
+        preview.open_app_window(self._authed("/mini") + f"#{which}")
+
     def stop_render(self, *_):
         self._post("/api/stop")
 
-    def show_log(self, *_):
-        """Open a console that follows the log.
-
-        A separate tailing window rather than attaching a console to this process: the log
-        survives a crash and can be reopened afterwards, and AllocConsole on a process that
-        started without one leaves stdio in a state that is fiddly to get right for no gain.
-        """
+    def open_log_file(self, *_):
+        """Hand the log file to whatever the OS opens .log/.txt with. No console involved."""
         p = applog.path()
         try:
             if sys.platform == "win32":
-                subprocess.Popen(
-                    ["powershell", "-NoExit", "-NoProfile", "-Command",
-                     f"Get-Content -Wait -Tail 200 '{p}'"],
-                    creationflags=0x00000010)          # CREATE_NEW_CONSOLE
+                os.startfile(str(p))                  # noqa: S606 - a user-initiated open
             elif sys.platform == "darwin":
-                script = f'tell app "Terminal" to do script "tail -f \\"{p}\\""'
-                subprocess.Popen(["osascript", "-e", script,
-                                  "-e", 'tell app "Terminal" to activate'])
+                subprocess.Popen(["open", "-t", str(p)])
             else:
-                for term in ("x-terminal-emulator", "gnome-terminal", "konsole", "xterm"):
-                    import shutil
-                    if shutil.which(term):
-                        subprocess.Popen([term, "-e", f"tail -f {p}"])
-                        break
-                else:
-                    self.open_folder(p.parent)
+                subprocess.Popen(["xdg-open", str(p)])
         except Exception as ex:
-            print(f"[tray] could not open the log window: {ex}")
+            print(f"[tray] could not open {p}: {ex}")
             self.open_folder(p.parent)
 
     def open_folder(self, target: Path | None = None, *_):
@@ -182,9 +180,11 @@ class Tray:
             Item("Open ArnisXL", self.open_ui, default=True),
             Item("Preview…", self.open_preview),
             pystray.Menu.SEPARATOR,
-            Item("Stop render", self.stop_render),
+            Item("Meld console", lambda *_: self.open_console("meld")),
+            Item("Arnis console", lambda *_: self.open_console("arnis")),
             pystray.Menu.SEPARATOR,
-            Item("Show log", self.show_log),
+            Item("Stop render", self.stop_render),
+            Item("Open log file", self.open_log_file),
             Item("Data folder", lambda *_: self.open_folder()),
             pystray.Menu.SEPARATOR,
             Item("Quit ArnisXL", self.quit),

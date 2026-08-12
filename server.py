@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 # Windows consoles default to cp1252; Arnis stdout and log lines can contain
@@ -185,6 +186,28 @@ POOL.stagger_seconds = (float(PROJECT.settings().get("cpu_stagger_seconds", 2) o
 POOL.stagger_adaptive = bool(PROJECT.settings().get("cpu_stagger_adaptive", True))
 
 _LOG: list[str] = []
+
+# Raw Arnis output, every line from every worker, for the console view in the preview window.
+# Separate from _LOG on purpose: _LOG is the curated feed the main UI shows, filtered down by
+# _arnis_should_surface() so a 3000-cell run does not bury the RUN/MERGE lines under a million
+# per-tile messages. The console wants exactly what was filtered out - what the generator
+# actually said - which is otherwise only reachable by opening a per-cell file on disk.
+#
+# A deque with a running total, not a list that gets sliced: the console polls with a cursor, and
+# a client that falls behind has to be told it missed lines rather than silently handed the wrong
+# ones. Bounded, so an overnight run cannot grow it without limit.
+_ARNIS_LOG: deque = deque(maxlen=4000)
+_ARNIS_TOTAL = 0                    # lines ever appended, including the ones aged out
+_ARNIS_LOCK = threading.Lock()
+_LOG_TOTAL = 0                      # same idea for the curated feed
+
+
+def arnis_console(line: str) -> None:
+    """Record one raw line of generator output."""
+    global _ARNIS_TOTAL
+    with _ARNIS_LOCK:
+        _ARNIS_LOG.append(line)
+        _ARNIS_TOTAL += 1
 
 # Generation run stats (for the live timer + final report).
 _RUN_LOCK = threading.Lock()
@@ -1665,8 +1688,10 @@ def read_world_meta(path):
 
 
 def log(msg: str) -> None:
+    global _LOG_TOTAL
     line = str(msg)
     _LOG.append(line)
+    _LOG_TOTAL += 1
     if len(_LOG) > 2000:
         del _LOG[:1000]
     print(line, flush=True)
@@ -1709,9 +1734,11 @@ def resolve_arnis_exe() -> Path | None:
     '[Errno 8] Exec format error'. On Windows we prefer `arnis.exe` then a bare `arnis`."""
     # APP_DIR first: in a frozen install the binary ships next to ArnisXL.exe, and BASE_DIR is
     # the unpacked payload, which on some platforms is a temp folder. From source both are the
-    # repo root, so the search order is unchanged.
+    # repo root, so the search order is unchanged. bin_dir() is where a single-file build
+    # unpacks its embedded copy, and comes last so a binary the user dropped in themselves wins.
+    from src.paths import bin_dir
     roots = [APP_DIR, APP_DIR.parent, BASE_DIR, BASE_DIR.parent,
-             APP_DIR.parent / "arnis-source" / "target" / "release"]
+             APP_DIR.parent / "arnis-source" / "target" / "release", bin_dir()]
     if sys.platform == "win32":
         names = ["arnis.exe", "arnis"]
     else:
@@ -1816,6 +1843,9 @@ def _runner(job: dict, state: dict) -> bool:
             return
         state["message"] = text[:140]
         state["progress"] = parse_progress(text, state.get("progress", 0))
+        # Unfiltered, into the console ring: this is the generator's own voice, which the
+        # surfacing filter below deliberately throws most of away.
+        arnis_console(f"[{cell_tag}] {text}")
         if cell_log_fp is not None:
             try:
                 cell_log_fp.write(text + "\n")
@@ -2379,6 +2409,34 @@ def api_mini():
                   "disk_free_gb": st.get("disk_free_gb")},
         "log": _LOG[-6:],
     })
+
+
+@app.route("/api/console")
+def api_console():
+    """Live console feed for the preview window: ?source=meld|arnis&since=<cursor>.
+
+    Cursor-based rather than "last N lines" so the window can sit open for a six-hour render
+    without re-fetching the whole buffer every second, and so a client that falls behind is
+    TOLD it fell behind (`dropped`) instead of being handed a feed with a silent hole in it.
+    """
+    source = (request.args.get("source") or "meld").lower()
+    try:
+        since = int(request.args.get("since") or 0)
+    except ValueError:
+        since = 0
+
+    if source == "arnis":
+        with _ARNIS_LOCK:
+            buf, total = list(_ARNIS_LOG), _ARNIS_TOTAL
+    else:
+        source = "meld"
+        buf, total = list(_LOG), _LOG_TOTAL
+
+    oldest = total - len(buf)              # cursor of the first line still held
+    dropped = since < oldest and since > 0
+    start = max(0, min(len(buf), since - oldest)) if since > 0 else max(0, len(buf) - 300)
+    return jsonify({"ok": True, "source": source, "lines": buf[start:],
+                    "next": total, "dropped": dropped})
 
 
 @app.route("/assets/<path:fname>")

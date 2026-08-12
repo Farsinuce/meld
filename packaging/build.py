@@ -163,6 +163,10 @@ def main() -> int:
     ap.add_argument("--no-arnis", action="store_true", help="skip the generator binary")
     ap.add_argument("--no-clean", action="store_true", help="keep the previous dist/")
     ap.add_argument("--archive", action="store_true", help="also produce the release archive")
+    ap.add_argument("--onefile", action="store_true",
+                    help="one self-contained executable instead of a folder (slower to start)")
+    ap.add_argument("--no-embed-arnis", action="store_true",
+                    help="with --onefile: leave the generator as a separate file next to the exe")
     args = ap.parse_args()
 
     run([sys.executable, str(ROOT / "packaging" / "make_icons.py")])
@@ -171,8 +175,31 @@ def main() -> int:
         for d in (ROOT / "build", ROOT / "dist"):
             shutil.rmtree(d, ignore_errors=True)
 
+    env = dict(os.environ)
+    if args.onefile:
+        env["ARNISXL_ONEFILE"] = "1"
+        # A lone executable has no folder for the generator to sit in, so embedding is the
+        # default here - otherwise "one file you can copy anywhere" quietly is not one file.
+        if not args.no_embed_arnis:
+            if not fetch_arnis(ROOT):
+                log("ERROR: --onefile needs the arnis binary present to embed it")
+                return 1
+            env["ARNISXL_EMBED_ARNIS"] = "1"
+
     run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
-         str(ROOT / "packaging" / "arnisxl.spec")])
+         str(ROOT / "packaging" / "arnisxl.spec")], env=env)
+
+    if args.onefile:
+        exe = ROOT / "dist" / ("ArnisXL.exe" if IS_WIN else "ArnisXL")
+        if not exe.is_file():
+            log(f"expected {exe} - PyInstaller layout changed?")
+            return 1
+        if not args.no_embed_arnis:
+            log(f"built single file: {exe} ({exe.stat().st_size / 1e6:.0f} MB, generator inside)")
+        else:
+            fetch_arnis(exe.parent)
+            log(f"built single file: {exe} (generator alongside)")
+        return 0
 
     out = DIST
     if IS_MAC and (ROOT / "dist" / "ArnisXL.app").exists():

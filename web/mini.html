@@ -10,43 +10,63 @@
      network is gone, which it always is - everything here is local. */
   :root {
     --bg: #14161a; --panel: #1c1f26; --line: #2a2f3a;
-    --fg: #e7ebf2; --dim: #8b93a3; --accent: #6ee7a8; --warn: #f0a75f; --bad: #f06a6a;
+    --fg: #e7ebf2; --dim: #8b93a3; --accent: #f5c542; --ok: #6ee7a8;
+    --warn: #f0a75f; --bad: #f06a6a;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body {
     background: var(--bg); color: var(--fg);
     font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    display: flex; flex-direction: column; padding: 12px; gap: 10px;
+    display: flex; flex-direction: column; padding: 10px; gap: 8px;
     -webkit-user-select: none; user-select: none;
   }
-  header { display: flex; align-items: baseline; gap: 8px; }
-  h1 { font-size: 15px; margin: 0; letter-spacing: .04em; }
+  header { display: flex; align-items: center; gap: 7px; }
+  h1 { font-size: 14px; margin: 0; letter-spacing: .04em; flex: 1; }
   .tag { font-size: 11px; color: var(--dim); }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 9px; }
   .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-  .big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .big { font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .dim { color: var(--dim); }
-  .bar { height: 8px; background: #262b35; border-radius: 99px; overflow: hidden; margin-top: 8px; }
-  .bar > i { display: block; height: 100%; width: 0; background: var(--accent);
-             transition: width .4s ease; }
+  .bar { height: 7px; background: #262b35; border-radius: 99px; overflow: hidden; margin-top: 7px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .4s ease; }
   .bar.failed > i { background: var(--warn); }
   .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .stat { text-align: center; }
-  .stat b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .stat b { display: block; font-size: 14px; font-variant-numeric: tabular-nums; }
   .stat span { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
-  .log { flex: 1; min-height: 60px; overflow: auto; font-family: ui-monospace, Consolas, monospace;
-         font-size: 11px; color: var(--dim); white-space: pre-wrap; word-break: break-word; }
-  .log div { padding: 1px 0; }
+
+  /* tabs */
+  nav { display: flex; gap: 4px; }
+  nav button { flex: 1; padding: 5px 4px; font-size: 11px; border-radius: 6px 6px 0 0;
+               border: 1px solid var(--line); border-bottom: none; background: #191d24;
+               color: var(--dim); cursor: pointer; font-family: inherit; }
+  nav button[aria-selected="true"] { background: var(--panel); color: var(--fg); }
+  .pane { display: none; flex: 1; min-height: 0; flex-direction: column; gap: 8px; }
+  .pane.on { display: flex; }
+
+  .console { flex: 1; min-height: 80px; overflow: auto; background: #0f1116;
+             border: 1px solid var(--line); border-radius: 0 6px 6px 6px; padding: 7px;
+             font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 10.5px;
+             line-height: 1.4; color: #c3cad6; white-space: pre-wrap; word-break: break-word;
+             -webkit-user-select: text; user-select: text; }
+  .console div { padding: 0; }
+  .console .sys { color: var(--dim); font-style: italic; }
+  .console .err { color: var(--bad); }
+  .console .warn { color: var(--warn); }
+  .consbar { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--dim); }
+  .consbar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
   footer { display: flex; gap: 6px; }
-  button { flex: 1; padding: 7px 4px; border-radius: 6px; border: 1px solid var(--line);
-           background: #232833; color: var(--fg); font: inherit; font-size: 12px; cursor: pointer; }
-  button:hover { background: #2b313d; }
-  button.primary { background: #1f4d38; border-color: #2c6b4d; }
-  button.danger:hover { background: #4a2626; border-color: #6b3434; }
-  button:disabled { opacity: .4; cursor: default; }
+  button.act { flex: 1; padding: 7px 4px; border-radius: 6px; border: 1px solid var(--line);
+               background: #232833; color: var(--fg); font: inherit; font-size: 12px; cursor: pointer; }
+  button.act:hover { background: #2b313d; }
+  button.act.primary { background: #4a3c10; border-color: #6b571a; }
+  button.act.danger:hover { background: #4a2626; border-color: #6b3434; }
+  button.act:disabled { opacity: .4; cursor: default; }
+  .hint { font-size: 10px; color: var(--dim); text-align: center; }
   .dot { width: 7px; height: 7px; border-radius: 99px; background: var(--dim); display: inline-block; }
-  .dot.on { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
   .dot.err { background: var(--bad); }
 </style>
 </head>
@@ -57,30 +77,57 @@
     <span class="tag" id="world">—</span>
   </header>
 
-  <div class="card">
-    <div class="row">
-      <span class="big" id="pct">0%</span>
-      <span class="dim" id="counts">idle</span>
+  <nav>
+    <button id="tab-status" aria-selected="true">Status</button>
+    <button id="tab-meld">Meld</button>
+    <button id="tab-arnis">Arnis</button>
+  </nav>
+
+  <div class="pane on" id="pane-status">
+    <div class="card">
+      <div class="row">
+        <span class="big" id="pct">0%</span>
+        <span class="dim" id="counts">idle</span>
+      </div>
+      <div class="bar" id="bar"><i></i></div>
+      <div class="row" style="margin-top:7px">
+        <span class="dim" id="elapsed">—</span>
+        <span class="dim" id="eta"></span>
+      </div>
     </div>
-    <div class="bar" id="bar"><i></i></div>
-    <div class="row" style="margin-top:8px">
-      <span class="dim" id="elapsed">—</span>
-      <span class="dim" id="eta"></span>
+    <div class="card grid3">
+      <div class="stat"><b id="cpu">—</b><span>cpu</span></div>
+      <div class="stat"><b id="ram">—</b><span>ram</span></div>
+      <div class="stat"><b id="free">—</b><span>free</span></div>
+    </div>
+    <div class="card grid3">
+      <div class="stat"><b id="workers">—</b><span>workers</span></div>
+      <div class="stat"><b id="failed">—</b><span>failed</span></div>
+      <div class="stat"><b id="awake">—</b><span>sleep</span></div>
     </div>
   </div>
 
-  <div class="card grid3">
-    <div class="stat"><b id="cpu">—</b><span>cpu</span></div>
-    <div class="stat"><b id="ram">—</b><span>ram</span></div>
-    <div class="stat"><b id="free">—</b><span>free</span></div>
+  <div class="pane" id="pane-meld">
+    <div class="consbar">
+      <label><input type="checkbox" id="follow-meld" checked> follow</label>
+      <span id="stat-meld"></span>
+    </div>
+    <div class="console" id="log-meld"></div>
   </div>
 
-  <div class="card log" id="log"></div>
+  <div class="pane" id="pane-arnis">
+    <div class="consbar">
+      <label><input type="checkbox" id="follow-arnis" checked> follow</label>
+      <span id="stat-arnis"></span>
+    </div>
+    <div class="console" id="log-arnis"></div>
+  </div>
 
   <footer>
-    <button id="stop" class="danger">Stop</button>
-    <button id="open" class="primary">Open full UI</button>
+    <button class="act danger" id="stop">Stop</button>
+    <button class="act primary" id="open">Open full UI</button>
   </footer>
+  <div class="hint">Closing this window leaves ArnisXL running — quit from the tray icon.</div>
 
 <script>
 // Poll rather than stream: the server has no SSE/WebSocket path, and a 1 s poll of a
@@ -88,11 +135,61 @@
 const $ = id => document.getElementById(id);
 let failures = 0;
 
+// Console cursors. The server hands back `next`; sending it as `since` next time means only new
+// lines cross the wire, so a window left open through a six-hour render stays cheap.
+const cursors = { meld: 0, arnis: 0 };
+let activeTab = 'status';
+
 function hms(s) {
   if (s == null || s < 0) return '';
   s = Math.round(s);
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+function selectTab(name) {
+  activeTab = name;
+  for (const t of ['status', 'meld', 'arnis']) {
+    $('tab-' + t).setAttribute('aria-selected', String(t === name));
+    $('pane-' + t).classList.toggle('on', t === name);
+  }
+  if (name !== 'status') pollConsole(name);
+  try { location.hash = name === 'status' ? '' : name; } catch (e) {}
+}
+for (const t of ['status', 'meld', 'arnis']) $('tab-' + t).onclick = () => selectTab(t);
+
+function classify(line) {
+  const l = line.toLowerCase();
+  if (l.includes('error') || l.includes('panic') || l.includes('failed')) return 'err';
+  if (l.includes('warn') || l.includes('retry')) return 'warn';
+  return '';
+}
+
+async function pollConsole(which) {
+  const box = $('log-' + which);
+  try {
+    const r = await fetch(`/api/console?source=${which}&since=${cursors[which]}`, { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.dropped) {
+      const el = document.createElement('div');
+      el.className = 'sys';
+      el.textContent = '… earlier output dropped (buffer full)';
+      box.appendChild(el);
+    }
+    cursors[which] = d.next;
+    // Only ever appends. Re-rendering the whole buffer each second would fight text selection
+    // and reset the scroll position mid-read.
+    for (const line of d.lines || []) {
+      const el = document.createElement('div');
+      el.className = classify(line);
+      el.textContent = line;
+      box.appendChild(el);
+    }
+    while (box.childElementCount > 1500) box.removeChild(box.firstChild);
+    if ($('follow-' + which).checked) box.scrollTop = box.scrollHeight;
+    $('stat-' + which).textContent = `${box.childElementCount} lines`;
+  } catch (e) { /* the status poll reports the outage */ }
 }
 
 async function tick() {
@@ -111,23 +208,15 @@ async function tick() {
     $('bar').firstElementChild.style.width = (d.total ? d.percent : 0) + '%';
     $('bar').classList.toggle('failed', d.failed > 0);
     $('elapsed').textContent = d.total ? 'elapsed ' + hms(d.elapsed_s) : '';
-    $('eta').textContent = d.eta_s != null && d.active ? 'eta ' + hms(d.eta_s)
-                         : (d.awake ? 'sleep blocked' : '');
+    $('eta').textContent = d.eta_s != null && d.active ? 'eta ' + hms(d.eta_s) : '';
 
     const s = d.stats || {};
     $('cpu').textContent = s.cpu_pct != null ? s.cpu_pct + '%' : '—';
     $('ram').textContent = s.ram_pct != null ? s.ram_pct + '%' : '—';
     $('free').textContent = s.disk_free_gb != null ? Math.round(s.disk_free_gb) + 'G' : '—';
-
-    const log = $('log');
-    const stuck = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
-    log.innerHTML = '';
-    (d.log || []).forEach(line => {
-      const el = document.createElement('div');
-      el.textContent = line;
-      log.appendChild(el);
-    });
-    if (stuck) log.scrollTop = log.scrollHeight;   // follow the tail unless the user scrolled up
+    $('workers').textContent = `${d.workers_busy}/${d.workers_max}`;
+    $('failed').textContent = d.failed;
+    $('awake').textContent = d.awake ? 'held' : 'free';
 
     $('stop').disabled = !d.active;
   } catch (e) {
@@ -139,6 +228,7 @@ async function tick() {
       $('stop').disabled = true;
     }
   }
+  if (activeTab !== 'status') pollConsole(activeTab);
 }
 
 $('stop').onclick = async () => {
@@ -148,6 +238,8 @@ $('stop').onclick = async () => {
 };
 $('open').onclick = () => { window.open('/', '_blank'); };
 
+const wanted = (location.hash || '').replace('#', '');
+if (['meld', 'arnis'].includes(wanted)) selectTab(wanted);
 tick();
 setInterval(tick, 1000);
 </script>

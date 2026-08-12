@@ -50,6 +50,18 @@ def venv_python() -> Path:
     return VENV / ("Scripts" if IS_WIN else "bin") / ("python.exe" if IS_WIN else "python")
 
 
+def venv_pythonw() -> Path:
+    """The windowless interpreter (Windows only).
+
+    python.exe is a CONSOLE program: starting it always gives it a console, and when the parent
+    has none Windows creates a fresh window for it - which is the black box that kept appearing
+    in the taskbar even when the launcher itself was hidden. pythonw.exe is the same interpreter
+    built as a GUI subsystem binary, so it gets no console and no taskbar button.
+    """
+    p = VENV / "Scripts" / "pythonw.exe"
+    return p if p.is_file() else venv_python()
+
+
 def in_target_venv() -> bool:
     try:
         return Path(sys.executable).resolve() == venv_python().resolve()
@@ -226,18 +238,34 @@ def start_server() -> int:
     if not entry.is_file():
         entry = HERE / "server.py"
     log(f"starting ArnisXL -> {url}")
-    proc = subprocess.Popen([str(venv_python()), str(entry)], env=env)
+    # arnisxl.py goes to the tray, so it must start windowless: pythonw plus CREATE_NO_WINDOW,
+    # because either one alone still leaves a console window in some launch paths. server.py is
+    # the console fallback and keeps the visible window it has always had.
+    if entry.name == "arnisxl.py":
+        interp, flags = venv_pythonw(), (0x08000000 if IS_WIN else 0)   # CREATE_NO_WINDOW
+    else:
+        interp, flags = venv_python(), 0
+    proc = subprocess.Popen([str(interp), str(entry)], env=env, creationflags=flags) if IS_WIN \
+        else subprocess.Popen([str(interp), str(entry)], env=env)
     for _ in range(240):                       # up to ~2 min for first-run startup
         if _port_open():
             break
         if proc.poll() is not None:
             return proc.returncode or 1
         time.sleep(0.5)
-    if entry.name == "server.py":
-        try:
-            webbrowser.open(url)
-        except Exception:  # noqa: BLE001
-            pass
+    if entry.name == "arnisxl.py":
+        # DETACH. The launcher's job - virtual environment, dependencies, arnis binary - is
+        # finished once the port answers, and waiting on the child is what kept a console
+        # window pinned to the taskbar for the entire session. ArnisXL lives in the tray from
+        # here; quitting it is the tray's Quit item, not closing a window. On Windows the child
+        # survives the parent exiting, so there is nothing to keep alive for.
+        log("ArnisXL is running in the tray. This window can close; "
+            "quit from the tray icon (near the clock).")
+        return 0
+    try:
+        webbrowser.open(url)
+    except Exception:  # noqa: BLE001
+        pass
     log("ArnisXL is running. Close this window (or press Ctrl+C) to stop the server.")
     try:
         return proc.wait()

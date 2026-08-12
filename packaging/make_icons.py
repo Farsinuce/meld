@@ -39,40 +39,42 @@ MASTER = 1024
 SIZES = [16, 24, 32, 48, 64, 128, 256, 512]
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 
-BG = (24, 27, 33, 255)
-EDGE = (46, 52, 64, 255)
-GREEN = (110, 231, 168, 255)
-GREEN_DIM = (63, 150, 108, 255)
+YELLOW = (245, 197, 66, 255)          # the brand colour: a warm amber, not a highlighter yellow
+YELLOW_HI = (255, 224, 130, 255)      # lit top facet
+YELLOW_LO = (196, 148, 32, 255)       # shaded bottom facet
+INK = (26, 21, 8, 255)                # the seam and the outline
 
 
 def placeholder(size: int = MASTER) -> Image.Image:
-    """A terrain-ridge mark on a dark rounded square.
+    """A yellow rhombus.
 
-    Drawn to survive being shrunk to 16px: one silhouette, one accent, no thin strokes and no
-    text. Real-world terrain turning into a world is what the app does, so a ridge line is a
-    reasonable stand-in until the brand pass replaces it.
+    Shape first, detail second: a diamond is one of the few silhouettes still identifiable at
+    16x16, and in a tray of blue and grey circles a warm yellow diamond is findable without
+    reading anything. It is drawn edge to edge with no plate behind it, because a rounded-square
+    background would eat most of those 16 pixels and leave the mark too small to tell apart.
+
+    The two facets are what stop it looking like a flat lozenge at large sizes; at 16px they
+    merge into a single yellow shape, which is the intended reading.
     """
     s = size
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    pad = s * 0.06
-    d.rounded_rectangle([pad, pad, s - pad, s - pad], radius=s * 0.22, fill=BG,
-                        outline=EDGE, width=max(1, int(s * 0.012)))
 
-    # Back ridge (dimmer, sits behind) then the front ridge, both closed to the baseline so they
-    # read as solid mass rather than as lines when the icon is tiny.
-    base = s * 0.74
-    back = [(s * 0.14, base), (s * 0.36, s * 0.40), (s * 0.52, s * 0.60),
-            (s * 0.66, s * 0.44), (s * 0.88, base)]
-    front = [(s * 0.14, base), (s * 0.33, s * 0.52), (s * 0.46, s * 0.66),
-             (s * 0.62, s * 0.50), (s * 0.74, s * 0.62), (s * 0.88, base)]
-    d.polygon(back, fill=GREEN_DIM)
-    d.polygon(front, fill=GREEN)
+    # A slightly tall diamond, inset just enough that the outline is never clipped.
+    cx, cy = s * 0.5, s * 0.5
+    hw, hh = s * 0.40, s * 0.455
+    top, right = (cx, cy - hh), (cx + hw, cy)
+    bottom, left = (cx, cy + hh), (cx - hw, cy)
+    outline_w = max(1, int(s * 0.028))
 
-    # A voxel notch: one square bitten out of the ridge, the only nod to Minecraft that stays
-    # legible at 16px.
-    q = s * 0.085
-    d.rectangle([s * 0.455, s * 0.545, s * 0.455 + q, s * 0.545 + q], fill=BG)
+    d.polygon([top, right, bottom, left], fill=YELLOW, outline=INK, width=outline_w)
+    # Upper facet catches the light, lower facet falls away - the classic gem read.
+    d.polygon([top, right, (cx, cy), left], fill=YELLOW_HI)
+    d.polygon([left, (cx, cy), right, bottom], fill=YELLOW_LO)
+    # Re-draw the silhouette so the facet fills cannot spill over the outline.
+    d.polygon([top, right, bottom, left], outline=INK, width=outline_w)
+    # The waist seam, drawn short of the edges so it does not muddy the outline when shrunk.
+    d.line([(cx - hw * 0.82, cy), (cx + hw * 0.82, cy)], fill=INK, width=max(1, int(s * 0.02)))
     return img
 
 

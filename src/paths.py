@@ -173,6 +173,22 @@ def logs_dir() -> Path:
     return d
 
 
+def bin_dir() -> Path:
+    """Where a single-file build unpacks the arnis generator on first launch.
+
+    It cannot stay inside the executable: arnis is a separate program, and the OS will only run
+    a program that exists on disk. It cannot live in the PyInstaller payload either - that is a
+    temp directory in onefile mode, wiped between runs, so the binary would be re-extracted (45
+    MB) on every start. The data directory is stable and writable, which is what is needed.
+    """
+    d = data_dir() / "bin"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return d
+
+
 def user_assets_dir() -> Path:
     """Writable twin of the bundled assets/ - user-saved loot presets, generated caches. Read
     paths check here first, then fall back to the bundled read-only copy."""
@@ -190,3 +206,29 @@ def describe() -> dict:
         "cache": str(cache_root()),
         "logs": str(logs_dir()),
     }
+
+
+def unpack_embedded_arnis() -> Path | None:
+    """Write the bundled generator out of a single-file build. Returns its path, or None.
+
+    Only does anything for a build made with --onefile-embed-arnis; for every other layout the
+    binary is already a real file next to the app. Re-extracts when the sizes differ, which is
+    how an upgraded ArnisXL replaces the generator it unpacked a version ago.
+    """
+    if not is_frozen():
+        return None
+    name = "arnis.exe" if sys.platform == "win32" else "arnis"
+    src = resource_dir() / "arnis-bundled" / name
+    if not src.is_file():
+        return None
+    dst = bin_dir() / name
+    try:
+        if dst.is_file() and dst.stat().st_size == src.stat().st_size:
+            return dst
+        import shutil
+        shutil.copy2(src, dst)
+        if sys.platform != "win32":
+            dst.chmod(0o755)
+        return dst
+    except Exception:
+        return None

@@ -54,19 +54,43 @@ browser does not stop a render, because the browser was never doing the work.
 
 | | |
 |---|---|
-| Tray menu | Open · Preview · Stop render · Show log · Data folder · Quit |
-| Preview window | A 430×580 always-there panel: progress, ETA, CPU/RAM, live log tail |
-| No console flashing | A 3000-cell render used to pop a black window per cell; children are spawned with `CREATE_NO_WINDOW` |
+| Tray menu | Open · Preview · **Meld console** · **Arnis console** · Stop render · Open log file · Data folder · Quit |
+| Preview window | 430×580, three tabs: progress/ETA/CPU/RAM, the Meld log, and the raw Arnis output |
+| No window anywhere | No console, no taskbar button. **The only way to quit is the tray's Quit** — closing the browser, the preview or a console leaves the render running |
+| No console flashing | A 3000-cell render used to pop a black window per cell; children get `CREATE_NO_WINDOW` |
 | No orphans | Every `arnis` child sits in a job that dies with the app, however the app dies |
 | Sleep is blocked | While a render runs — hours of compute with no keypress looks idle to every power policy |
 | Desktop shortcut | `packaging\Create-Shortcut.ps1` (Windows) · `packaging/install-shortcut.sh` (macOS/Linux) |
 
+The consoles live **inside** the preview window, not in a spawned terminal. A `tail` window would
+put a console back in the taskbar — the one thing this app exists to avoid — and could only ever
+show the log file, never the raw generator output, which is filtered out before it gets there.
+
 ```
 ArnisXL.exe             tray app, no console, no taskbar button
 ArnisXL-console.exe     same app with the banner and a live log
+ArnisXL.exe --console   open a console at runtime (single-file builds)
 ArnisXL.exe --check     what is installed, where the data lives
 ArnisXL.exe --no-tray   headless: server only
 ```
+
+### One folder, or one file
+
+| | `--onefile` | default (onedir) |
+|---|---|---|
+| Ships as | **one 58 MB `.exe`**, generator inside | a 152 MB folder |
+| Start-up | **~2.8 s** (unpacks to temp every launch) | **~0.7 s** |
+| Copy it anywhere and run | yes | yes, but the whole folder |
+| Swap in your own `arnis` build | no | drop it next to the exe |
+
+```
+python packaging/build.py --onefile     # one file, generator embedded
+python packaging/build.py               # folder (default)
+```
+
+The generator cannot live *inside* the running executable — it is a separate program, and the OS
+only runs programs that exist on disk. The single-file build carries it as a payload and unpacks
+it once to `<data>/bin` on first launch.
 
 **Where your data goes.** A source checkout is unchanged — `projects/` and `cache/` stay in the
 repo. A packaged install keeps them in `ArnisXL/data/` next to the app, or in the OS user-data

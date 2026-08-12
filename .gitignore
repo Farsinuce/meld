@@ -77,3 +77,7 @@ data/
 # PyInstaller output (packaging/build.py) — ~150 MB per build, rebuilt on demand.
 build/
 dist/
+
+# Private browser profile the preview window runs against (created at runtime, ~40 MB of Edge
+# state). Without a profile of its own, --app= hands the URL to the user's own browser.
+preview-profile/

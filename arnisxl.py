@@ -16,7 +16,12 @@ prints the banner, for anyone who wants to watch it work or script it. Same code
 
     python arnisxl.py                 tray + server
     python arnisxl.py --no-tray       server only, banner in the terminal
+    python arnisxl.py --console       open a console window too (single-file builds)
     python arnisxl.py --check         report what is installed and exit
+
+Quitting is the tray's Quit item. Closing the browser tab, the preview window or a console does
+not stop it - none of them are doing the work, and a render that died because someone tidied
+their taskbar would be the whole point of this app thrown away.
 """
 from __future__ import annotations
 
@@ -74,6 +79,12 @@ def version() -> str:
 def check() -> int:
     """`--check`: say what is present without starting or installing anything."""
     import platform
+    # A single-file build is windowed, so it has no stdout to print this report to. Borrow the
+    # terminal it was launched from (or open one), and mirror to the log file either way -
+    # a diagnostic command that produces nothing visible is worse than no diagnostic command.
+    if paths.is_frozen():
+        applog.attach_console()
+        applog.setup()
     import server  # noqa: PLC0415 - imported late; it is the expensive import
     print(f"ArnisXL {version() or '(unknown version)'}")
     print(f"python      {platform.python_version()} ({'frozen' if paths.is_frozen() else 'source'})")
@@ -98,8 +109,14 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("PYTHONUTF8", "1")
 
     # Before anything else: a windowed build has no stdout at all, so print() would raise on
-    # the very first line. This gives it one, and gives "Show log" something to show.
+    # the very first line. This gives it one, and gives the console view something to show.
     log_path = applog.setup()
+    if "--console" in argv:
+        applog.attach_console()
+
+    # A single-file build carries the generator inside itself; write it out once so the OS has
+    # a real file to execute. A no-op for every other layout.
+    paths.unpack_embedded_arnis()
 
     inst = SingleInstance()
     if not inst.acquire():

@@ -112,6 +112,61 @@ def setup() -> Path:
     return p
 
 
+def _has_real_stdout() -> bool:
+    """Is there already a usable stdout? A windowed PyInstaller build normally has None, but
+    gets a genuine handle when the caller redirects it to a file or a pipe."""
+    s = sys.__stdout__
+    if s is None:
+        return False
+    try:
+        return s.fileno() >= 0
+    except Exception:
+        return False
+
+
+def attach_console() -> bool:
+    """Give a windowed build a console at runtime (`ArnisXL --console`).
+
+    A single-file build ships one executable, so there is no separate console build to run when
+    you want to watch it work. AllocConsole hands this process a fresh console window and the
+    streams are rebound onto it; the log file keeps receiving everything either way, so if any
+    of this fails there is nothing lost but the window.
+    """
+    if sys.platform != "win32":
+        return True                             # a POSIX terminal is already attached
+    if _has_real_stdout():
+        # Somewhere to write already exists - most importantly when the caller redirected us
+        # (`ArnisXL.exe --check > out.txt`), which a windowed build DOES receive as a real
+        # handle. Grabbing a console here would rebind the streams onto it and send the output
+        # to a window instead of the file the user asked for.
+        return True
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        if k32.GetConsoleWindow():
+            return True                         # already have one
+        # Prefer the console of whoever launched us. A GUI-subsystem exe started from a terminal
+        # does NOT inherit that terminal, so `ArnisXL.exe --check > out.txt` silently produced an
+        # empty file. ATTACH_PARENT_PROCESS (-1) borrows it, which puts the output where the
+        # person who typed the command is looking. AllocConsole is the fallback for a launch with
+        # no parent console at all (a double-click).
+        ATTACH_PARENT_PROCESS = -1
+        if not k32.AttachConsole(ATTACH_PARENT_PROCESS) and not k32.AllocConsole():
+            return False
+        con_out = open("CONOUT$", "w", encoding="utf-8", errors="replace", buffering=1)
+        con_in = open("CONIN$", "r", encoding="utf-8", errors="replace")
+        sys.__stdout__ = sys.__stderr__ = con_out
+        sys.stdin = con_in
+        if _file is not None:
+            sys.stdout = _Tee(con_out, _file)
+            sys.stderr = _Tee(con_out, _file)
+        else:
+            sys.stdout = sys.stderr = con_out
+        return True
+    except Exception:
+        return False
+
+
 def close() -> None:
     global _file
     fh, _file = _file, None

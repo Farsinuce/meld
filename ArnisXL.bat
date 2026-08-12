@@ -1,21 +1,14 @@
 @echo off
 REM ArnisXL one-click launcher (Windows). Double-click to start it.
 REM
-REM Hands off to meld_launch.py, which sets up the virtual environment, fetches the arnis
-REM binary for this machine, and then starts arnisxl.py (tray icon + server).
+REM This window is the SETUP window: it shows the virtual environment being made, the
+REM dependencies installing and the arnis binary being fetched, all of which take a few minutes
+REM the first time and are worth watching. Once ArnisXL is up it hands off to a windowless
+REM process and this window closes on its own - from then on the app lives in the tray, and the
+REM only way to quit it is the tray icon's Quit.
 REM
-REM This window closes on its own once the app is up: `start /b` runs the launcher without a
-REM second console, and pythonw takes over from there with no window at all. To watch it work
-REM instead, run `python arnisxl.py` in a terminal - same app, with the banner and live log.
+REM To watch it work instead, run `python arnisxl.py` in a terminal - same app, banner and all.
 cd /d "%~dp0"
-where pyw >nul 2>nul && (
-  start "" pyw meld_launch.py
-  goto :end
-)
-where pythonw >nul 2>nul && (
-  start "" pythonw meld_launch.py
-  goto :end
-)
 where py >nul 2>nul && (
   py meld_launch.py
   goto :end
