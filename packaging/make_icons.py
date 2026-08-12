@@ -3,14 +3,14 @@
 
     python packaging/make_icons.py [source.png]
 
-Source: `assets/icons/meld-source.png`, 1024x1024 RGBA. If it is missing, a placeholder is
-drawn and used, so a clone with no art still produces a build with a working icon instead of
-failing or shipping a blank tray slot. Drop a real square PNG in at that path and re-run - every
-downstream size is derived, nothing else has to change.
+Source: `assets/icons/meld-source.png` - the gold Meld block, square RGBA, 1280x1280. If it is
+missing, a flat placeholder is drawn instead, so a clone with no art still produces a build with
+a working icon rather than failing or shipping a blank tray slot. Replace that one file and
+re-run: every downstream size is derived from it and nothing else has to change.
 
-Why a square source is required: the existing `web/meld_icon.png` is 1024x363, a wordmark. A
-wordmark cannot be an app icon; at the 16x16 a tray slot gives you it is a grey smear. The other
-candidate, `web/world_icon.png`, is square but 64x64, which upscales to a mushy 256px shortcut.
+Why a square source is required: `web/meld_icon.png` is 1024x363, a wordmark. A wordmark cannot
+be an app icon; at the 16x16 a tray slot gives you it is a grey smear. The other candidate,
+`web/world_icon.png`, is square but 64x64, which upscales to a mushy 256px shortcut.
 
 Outputs
     assets/icons/meld.ico          Windows: exe, shortcut, taskbar (16..256 in one file)
@@ -39,42 +39,30 @@ MASTER = 1024
 SIZES = [16, 24, 32, 48, 64, 128, 256, 512]
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 
-YELLOW = (245, 197, 66, 255)          # the brand colour: a warm amber, not a highlighter yellow
-YELLOW_HI = (255, 224, 130, 255)      # lit top facet
-YELLOW_LO = (196, 148, 32, 255)       # shaded bottom facet
-INK = (26, 21, 8, 255)                # the seam and the outline
+GOLD_TOP = (247, 220, 149, 255)       # lit face
+GOLD_LEFT = (227, 164, 23, 255)       # the brand gold, #e3a417
+GOLD_RIGHT = (169, 114, 15, 255)      # shaded face
 
 
 def placeholder(size: int = MASTER) -> Image.Image:
-    """A yellow rhombus.
+    """A flat gold block - the shipped icon reduced to its silhouette.
 
-    Shape first, detail second: a diamond is one of the few silhouettes still identifiable at
-    16x16, and in a tray of blue and grey circles a warm yellow diamond is findable without
-    reading anything. It is drawn edge to edge with no plate behind it, because a rounded-square
-    background would eat most of those 16 pixels and leave the mark too small to tell apart.
+    This is the fallback for a checkout with no artwork, not the real icon: `meld-source.png` is,
+    and it wins whenever it exists. Kept deliberately plain, because the only job here is to be
+    findable in a tray full of blue circles when the real file is missing.
 
-    The two facets are what stop it looking like a flat lozenge at large sizes; at 16px they
-    merge into a single yellow shape, which is the intended reading.
+    Three faces, no outline: at 16px an outline eats the shape it is meant to define.
     """
     s = size
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    # A slightly tall diamond, inset just enough that the outline is never clipped.
-    cx, cy = s * 0.5, s * 0.5
-    hw, hh = s * 0.40, s * 0.455
-    top, right = (cx, cy - hh), (cx + hw, cy)
-    bottom, left = (cx, cy + hh), (cx - hw, cy)
-    outline_w = max(1, int(s * 0.028))
+    def p(x, y):
+        return (s * x, s * y)
 
-    d.polygon([top, right, bottom, left], fill=YELLOW, outline=INK, width=outline_w)
-    # Upper facet catches the light, lower facet falls away - the classic gem read.
-    d.polygon([top, right, (cx, cy), left], fill=YELLOW_HI)
-    d.polygon([left, (cx, cy), right, bottom], fill=YELLOW_LO)
-    # Re-draw the silhouette so the facet fills cannot spill over the outline.
-    d.polygon([top, right, bottom, left], outline=INK, width=outline_w)
-    # The waist seam, drawn short of the edges so it does not muddy the outline when shrunk.
-    d.line([(cx - hw * 0.82, cy), (cx + hw * 0.82, cy)], fill=INK, width=max(1, int(s * 0.02)))
+    d.polygon([p(.50, .06), p(.94, .31), p(.50, .56), p(.06, .31)], fill=GOLD_TOP)
+    d.polygon([p(.06, .31), p(.50, .56), p(.50, .94), p(.06, .69)], fill=GOLD_LEFT)
+    d.polygon([p(.94, .31), p(.94, .69), p(.50, .94), p(.50, .56)], fill=GOLD_RIGHT)
     return img
 
 

@@ -58,18 +58,19 @@ def _icon_image(size: int = 64):
                         return img.resize((size, size), Image.LANCZOS)
             except Exception:
                 pass
-    # Same yellow rhombus packaging/make_icons.py builds, drawn small: a diamond is one of the
-    # few silhouettes still readable at 16px, and yellow finds itself in a tray of blue circles.
+    # The Meld block reduced to three flat faces - the shipped icon's silhouette, drawn from
+    # scratch so a build that lost its assets still has a findable tray icon rather than a blank
+    # slot. Gold reads against the blues and greys of a normal tray.
     s = size
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    cx, cy, hw, hh = s * 0.5, s * 0.5, s * 0.40, s * 0.455
-    pts = [(cx, cy - hh), (cx + hw, cy), (cx, cy + hh), (cx - hw, cy)]
-    ink, w = (26, 21, 8, 255), max(1, int(s * 0.028))
-    d.polygon(pts, fill=(245, 197, 66, 255), outline=ink, width=w)
-    d.polygon([pts[0], pts[1], (cx, cy), pts[3]], fill=(255, 224, 130, 255))
-    d.polygon([pts[3], (cx, cy), pts[1], pts[2]], fill=(196, 148, 32, 255))
-    d.polygon(pts, outline=ink, width=w)
+
+    def p(x, y):
+        return (s * x, s * y)
+
+    d.polygon([p(.50, .06), p(.94, .31), p(.50, .56), p(.06, .31)], fill=(247, 220, 149, 255))
+    d.polygon([p(.06, .31), p(.50, .56), p(.50, .94), p(.06, .69)], fill=(227, 164, 23, 255))
+    d.polygon([p(.94, .31), p(.94, .69), p(.50, .94), p(.50, .56)], fill=(169, 114, 15, 255))
     return img
 
 
