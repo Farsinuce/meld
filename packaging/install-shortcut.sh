@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Register ArnisXL with the desktop on Linux (and drop it in /Applications on macOS).
+# Register Meld with the desktop on Linux (and drop it in /Applications on macOS).
 #
-# ArnisXL ships as a folder you extract anywhere, so nothing has told the desktop it exists.
+# Meld ships as a folder you extract anywhere, so nothing has told the desktop it exists.
 # This adds the launcher entry and the icon theme files pointing at wherever you put it. Re-run
 # after moving the folder - the .desktop stores an absolute path.
 #
@@ -10,8 +10,8 @@
 #   ./packaging/install-shortcut.sh --remove     undo
 set -euo pipefail
 
-APP="ArnisXL"
-ID="arnisxl"
+APP="Meld"
+ID="meld"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 AUTOSTART=0
@@ -34,7 +34,7 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   fi
   if [[ ! -d "$BUNDLE" ]]; then
     echo "No $APP.app here. On macOS, run the app bundle from the release archive," >&2
-    echo "or from a source checkout just run: python3 arnisxl.py" >&2
+    echo "or from a source checkout just run: python3 meld_app.py" >&2
     exit 1
   fi
   # A symlink, not a copy: the app folder holds the data dir and the arnis binary, and a copied
@@ -63,16 +63,16 @@ fi
 
 if [[ -x "$ROOT/$APP" ]]; then
   EXEC="$ROOT/$APP"
-elif [[ -f "$ROOT/arnisxl.py" ]]; then
-  EXEC="$(command -v python3 || command -v python) $ROOT/arnisxl.py"
+elif [[ -f "$ROOT/meld_app.py" ]]; then
+  EXEC="$(command -v python3 || command -v python) $ROOT/meld_app.py"
 else
-  echo "Could not find the $APP binary or arnisxl.py under $ROOT" >&2
+  echo "Could not find the $APP binary or meld_app.py under $ROOT" >&2
   exit 1
 fi
 
 mkdir -p "$APPS_DIR"
 for n in 16 24 32 48 64 128 256 512; do
-  src="$ROOT/assets/icons/arnisxl-$n.png"
+  src="$ROOT/assets/icons/meld-$n.png"
   [[ -f "$src" ]] || continue
   mkdir -p "$ICON_ROOT/${n}x${n}/apps"
   cp -f "$src" "$ICON_ROOT/${n}x${n}/apps/$ID.png"

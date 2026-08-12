@@ -21,17 +21,17 @@ from src import paths  # noqa: E402
 def _clean(monkeypatch):
     """Every test starts with an unresolved data dir and no inherited overrides."""
     monkeypatch.setattr(paths, "_DATA_CACHE", None)
-    for var in ("ARNISXL_DATA_DIR", "MELD_DATA_DIR", "MELD_CACHE_DIR"):
+    for var in ("MELD_DATA_DIR", "MELD_CACHE_DIR"):
         monkeypatch.delenv(var, raising=False)
     yield
     paths._DATA_CACHE = None
 
 
 def _fake_frozen(monkeypatch, app: Path, payload: Path):
-    """Make paths.py believe it is running as ArnisXL.exe out of `app`, unpacked into `payload`."""
+    """Make paths.py believe it is running as Meld.exe out of `app`, unpacked into `payload`."""
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", str(payload), raising=False)
-    monkeypatch.setattr(sys, "executable", str(app / "ArnisXL.exe"), raising=False)
+    monkeypatch.setattr(sys, "executable", str(app / "Meld.exe"), raising=False)
 
 
 def test_source_checkout_keeps_todays_layout():
@@ -70,13 +70,13 @@ def test_frozen_read_only_app_dir_falls_back_to_user_dir(tmp_path, monkeypatch):
 
 
 def test_env_override_wins(tmp_path, monkeypatch):
-    monkeypatch.setenv("ARNISXL_DATA_DIR", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("MELD_DATA_DIR", str(tmp_path / "elsewhere"))
     assert paths.data_dir() == (tmp_path / "elsewhere").resolve()
     assert paths.projects_root() == (tmp_path / "elsewhere").resolve() / "projects"
 
 
 def test_pointer_file_moves_the_data_dir(tmp_path, monkeypatch):
-    """The portable escape hatch: one line in arnisxl-data.txt parks the cache on another drive."""
+    """The portable escape hatch: one line in meld-data.txt parks the cache on another drive."""
     app, payload, target = tmp_path / "app", tmp_path / "payload", tmp_path / "D-drive"
     app.mkdir()
     payload.mkdir()
@@ -88,7 +88,7 @@ def test_pointer_file_moves_the_data_dir(tmp_path, monkeypatch):
 
 def test_cache_env_var_still_wins(tmp_path, monkeypatch):
     """MELD_CACHE_DIR predates the data-dir pointer and is documented; it must keep working."""
-    monkeypatch.setenv("ARNISXL_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("MELD_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("MELD_CACHE_DIR", str(tmp_path / "bigdrive"))
     assert paths.cache_root() == (tmp_path / "bigdrive").resolve()
 

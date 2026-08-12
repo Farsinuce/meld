@@ -1,4 +1,4 @@
-# Build-time only - needed to package ArnisXL, never to run it.
+# Build-time only - needed to package Meld, never to run it.
 #   python -m pip install -r requirements.txt -r requirements-build.txt
 #   python packaging/build.py --archive
 -r requirements.txt

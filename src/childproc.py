@@ -1,9 +1,9 @@
-"""Process-wide policy for every native child ArnisXL starts.
+"""Process-wide policy for every native child Meld starts.
 
 Two problems, both of which only show up once the app runs without a console:
 
 1. **Console flashing.** A windowed process that starts a console program gets a brand new
-   console window for it. ArnisXL launches one `arnis` per cell, so a 3000-cell render would
+   console window for it. Meld launches one `arnis` per cell, so a 3000-cell render would
    pop and close 3000 black windows over the user's desktop. CREATE_NO_WINDOW stops that.
 
 2. **Orphans.** Quit from the tray - or crash, or get killed by the OS - and the `arnis`
@@ -19,7 +19,7 @@ the two dozen places that already spawn something, and - the real reason - it mu
 next one somebody adds without reading this file.
 
 Shell-open helpers (`explorer`, `open`, `xdg-open`) are exempt from adoption: they hand off to
-an already-running desktop process and exit, and adopting them would mean quitting ArnisXL
+an already-running desktop process and exit, and adopting them would mean quitting Meld
 slammed shut the file manager window the user just opened.
 """
 from __future__ import annotations

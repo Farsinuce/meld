@@ -46,11 +46,11 @@ Then: draw an area, set the cell size, press **Generate world**.
 
 ---
 
-## ArnisXL — the background app
+## The desktop app
 
-`ArnisXL` is the same engine as a desktop app: a portable folder, no installer, no Python
-required. Extract it anywhere and run it. It starts **in the tray with no window** — closing the
-browser does not stop a render, because the browser was never doing the work.
+Meld also ships as a desktop app: a portable folder, no installer, no Python required. Extract it
+anywhere and run it. It starts **in the tray with no window** — closing the browser does not stop
+a render, because the browser was never doing the work.
 
 | | |
 |---|---|
@@ -67,11 +67,11 @@ put a console back in the taskbar — the one thing this app exists to avoid —
 show the log file, never the raw generator output, which is filtered out before it gets there.
 
 ```
-ArnisXL.exe             tray app, no console, no taskbar button
-ArnisXL-console.exe     same app with the banner and a live log
-ArnisXL.exe --console   open a console at runtime (single-file builds)
-ArnisXL.exe --check     what is installed, where the data lives
-ArnisXL.exe --no-tray   headless: server only
+Meld.exe             tray app, no console, no taskbar button
+Meld-console.exe     same app with the banner and a live log
+Meld.exe --console   open a console at runtime (single-file builds)
+Meld.exe --check     what is installed, where the data lives
+Meld.exe --no-tray   headless: server only
 ```
 
 ### One folder, or one file
@@ -93,9 +93,9 @@ only runs programs that exist on disk. The single-file build carries it as a pay
 it once to `<data>/bin` on first launch.
 
 **Where your data goes.** A source checkout is unchanged — `projects/` and `cache/` stay in the
-repo. A packaged install keeps them in `ArnisXL/data/` next to the app, or in the OS user-data
+repo. A packaged install keeps them in `Meld/data/` next to the app, or in the OS user-data
 folder if the app folder is read-only. Point it anywhere by putting a path in
-`arnisxl-data.txt` next to the executable, or by setting `ARNISXL_DATA_DIR`. A packaged install
+`meld-data.txt` next to the executable, or by setting `MELD_DATA_DIR`. A packaged install
 never adopts caches it did not create.
 
 **Building it yourself:** `pip install -r requirements.txt -r requirements-build.txt` then

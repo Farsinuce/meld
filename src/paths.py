@@ -1,4 +1,4 @@
-"""Where ArnisXL reads its bundled files from, and where it writes its state to.
+"""Where Meld reads its bundled files from, and where it writes its state to.
 
 Two roots that are deliberately NOT the same thing:
 
@@ -14,8 +14,8 @@ platforms, and is wiped between runs. Writing 100 GB of tile cache in there woul
 worse, silently disappear.
 
 Data-dir resolution order (first hit wins):
-  1. $ARNISXL_DATA_DIR  (or the older $MELD_DATA_DIR)
-  2. a pointer file `arnisxl-data.txt` next to the executable - one line, a path. This is how a
+  1. $MELD_DATA_DIR
+  2. a pointer file `meld-data.txt` next to the executable - one line, a path. This is how a
      portable install parks its 100 GB cache on a different drive without any env-var setup.
   3. source checkout  -> the repo root (today's layout, unchanged)
   4. frozen + the app folder is writable -> <app>/data  (the portable-ZIP case)
@@ -33,21 +33,21 @@ import os
 import sys
 from pathlib import Path
 
-APP_NAME = "ArnisXL"
-POINTER_FILE = "arnisxl-data.txt"
+APP_NAME = "Meld"
+POINTER_FILE = "meld-data.txt"
 
 _DATA_CACHE: Path | None = None
 
 
 def is_frozen() -> bool:
-    """True when running from a PyInstaller bundle (ArnisXL.exe) rather than from source."""
+    """True when running from a PyInstaller bundle (Meld.exe) rather than from source."""
     return bool(getattr(sys, "frozen", False))
 
 
 def exe_dir() -> Path:
     """The folder a user would call "where the app is".
 
-    Frozen: the directory holding ArnisXL.exe - NOT sys._MEIPASS, which is the unpacked
+    Frozen: the directory holding Meld.exe - NOT sys._MEIPASS, which is the unpacked
     payload. In onedir mode the exe sits next to _internal/; in onefile mode _MEIPASS is a
     temp dir that vanishes on exit, so a pointer file or data folder must never live there.
     Source: the repo root.
@@ -101,7 +101,7 @@ def _os_user_data_dir() -> Path:
 
 
 def _pointer_target() -> Path | None:
-    """Read `arnisxl-data.txt` next to the executable, if present and non-empty."""
+    """Read `meld-data.txt` next to the executable, if present and non-empty."""
     try:
         f = exe_dir() / POINTER_FILE
         if not f.is_file():
@@ -122,11 +122,9 @@ def data_dir() -> Path:
         return _DATA_CACHE
 
     candidate: Path | None = None
-    for var in ("ARNISXL_DATA_DIR", "MELD_DATA_DIR"):
-        env = (os.environ.get(var) or "").strip().strip('"').strip("'")
-        if env:
-            candidate = Path(env).expanduser()
-            break
+    env = (os.environ.get("MELD_DATA_DIR") or "").strip().strip('"').strip("'")
+    if env:
+        candidate = Path(env).expanduser()
     if candidate is None:
         candidate = _pointer_target()
     if candidate is None:
@@ -213,7 +211,7 @@ def unpack_embedded_arnis() -> Path | None:
 
     Only does anything for a build made with --onefile-embed-arnis; for every other layout the
     binary is already a real file next to the app. Re-extracts when the sizes differ, which is
-    how an upgraded ArnisXL replaces the generator it unpacked a version ago.
+    how an upgraded Meld replaces the generator it unpacked a version ago.
     """
     if not is_frozen():
         return None

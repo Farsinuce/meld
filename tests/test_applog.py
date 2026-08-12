@@ -69,7 +69,7 @@ def test_output_reaches_both_console_and_file(monkeypatch, tmp_path):
 
 def test_attach_console_leaves_a_redirected_stdout_alone(monkeypatch):
     """Regression: attaching a console rebound the streams onto it, so
-    `ArnisXL.exe --check > out.txt` wrote to a console window and left the file empty.
+    `Meld.exe --check > out.txt` wrote to a console window and left the file empty.
 
     A windowed build DOES get a real stdout handle when the caller redirects it, so the presence
     of a usable stream - not the absence of a console - is what decides.
@@ -100,5 +100,5 @@ def test_rotation_keeps_the_current_log_small(monkeypatch, tmp_path):
     big = tmp_path / applog.LOG_NAME
     big.write_bytes(b"x" * (applog.MAX_BYTES + 10))
     applog.setup()
-    assert (tmp_path / "arnisxl.1.log").is_file(), "the oversized log should have been rotated"
+    assert (tmp_path / "meld.1.log").is_file(), "the oversized log should have been rotated"
     assert applog.path().stat().st_size < applog.MAX_BYTES

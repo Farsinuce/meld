@@ -1,6 +1,6 @@
 """Localhost hardening (src/appguard.py).
 
-Scenario being defended: ArnisXL sits in the tray all day. The user browses the web. A page they
+Scenario being defended: Meld sits in the tray all day. The user browses the web. A page they
 visit runs `fetch('http://127.0.0.1:5630/api/project/delete', {method:'POST'})`, or resolves its
 own domain to 127.0.0.1 to dodge the origin rules. Neither may reach a handler.
 """
@@ -114,7 +114,7 @@ def test_wrong_token_refused():
 
 
 def test_require_token_default_reads_env(monkeypatch):
-    monkeypatch.delenv("ARNISXL_REQUIRE_TOKEN", raising=False)
+    monkeypatch.delenv("MELD_REQUIRE_TOKEN", raising=False)
     assert appguard.require_token_default() is False
-    monkeypatch.setenv("ARNISXL_REQUIRE_TOKEN", "1")
+    monkeypatch.setenv("MELD_REQUIRE_TOKEN", "1")
     assert appguard.require_token_default() is True

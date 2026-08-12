@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ArnisXL - the background app.
+"""Meld - the background app.
 
 Double-click it and nothing opens: it goes to the tray, the server comes up behind it, and the
 browser lands on the UI. Close the window and the render keeps going, because the window was
@@ -10,14 +10,14 @@ Layout of the process:
     main thread   the tray icon (macOS refuses to run AppKit anywhere else)
     worker thread the HTTP server + the arnis worker pool
 
-Two entry points are built from this one file. `ArnisXL.exe` is frozen with --noconsole, so it
-has no console and no taskbar button - just the tray icon. `arnisxl.exe` keeps its console and
+Two entry points are built from this one file. `Meld.exe` is frozen with --noconsole, so it
+has no console and no taskbar button - just the tray icon. `meld.exe` keeps its console and
 prints the banner, for anyone who wants to watch it work or script it. Same code, one flag apart.
 
-    python arnisxl.py                 tray + server
-    python arnisxl.py --no-tray       server only, banner in the terminal
-    python arnisxl.py --console       open a console window too (single-file builds)
-    python arnisxl.py --check         report what is installed and exit
+    python meld_app.py                 tray + server
+    python meld_app.py --no-tray       server only, banner in the terminal
+    python meld_app.py --console       open a console window too (single-file builds)
+    python meld_app.py --check         report what is installed and exit
 
 Quitting is the tray's Quit item. Closing the browser tab, the preview window or a console does
 not stop it - none of them are doing the work, and a render that died because someone tidied
@@ -53,7 +53,7 @@ def pick_port(preferred: int = DEFAULT_PORT) -> int:
     """First free port at or after `preferred`.
 
     Reached only when we already hold the single-instance lock, so a busy 5630 is somebody
-    else's program, not another ArnisXL. Refusing to start because an unrelated app took the
+    else's program, not another Meld. Refusing to start because an unrelated app took the
     port would be a bad trade for a tool people leave running all day.
     """
     for i in range(PORT_TRIES):
@@ -86,7 +86,7 @@ def check() -> int:
         applog.attach_console()
         applog.setup()
     import server  # noqa: PLC0415 - imported late; it is the expensive import
-    print(f"ArnisXL {version() or '(unknown version)'}")
+    print(f"Meld {version() or '(unknown version)'}")
     print(f"python      {platform.python_version()} ({'frozen' if paths.is_frozen() else 'source'})")
     for k, v in paths.describe().items():
         print(f"{k:<11} {v}")
@@ -123,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         # Already running. Open that copy instead of dying on a busy port - a second
         # double-click should feel like "bring it up", not like an error.
         other = running_url()
-        print(f"ArnisXL is already running: {other or 'http://127.0.0.1:5630'}")
+        print(f"Meld is already running: {other or 'http://127.0.0.1:5630'}")
         if other:
             preview.open_in_browser(other)
         return 0
@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         url = f"http://127.0.0.1:{port}"
         # The tray always opens URLs carrying the token, so enforcement costs the user nothing
         # here and shuts out other native programs on the machine.
-        os.environ.setdefault("ARNISXL_REQUIRE_TOKEN", "1")
+        os.environ.setdefault("MELD_REQUIRE_TOKEN", "1")
         childproc.install()
 
         banner.show(version=version(), url=url, data_dir=str(paths.data_dir()),
@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 server.run_server(port, token=token, require_token=True, on_ready=on_ready)
             except Exception as ex:                       # noqa: BLE001
-                print(f"[arnisxl] server stopped: {type(ex).__name__}: {ex}")
+                print(f"[meld] server stopped: {type(ex).__name__}: {ex}")
             finally:
                 if want_tray and t is not None and t._icon is not None:
                     try:
@@ -166,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
                         pass
 
         def shutdown() -> None:
-            print("[arnisxl] shutting down…")
+            print("[meld] shutting down…")
             try:
                 server.stop_server()
             except Exception:
@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
             childproc.kill_all()
 
         t = tray.Tray(url, on_quit=shutdown, token=token) if want_tray else None
-        worker = threading.Thread(target=serve, name="arnisxl-server", daemon=True)
+        worker = threading.Thread(target=serve, name="meld-server", daemon=True)
         worker.start()
 
         if t is not None:

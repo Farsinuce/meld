@@ -51,7 +51,7 @@ def test_plain_art_used_on_legacy_codepage(monkeypatch):
     code pages look old.)"""
     monkeypatch.setattr(sys, "stdout", _Stream("cp1252"))
     assert "█" not in banner.art()
-    assert "A R N I S" in banner.art()
+    assert "M E L D" in banner.art()
 
 
 def test_render_is_encodable_on_legacy_codepage(monkeypatch):

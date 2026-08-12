@@ -28,7 +28,7 @@ from pathlib import Path
 from . import applog, preview
 from .paths import data_dir, resource
 
-APP_NAME = "ArnisXL"
+APP_NAME = "Meld"
 
 
 def available() -> bool:
@@ -49,7 +49,7 @@ def _icon_image(size: int = 64):
     it. A 16 px tray slot cannot show a wordmark anyway, so the fallback is a simple mark.
     """
     from PIL import Image, ImageDraw
-    for name in ("arnisxl.png", "icon.png", "meld_icon.png"):
+    for name in ("meld.png", "icon.png", "meld_icon.png"):
         for p in (resource("assets", "icons", name), resource("web", name)):
             try:
                 if p.is_file():
@@ -88,7 +88,7 @@ class Tray:
         # is on (the tray is a native client - it gets no cookie for free).
         req.add_header("Origin", self.url)
         if self.token:
-            req.add_header("X-ArnisXL-Token", self.token)
+            req.add_header("X-Meld-Token", self.token)
         try:
             with urllib.request.urlopen(req, timeout=15) as r:
                 return json.loads(r.read() or b"{}")
@@ -99,7 +99,7 @@ class Tray:
     def _get(self, path: str) -> dict:
         req = urllib.request.Request(self.url + path)
         if self.token:
-            req.add_header("X-ArnisXL-Token", self.token)
+            req.add_header("X-Meld-Token", self.token)
         try:
             with urllib.request.urlopen(req, timeout=10) as r:
                 return json.loads(r.read() or b"{}")
@@ -177,7 +177,7 @@ class Tray:
         from pystray import MenuItem as Item
 
         menu = pystray.Menu(
-            Item("Open ArnisXL", self.open_ui, default=True),
+            Item("Open Meld", self.open_ui, default=True),
             Item("Preview…", self.open_preview),
             pystray.Menu.SEPARATOR,
             Item("Meld console", lambda *_: self.open_console("meld")),
@@ -187,7 +187,7 @@ class Tray:
             Item("Open log file", self.open_log_file),
             Item("Data folder", lambda *_: self.open_folder()),
             pystray.Menu.SEPARATOR,
-            Item("Quit ArnisXL", self.quit),
+            Item("Quit Meld", self.quit),
         )
         self._icon = pystray.Icon(APP_NAME, _icon_image(), APP_NAME, menu)
         # Refresh the tooltip so hovering shows live progress without opening anything.

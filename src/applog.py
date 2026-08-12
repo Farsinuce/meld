@@ -25,7 +25,7 @@ from .paths import logs_dir
 
 MAX_BYTES = 4 * 1024 * 1024
 KEEP = 3
-LOG_NAME = "arnisxl.log"
+LOG_NAME = "meld.log"
 
 _lock = threading.Lock()
 _file = None
@@ -106,7 +106,7 @@ def setup() -> Path:
     except Exception:
         return p                                # read-only data dir: keep whatever streams exist
     _file, _path = fh, p
-    fh.write(f"\n===== ArnisXL started {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
+    fh.write(f"\n===== Meld started {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
     sys.stdout = _Tee(sys.__stdout__, fh)
     sys.stderr = _Tee(sys.__stderr__, fh)
     return p
@@ -125,7 +125,7 @@ def _has_real_stdout() -> bool:
 
 
 def attach_console() -> bool:
-    """Give a windowed build a console at runtime (`ArnisXL --console`).
+    """Give a windowed build a console at runtime (`Meld --console`).
 
     A single-file build ships one executable, so there is no separate console build to run when
     you want to watch it work. AllocConsole hands this process a fresh console window and the
@@ -136,7 +136,7 @@ def attach_console() -> bool:
         return True                             # a POSIX terminal is already attached
     if _has_real_stdout():
         # Somewhere to write already exists - most importantly when the caller redirected us
-        # (`ArnisXL.exe --check > out.txt`), which a windowed build DOES receive as a real
+        # (`Meld.exe --check > out.txt`), which a windowed build DOES receive as a real
         # handle. Grabbing a console here would rebind the streams onto it and send the output
         # to a window instead of the file the user asked for.
         return True
@@ -146,7 +146,7 @@ def attach_console() -> bool:
         if k32.GetConsoleWindow():
             return True                         # already have one
         # Prefer the console of whoever launched us. A GUI-subsystem exe started from a terminal
-        # does NOT inherit that terminal, so `ArnisXL.exe --check > out.txt` silently produced an
+        # does NOT inherit that terminal, so `Meld.exe --check > out.txt` silently produced an
         # empty file. ATTACH_PARENT_PROCESS (-1) borrows it, which puts the output where the
         # person who typed the command is looking. AllocConsole is the fallback for a launch with
         # no parent console at all (a double-click).

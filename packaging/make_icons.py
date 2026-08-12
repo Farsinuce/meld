@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build every icon ArnisXL needs from one square source.
+"""Build every icon Meld needs from one square source.
 
     python packaging/make_icons.py [source.png]
 
-Source: `assets/icons/arnisxl-source.png`, 1024x1024 RGBA. If it is missing, a placeholder is
+Source: `assets/icons/meld-source.png`, 1024x1024 RGBA. If it is missing, a placeholder is
 drawn and used, so a clone with no art still produces a build with a working icon instead of
 failing or shipping a blank tray slot. Drop a real square PNG in at that path and re-run - every
 downstream size is derived, nothing else has to change.
@@ -13,10 +13,10 @@ wordmark cannot be an app icon; at the 16x16 a tray slot gives you it is a grey 
 candidate, `web/world_icon.png`, is square but 64x64, which upscales to a mushy 256px shortcut.
 
 Outputs
-    assets/icons/arnisxl.ico          Windows: exe, shortcut, taskbar (16..256 in one file)
-    assets/icons/arnisxl.png          512px master for Linux + the .app bundle
-    assets/icons/arnisxl-<n>.png      16/24/32/48/64/128/256/512 for hicolor + the tray
-    assets/icons/arnisxl.icns         macOS - only when run on macOS (needs iconutil)
+    assets/icons/meld.ico          Windows: exe, shortcut, taskbar (16..256 in one file)
+    assets/icons/meld.png          512px master for Linux + the .app bundle
+    assets/icons/meld-<n>.png      16/24/32/48/64/128/256/512 for hicolor + the tray
+    assets/icons/meld.icns         macOS - only when run on macOS (needs iconutil)
 
 The .icns step is skipped on other platforms rather than approximated: Pillow's ICNS writer
 covers a narrower set of sizes than iconutil, and a subtly wrong .icns shows up as a blurry Dock
@@ -34,7 +34,7 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
 ICON_DIR = ROOT / "assets" / "icons"
-SOURCE = ICON_DIR / "arnisxl-source.png"
+SOURCE = ICON_DIR / "meld-source.png"
 MASTER = 1024
 SIZES = [16, 24, 32, 48, 64, 128, 256, 512]
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
@@ -103,25 +103,25 @@ def main() -> int:
         print("   replace it with a real 1024x1024 square PNG and re-run to rebrand everything")
 
     for n in SIZES:
-        master.resize((n, n), Image.LANCZOS).save(ICON_DIR / f"arnisxl-{n}.png")
-    master.resize((512, 512), Image.LANCZOS).save(ICON_DIR / "arnisxl.png")
+        master.resize((n, n), Image.LANCZOS).save(ICON_DIR / f"meld-{n}.png")
+    master.resize((512, 512), Image.LANCZOS).save(ICON_DIR / "meld.png")
     # Pillow builds the multi-resolution .ico itself; Windows picks the size it needs per surface
     # (16 in the tray, 32 in the taskbar, 256 on the desktop).
-    master.save(ICON_DIR / "arnisxl.ico", sizes=[(n, n) for n in ICO_SIZES])
-    print(f"wrote {len(SIZES)} PNG sizes + arnisxl.ico into {ICON_DIR.relative_to(ROOT)}")
+    master.save(ICON_DIR / "meld.ico", sizes=[(n, n) for n in ICO_SIZES])
+    print(f"wrote {len(SIZES)} PNG sizes + meld.ico into {ICON_DIR.relative_to(ROOT)}")
 
     if sys.platform == "darwin" and shutil.which("iconutil"):
         with tempfile.TemporaryDirectory() as tmp:
-            iconset = Path(tmp) / "arnisxl.iconset"
+            iconset = Path(tmp) / "meld.iconset"
             iconset.mkdir()
             for n in (16, 32, 128, 256, 512):
                 master.resize((n, n), Image.LANCZOS).save(iconset / f"icon_{n}x{n}.png")
                 master.resize((n * 2, n * 2), Image.LANCZOS).save(iconset / f"icon_{n}x{n}@2x.png")
             subprocess.run(["iconutil", "-c", "icns", str(iconset),
-                            "-o", str(ICON_DIR / "arnisxl.icns")], check=True)
-        print("wrote arnisxl.icns")
+                            "-o", str(ICON_DIR / "meld.icns")], check=True)
+        print("wrote meld.icns")
     else:
-        print("skipped arnisxl.icns (built on macOS by the release job)")
+        print("skipped meld.icns (built on macOS by the release job)")
     return 0
 
 

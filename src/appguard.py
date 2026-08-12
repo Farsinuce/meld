@@ -1,4 +1,4 @@
-"""Keeps other programs on the machine out of ArnisXL's API.
+"""Keeps other programs on the machine out of Meld's API.
 
 Binding to 127.0.0.1 stops the network, not the browser. Any web page the user has open can
 POST to http://127.0.0.1:5630/api/... - the browser sends the request happily, and this API
@@ -29,8 +29,8 @@ from urllib.parse import urlsplit
 
 from flask import g, jsonify, redirect, request
 
-COOKIE = "arnisxl_token"
-HEADER = "X-ArnisXL-Token"
+COOKIE = "meld_token"
+HEADER = "X-Meld-Token"
 QUERY = "t"
 
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -96,7 +96,7 @@ def install(app, *, port: int, token: str = "", require_token: bool = False) -> 
                 if request.method == "GET" and request.path == "/":
                     g.strip_token_redirect = True
             return None
-        return jsonify({"ok": False, "error": "unauthorized: open ArnisXL from the tray icon"}), 403
+        return jsonify({"ok": False, "error": "unauthorized: open Meld from the tray icon"}), 403
 
     @app.after_request
     def _stamp(resp):                           # noqa: ANN202 - Flask hook
@@ -110,5 +110,5 @@ def install(app, *, port: int, token: str = "", require_token: bool = False) -> 
 
 
 def require_token_default() -> bool:
-    """Token enforcement is opt-in via ARNISXL_REQUIRE_TOKEN; the tray entry point sets it."""
-    return (os.environ.get("ARNISXL_REQUIRE_TOKEN") or "").strip().lower() in ("1", "true", "yes", "on")
+    """Token enforcement is opt-in via MELD_REQUIRE_TOKEN; the tray entry point sets it."""
+    return (os.environ.get("MELD_REQUIRE_TOKEN") or "").strip().lower() in ("1", "true", "yes", "on")

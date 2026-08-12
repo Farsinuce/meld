@@ -45,7 +45,7 @@ from src.paths import (resource_dir, exe_dir, data_dir, projects_root, logs_dir,
 # root exactly as before; frozen it is the unpacked PyInstaller payload, which must never be
 # written to. Anything the user creates goes under data_dir() instead - see src/paths.py.
 BASE_DIR = resource_dir()
-# APP_DIR = the folder the app lives in (repo root from source, the folder holding ArnisXL.exe
+# APP_DIR = the folder the app lives in (repo root from source, the folder holding Meld.exe
 # when frozen). Used as the child-process working directory and as an arnis-binary search root:
 # the unpacked payload is a temp directory on some platforms, so it is the wrong answer for both.
 APP_DIR = exe_dir()
@@ -112,13 +112,13 @@ def _setup_shared_cache() -> None:
     if sentinel.exists():
         return
     if is_frozen():
-        # A packaged ArnisXL must not adopt caches it did not create. The move made sense when
+        # A packaged Meld must not adopt caches it did not create. The move made sense when
         # there was exactly one install, editing files in place; a portable folder is copied to
         # a second machine, run from a USB stick, or unpacked next to an existing source
         # checkout, and any of those silently emptying %LOCALAPPDATA% into itself is theft, not
         # migration - the first run of a test build here moved 189 MB of live tile cache out
         # from under the source install. A packaged install that wants an existing cache points
-        # at it with MELD_CACHE_DIR or the arnisxl-data.txt pointer file.
+        # at it with MELD_CACHE_DIR or the meld-data.txt pointer file.
         try:
             sentinel.write_text("")
         except Exception:
@@ -1732,7 +1732,7 @@ def resolve_arnis_exe() -> Path | None:
     """Find the Arnis binary next to Meld. Platform-aware: on Linux/macOS we look for `arnis`
     (no extension) and NEVER pick up a stray Windows `arnis.exe`, which would die with
     '[Errno 8] Exec format error'. On Windows we prefer `arnis.exe` then a bare `arnis`."""
-    # APP_DIR first: in a frozen install the binary ships next to ArnisXL.exe, and BASE_DIR is
+    # APP_DIR first: in a frozen install the binary ships next to Meld.exe, and BASE_DIR is
     # the unpacked payload, which on some platforms is a temp folder. From source both are the
     # repo root, so the search order is unchanged. bin_dir() is where a single-file build
     # unpacks its embedded copy, and comes last so a binary the user dropped in themselves wins.
@@ -2392,7 +2392,7 @@ def api_mini():
         ram_pct = round(st["ram_used_gb"] / st["ram_total_gb"] * 100)
     return jsonify({
         "ok": True,
-        "app": "ArnisXL",
+        "app": "Meld",
         "project": PROJECT.root.name,
         "world": PROJECT.master_world.name,
         "phase": run.get("phase") or ("idle" if not run.get("started") else "done"),
@@ -5670,7 +5670,7 @@ def run_server(port: int | None = None, host: str = "127.0.0.1", *,
         require_token = appguard.require_token_default()
     appguard.install(app, port=port, token=token, require_token=bool(require_token and token))
     resume_after_restart()
-    print(f"ArnisXL -> {url}")
+    print(f"Meld -> {url}")
     _exe = resolve_arnis_exe()
     if _exe:
         print(f"arnis binary: {_exe}")
@@ -5688,7 +5688,7 @@ def run_server(port: int | None = None, host: str = "127.0.0.1", *,
         app.run(host=host, port=port, threaded=True)
         return
     srv = create_server(app, host=host, port=port, threads=16,
-                        channel_timeout=3600, ident="ArnisXL")
+                        channel_timeout=3600, ident="Meld")
     _HTTP_SERVER = srv
     from src.single_instance import write_session
     write_session(port=port, url=url, token=token)
@@ -5717,7 +5717,7 @@ if __name__ == "__main__":
 
     _inst = SingleInstance()
     if not _inst.acquire():
-        print(f"ArnisXL is already running — open {running_url() or 'http://127.0.0.1:5630'}")
+        print(f"Meld is already running — open {running_url() or 'http://127.0.0.1:5630'}")
         sys.exit(1)
     try:
         run_server()

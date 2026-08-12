@@ -230,18 +230,18 @@ def start_server() -> int:
     # so the whole process is put on UTF-8 as the floor rather than relying on every call site.
     env = {**os.environ, "PORT": str(PORT), "PYTHONUTF8": "1"}
     url = f"http://127.0.0.1:{PORT}"
-    # Prefer the ArnisXL entry point: same server, plus the tray icon, the single-instance
+    # Prefer the Meld entry point: same server, plus the tray icon, the single-instance
     # guard and the wake lock. It opens the browser itself (with the session token in the URL),
     # so this launcher must not also open one. server.py stays the fallback for a checkout that
     # predates it.
-    entry = HERE / "arnisxl.py"
+    entry = HERE / "meld_app.py"
     if not entry.is_file():
         entry = HERE / "server.py"
-    log(f"starting ArnisXL -> {url}")
-    # arnisxl.py goes to the tray, so it must start windowless: pythonw plus CREATE_NO_WINDOW,
+    log(f"starting Meld -> {url}")
+    # meld_app.py goes to the tray, so it must start windowless: pythonw plus CREATE_NO_WINDOW,
     # because either one alone still leaves a console window in some launch paths. server.py is
     # the console fallback and keeps the visible window it has always had.
-    if entry.name == "arnisxl.py":
+    if entry.name == "meld_app.py":
         interp, flags = venv_pythonw(), (0x08000000 if IS_WIN else 0)   # CREATE_NO_WINDOW
     else:
         interp, flags = venv_python(), 0
@@ -253,20 +253,20 @@ def start_server() -> int:
         if proc.poll() is not None:
             return proc.returncode or 1
         time.sleep(0.5)
-    if entry.name == "arnisxl.py":
+    if entry.name == "meld_app.py":
         # DETACH. The launcher's job - virtual environment, dependencies, arnis binary - is
         # finished once the port answers, and waiting on the child is what kept a console
-        # window pinned to the taskbar for the entire session. ArnisXL lives in the tray from
+        # window pinned to the taskbar for the entire session. Meld lives in the tray from
         # here; quitting it is the tray's Quit item, not closing a window. On Windows the child
         # survives the parent exiting, so there is nothing to keep alive for.
-        log("ArnisXL is running in the tray. This window can close; "
+        log("Meld is running in the tray. This window can close; "
             "quit from the tray icon (near the clock).")
         return 0
     try:
         webbrowser.open(url)
     except Exception:  # noqa: BLE001
         pass
-    log("ArnisXL is running. Close this window (or press Ctrl+C) to stop the server.")
+    log("Meld is running. Close this window (or press Ctrl+C) to stop the server.")
     try:
         return proc.wait()
     except KeyboardInterrupt:

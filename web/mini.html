@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ArnisXL</title>
+<title>Meld</title>
 <style>
   /* Deliberately self-contained: no shared stylesheet, no fonts to fetch, no framework. This
      page is opened as a chrome-less window that must paint instantly and keep working when the
@@ -73,7 +73,7 @@
 <body>
   <header>
     <span class="dot" id="dot"></span>
-    <h1>ArnisXL</h1>
+    <h1>Meld</h1>
     <span class="tag" id="world">—</span>
   </header>
 
@@ -127,7 +127,7 @@
     <button class="act danger" id="stop">Stop</button>
     <button class="act primary" id="open">Open full UI</button>
   </footer>
-  <div class="hint">Closing this window leaves ArnisXL running — quit from the tray icon.</div>
+  <div class="hint">Closing this window leaves Meld running — quit from the tray icon.</div>
 
 <script>
 // Poll rather than stream: the server has no SSE/WebSocket path, and a 1 s poll of a
@@ -220,11 +220,11 @@ async function tick() {
 
     $('stop').disabled = !d.active;
   } catch (e) {
-    // A refused fetch means ArnisXL quit from the tray while this window stayed open. Say so
+    // A refused fetch means Meld quit from the tray while this window stayed open. Say so
     // instead of freezing on stale numbers that look live.
     if (++failures > 2) {
       $('dot').className = 'dot err';
-      $('counts').textContent = 'ArnisXL is not running';
+      $('counts').textContent = 'Meld is not running';
       $('stop').disabled = true;
     }
   }

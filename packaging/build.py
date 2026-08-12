@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the ArnisXL release folder for this machine's OS.
+"""Build the Meld release folder for this machine's OS.
 
     python packaging/build.py                 build everything
     python packaging/build.py --no-arnis      skip fetching the generator binary
@@ -8,10 +8,10 @@
 Steps, in order:
   1. icons              packaging/make_icons.py (placeholder if there is no source yet)
   2. arnis binary       the matching prebuilt from the fork's releases, copied in beside the exe
-  3. PyInstaller        packaging/arnisxl.spec -> dist/ArnisXL/
-  4. archive            ArnisXL-<version>-<os>-<arch>.zip / .tar.gz
+  3. PyInstaller        packaging/meld.spec -> dist/Meld/
+  4. archive            Meld-<version>-<os>-<arch>.zip / .tar.gz
 
-The result is a folder, not an installer: extract it anywhere and run ArnisXL. It carries its
+The result is a folder, not an installer: extract it anywhere and run Meld. It carries its
 own Python, so the machine needs nothing installed.
 
 The arnis binary is bundled rather than downloaded on first run. It costs 45 MB in the archive
@@ -33,7 +33,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DIST = ROOT / "dist" / "ArnisXL"
+DIST = ROOT / "dist" / "Meld"
 FORK = os.environ.get("MELD_ARNIS_REPO", "Teddy563/arnis")
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
@@ -94,7 +94,7 @@ def fetch_arnis(dest_dir: Path) -> bool:
         return False
     try:
         req = urllib.request.Request(f"https://api.github.com/repos/{FORK}/releases/latest",
-                                     headers={"User-Agent": "arnisxl-build"})
+                                     headers={"User-Agent": "meld-build"})
         with urllib.request.urlopen(req, timeout=30) as r:
             rel = json.loads(r.read())
         url = next((x["browser_download_url"] for x in rel.get("assets", [])
@@ -104,7 +104,7 @@ def fetch_arnis(dest_dir: Path) -> bool:
             return False
         log(f"downloading {asset} from {rel.get('tag_name')}")
         with urllib.request.urlopen(urllib.request.Request(
-                url, headers={"User-Agent": "arnisxl-build"}), timeout=300) as r:
+                url, headers={"User-Agent": "meld-build"}), timeout=300) as r:
             blob = r.read()
     except Exception as ex:                                   # noqa: BLE001
         log(f"could not fetch arnis: {ex}")
@@ -141,19 +141,19 @@ def version() -> str:
 
 def archive(folder: Path) -> Path:
     osname, arch = os_tag()
-    base = ROOT / "dist" / f"ArnisXL-{version()}-{osname}-{arch}"
+    base = ROOT / "dist" / f"Meld-{version()}-{osname}-{arch}"
     if IS_WIN:
         out = base.with_suffix(".zip")
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
             for p in folder.rglob("*"):
                 if p.is_file():
-                    z.write(p, Path("ArnisXL") / p.relative_to(folder))
+                    z.write(p, Path("Meld") / p.relative_to(folder))
     else:
         out = Path(str(base) + ".tar.gz")
         # tar, not zip, on Unix: it is the only common format that preserves the executable bit,
-        # and an ArnisXL that unzips without +x is a support ticket, not an app.
+        # and a Meld that unzips without +x is a support ticket, not an app.
         with tarfile.open(out, "w:gz") as t:
-            t.add(folder, arcname="ArnisXL")
+            t.add(folder, arcname="Meld")
     log(f"archive: {out} ({out.stat().st_size / 1e6:.0f} MB)")
     return out
 
@@ -177,20 +177,20 @@ def main() -> int:
 
     env = dict(os.environ)
     if args.onefile:
-        env["ARNISXL_ONEFILE"] = "1"
+        env["MELD_ONEFILE"] = "1"
         # A lone executable has no folder for the generator to sit in, so embedding is the
         # default here - otherwise "one file you can copy anywhere" quietly is not one file.
         if not args.no_embed_arnis:
             if not fetch_arnis(ROOT):
                 log("ERROR: --onefile needs the arnis binary present to embed it")
                 return 1
-            env["ARNISXL_EMBED_ARNIS"] = "1"
+            env["MELD_EMBED_ARNIS"] = "1"
 
     run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
-         str(ROOT / "packaging" / "arnisxl.spec")], env=env)
+         str(ROOT / "packaging" / "meld.spec")], env=env)
 
     if args.onefile:
-        exe = ROOT / "dist" / ("ArnisXL.exe" if IS_WIN else "ArnisXL")
+        exe = ROOT / "dist" / ("Meld.exe" if IS_WIN else "Meld")
         if not exe.is_file():
             log(f"expected {exe} - PyInstaller layout changed?")
             return 1
@@ -202,9 +202,9 @@ def main() -> int:
         return 0
 
     out = DIST
-    if IS_MAC and (ROOT / "dist" / "ArnisXL.app").exists():
+    if IS_MAC and (ROOT / "dist" / "Meld.app").exists():
         # The .app is what a Mac user runs; the plain folder next to it is the same payload.
-        out = ROOT / "dist" / "ArnisXL.app" / "Contents" / "MacOS"
+        out = ROOT / "dist" / "Meld.app" / "Contents" / "MacOS"
 
     if not out.exists():
         log(f"expected build output at {out} - PyInstaller layout changed?")
@@ -216,8 +216,8 @@ def main() -> int:
 
     log(f"built: {out}")
     if args.archive:
-        archive(ROOT / "dist" / ("ArnisXL.app" if (IS_MAC and (ROOT / "dist" / "ArnisXL.app").exists())
-                                 else "ArnisXL"))
+        archive(ROOT / "dist" / ("Meld.app" if (IS_MAC and (ROOT / "dist" / "Meld.app").exists())
+                                 else "Meld"))
     return 0
 
 

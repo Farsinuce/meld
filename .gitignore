@@ -66,9 +66,9 @@ server-run.*
 tools/seam_test/_work/
 tools/height_test/_work/
 
-# ArnisXL runtime state (per-machine, never committed): the single-instance lock, the session
+# Meld runtime state (per-machine, never committed): the single-instance lock, the session
 # file holding the live port + token, rotated logs, and the writable twin of assets/.
-arnisxl.lock
+*.lock
 session.json
 logs/
 user-assets/

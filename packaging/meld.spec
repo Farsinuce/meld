@@ -1,19 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for ArnisXL - two executables, one shared payload.
+"""PyInstaller spec for Meld - two executables, one shared payload.
 
-    ArnisXL(.exe)          windowed. No console, so no taskbar button: it goes to the tray and
+    Meld(.exe)          windowed. No console, so no taskbar button: it goes to the tray and
                            that is the whole visible surface. The shortcut points at this one.
-    ArnisXL-console(.exe)  console. Same code, prints the banner and the live log, for anyone who
+    Meld-console(.exe)  console. Same code, prints the banner and the live log, for anyone who
                            wants to watch it work or drive it from a script.
 
-The console build is NOT called `arnisxl` - Windows filenames are case-insensitive, so
-`arnisxl.exe` and `ArnisXL.exe` are one file, and COLLECT silently overwrote the windowed build
+The console build is NOT called `meld` - Windows filenames are case-insensitive, so
+`meld.exe` and `Meld.exe` are one file, and COLLECT silently overwrote the windowed build
 with the console one. The bug is invisible until someone notices the app opens a black window.
 
 Both are built from the same Analysis and land in the same folder, so the ~120 MB payload is
 paid for once rather than twice.
 
-Default layout is onedir. Set ARNISXL_ONEFILE=1 (or pass --onefile to packaging/build.py) to get
+Default layout is onedir. Set MELD_ONEFILE=1 (or pass --onefile to packaging/build.py) to get
 a single self-contained executable instead - one file the user can copy anywhere and run.
 
 The trade is real in both directions. onefile unpacks the whole payload to a temp directory on
@@ -39,12 +39,12 @@ from pathlib import Path
 ROOT = Path(SPECPATH).parent            # noqa: F821 - injected by PyInstaller
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
-ONEFILE = bool(os.environ.get("ARNISXL_ONEFILE"))
-EMBED_ARNIS = bool(os.environ.get("ARNISXL_EMBED_ARNIS"))
+ONEFILE = bool(os.environ.get("MELD_ONEFILE"))
+EMBED_ARNIS = bool(os.environ.get("MELD_EMBED_ARNIS"))
 
 ICON_DIR = ROOT / "assets" / "icons"
-icon_win = str(ICON_DIR / "arnisxl.ico") if (ICON_DIR / "arnisxl.ico").is_file() else None
-icon_mac = str(ICON_DIR / "arnisxl.icns") if (ICON_DIR / "arnisxl.icns").is_file() else None
+icon_win = str(ICON_DIR / "meld.ico") if (ICON_DIR / "meld.ico").is_file() else None
+icon_mac = str(ICON_DIR / "meld.icns") if (ICON_DIR / "meld.icns").is_file() else None
 icon = icon_win if IS_WIN else (icon_mac if IS_MAC else None)
 
 
@@ -72,7 +72,7 @@ datas += one("README.md")
 if EMBED_ARNIS:
     # Carry the generator INSIDE the executable. It is shipped as a data file, not as a
     # dependency: it is a separate program, and a program has to exist on disk before the OS
-    # will run it. arnisxl.py writes it out to <data>/bin on first launch. This is what makes a
+    # will run it. meld_app.py writes it out to <data>/bin on first launch. This is what makes a
     # true single-file build possible - without it the .exe still needs arnis sitting beside it.
     datas += one("arnis.exe" if IS_WIN else "arnis", "arnis-bundled")
 
@@ -102,7 +102,7 @@ excludes = [
 ]
 
 a = Analysis(
-    [str(ROOT / "arnisxl.py")],
+    [str(ROOT / "meld_app.py")],
     pathex=[str(ROOT)],
     binaries=[],
     datas=datas,
@@ -116,11 +116,11 @@ pyz = PYZ(a.pure)                        # noqa: F821
 
 if ONEFILE:
     # One self-extracting executable. Only the windowed build is produced: two onefile exes
-    # would be two copies of the same 150 MB payload. `ArnisXL --console` opens a console at
+    # would be two copies of the same 150 MB payload. `Meld --console` opens a console at
     # runtime instead, which is the same capability without the second file.
     exe = EXE(                           # noqa: F821
         pyz, a.scripts, a.binaries, a.datas, [],
-        name="ArnisXL",
+        name="Meld",
         console=False,
         icon=icon,
         debug=False,
@@ -131,7 +131,7 @@ else:
     exe_gui = EXE(                       # noqa: F821
         pyz, a.scripts, [],
         exclude_binaries=True,
-        name="ArnisXL",
+        name="Meld",
         console=False,                   # <- no console window, no taskbar button
         icon=icon,
         debug=False,
@@ -142,7 +142,7 @@ else:
     exe_cli = EXE(                       # noqa: F821
         pyz, a.scripts, [],
         exclude_binaries=True,
-        name="ArnisXL-console",          # see the header: NOT "arnisxl" (case-insensitive clash)
+        name="Meld-console",          # see the header: NOT "meld" (case-insensitive clash)
         console=True,                    # <- banner + live log
         icon=icon,
         debug=False,
@@ -155,7 +155,7 @@ else:
         a.binaries, a.datas,
         strip=False,
         upx=False,
-        name="ArnisXL",
+        name="Meld",
     )
 
 if IS_MAC and not ONEFILE:
@@ -164,13 +164,16 @@ if IS_MAC and not ONEFILE:
     # display, which looks broken.
     app = BUNDLE(                        # noqa: F821
         coll,
-        name="ArnisXL.app",
+        name="Meld.app",
         icon=icon_mac,
-        bundle_identifier="dev.arnisxl.app",
+        # Reverse-DNS of the project's own domain. macOS treats this as the app's identity for
+        # preferences, permissions and (later) notarisation, so it has to be a domain that is
+        # actually ours - meldmc.com - and it must not change once anything is signed with it.
+        bundle_identifier="com.meldmc.app",
         info_plist={
             "LSUIElement": True,
             "NSHighResolutionCapable": True,
-            "CFBundleName": "ArnisXL",
-            "CFBundleDisplayName": "ArnisXL",
+            "CFBundleName": "Meld",
+            "CFBundleDisplayName": "Meld",
         },
     )

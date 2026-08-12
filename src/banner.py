@@ -1,4 +1,4 @@
-"""The ArnisXL console banner.
+"""The Meld console banner.
 
 Two versions of the wordmark. The block-drawing one needs a console that can render U+2588 and
 the box-drawing set; Windows Terminal, the macOS terminal and every Linux terminal can, but a
@@ -17,18 +17,18 @@ import os
 import sys
 
 BLOCK = r"""
- █████╗ ██████╗ ███╗   ██╗██╗███████╗    ██╗  ██╗██╗
-██╔══██╗██╔══██╗████╗  ██║██║██╔════╝    ╚██╗██╔╝██║
-███████║██████╔╝██╔██╗ ██║██║███████╗     ╚███╔╝ ██║
-██╔══██║██╔══██╗██║╚██╗██║██║╚════██║     ██╔██╗ ██║
-██║  ██║██║  ██║██║ ╚████║██║███████║    ██╔╝ ██╗███████╗
-╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝╚══════╝    ╚═╝  ╚═╝╚══════╝
+███╗   ███╗███████╗██╗     ██████╗
+████╗ ████║██╔════╝██║     ██╔══██╗
+██╔████╔██║█████╗  ██║     ██║  ██║
+██║╚██╔╝██║██╔══╝  ██║     ██║  ██║
+██║ ╚═╝ ██║███████╗███████╗██████╔╝
+╚═╝     ╚═╝╚══════╝╚══════╝╚═════╝
 """
 
 PLAIN = r"""
-  +---------------------------------------------------+
-  |     A R N I S   X L                               |
-  +---------------------------------------------------+
+  +-------------------------------+
+  |     M E L D                   |
+  +-------------------------------+
 """
 
 RESET = "\x1b[0m"
@@ -84,9 +84,9 @@ def render(*, version: str = "", arnis: str = "", url: str = "",
         return f"{code}{text}{RESET}" if colour else text
 
     lines = [c(art().strip("\n"), GREEN)]
-    sub = "   Meld engine"
+    sub = "   Arnis at scale"
     if version:
-        sub += f" {version}"
+        sub += f"  ·  {version}" if _unicode_ok() else f"  |  {version}"
     if arnis:
         sub += f"  ·  arnis {arnis}" if _unicode_ok() else f"  |  arnis {arnis}"
     lines.append(c(sub, BOLD))
@@ -106,6 +106,6 @@ def show(**kw) -> None:
         sys.stdout.flush()
     except Exception:
         try:
-            print("ArnisXL")
+            print("Meld")
         except Exception:
             pass

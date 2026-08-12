@@ -946,7 +946,7 @@ def resolve_region_converter() -> Path | None:
     import platform
     import shutil as _sh
     from .paths import exe_dir, resource_dir
-    # Frozen, the converter ships next to ArnisXL.exe (exe_dir); from source both of these are
+    # Frozen, the converter ships next to Meld.exe (exe_dir); from source both of these are
     # the repo root, so the search order below is unchanged for a normal checkout.
     roots = list(dict.fromkeys([exe_dir(), resource_dir()]))
     sysname = sys.platform

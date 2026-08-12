@@ -2,7 +2,7 @@ Flask>=3.0
 waitress>=3.0   # serves the app instead of Flask's dev server: pure Python (freezes cleanly),
                 # cross-platform, and happy staying up for days with multi-minute requests.
 Pillow>=10.0   # elevation survey, the tray icon, and the icon build
-pystray>=0.19  # tray icon. Optional: ArnisXL falls back to headless if it (or a working tray)
+pystray>=0.19  # tray icon. Optional: Meld falls back to headless if it (or a working tray)
                # is missing — which is the normal case on GNOME, where the status area was
                # removed and an AppIndicator extension has to be installed by the user.
 psutil>=5.9

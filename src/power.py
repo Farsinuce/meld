@@ -28,7 +28,7 @@ ES_SYSTEM_REQUIRED = 0x00000001
 _lock = threading.Lock()
 _depth = 0                       # nested acquire() calls; release only on the way back to zero
 _proc: subprocess.Popen | None = None
-_reason = "ArnisXL is generating a world"
+_reason = "Meld is generating a world"
 
 
 def _begin() -> None:
@@ -48,7 +48,7 @@ def _begin() -> None:
     else:
         try:
             _proc = subprocess.Popen(
-                ["systemd-inhibit", "--what=sleep:idle", "--who=ArnisXL",
+                ["systemd-inhibit", "--what=sleep:idle", "--who=Meld",
                  f"--why={_reason}", "--mode=block", "sleep", "infinity"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
@@ -100,7 +100,7 @@ def reset() -> None:
     """Drop every outstanding request at once.
 
     A run that is stopped part-way never reaches the "run finished" path that would release it,
-    so without this the machine would refuse to sleep until ArnisXL was quit - a power bug that
+    so without this the machine would refuse to sleep until Meld was quit - a power bug that
     outlives the job that caused it. Called from Stop and from shutdown.
     """
     global _depth

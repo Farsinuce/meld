@@ -1,4 +1,4 @@
-"""One ArnisXL at a time, and a way for the second launch to find the first.
+"""One Meld at a time, and a way for the second launch to find the first.
 
 A background tray app gets launched again by accident constantly - double-clicked twice, started
 from a shortcut while it is already running in the tray, opened at login while a manual copy is
@@ -7,7 +7,7 @@ stack trace; worse, if the port were free it would run a second worker pool over
 folder and both would write the same cells.
 
 The lock is an OS file lock held for the whole process lifetime, not a PID file: a PID file left
-behind by a crash (or a hard power-off mid-render, which is exactly the case ArnisXL is built to
+behind by a crash (or a hard power-off mid-render, which is exactly the case Meld is built to
 survive) locks the user out until they find and delete it. An OS lock is released by the kernel
 when the holder dies, however it dies.
 
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .paths import data_dir
 
-LOCK_NAME = "arnisxl.lock"
+LOCK_NAME = "meld.lock"
 SESSION_NAME = "session.json"
 
 
