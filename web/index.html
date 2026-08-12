@@ -66,23 +66,32 @@
   #sideL .logo { display:block; line-height:0; margin-bottom:10px; }
   h1 { font-size:15px; margin:0 0 4px; letter-spacing:.5px; }
   .sub { color:var(--mut); font-size:12px; margin-bottom:12px; }
-  .card { background:var(--glass2); border:1px solid var(--hair); border-radius:var(--rsm);
-          box-shadow:var(--ring); padding:12px 14px; margin-bottom:10px; }
+  /* Cards sit ON the rail, not on top of it. A raised, bordered, shadowed box for every
+     section turned a list of headings into a column of buttons - a lot of chrome to read past
+     before reaching the controls. They share the rail's background now and are separated by a
+     single rule, which is enough to group them and nothing more. */
+  .card { background:transparent; border:0; border-radius:0; box-shadow:none;
+          padding:10px 2px; margin-bottom:0; border-bottom:1px solid var(--hair2); }
   .card h2 { font-family:var(--pixel); font-size:12px; text-transform:uppercase; letter-spacing:.04em;
              color:var(--acc2); margin:0 0 9px; }
   /* collapsible #side sections: click a heading to open/close; many can be open at once. The
      gold chevron + hover highlight make it read clearly as a dropdown. */
-  #side .card { transition:border-color .12s; }
-  #side .card > h2 { cursor:pointer; user-select:none; margin:-2px -4px 9px; padding:4px 6px;
-    border-radius:0; transition:background .12s, color .12s; }
-  #side .card > h2:hover { background:rgba(240,191,58,.10); color:#ffd86b; }
-  #side .card.collapsed:hover { border-color:#5a5037; }
+  #side .card { transition:background .12s; }
+  /* Full-width hit area: the heading IS the control, so it should feel like a row in a list
+     rather than a label that happens to be clickable. */
+  #side .card > h2 { cursor:pointer; user-select:none; margin:0 -14px 9px; padding:7px 14px;
+    border-radius:0; transition:background .12s, color .12s; display:flex; align-items:center; }
+  #side .card > h2:hover { background:rgba(240,191,58,.07); color:#ffd86b; }
+  #side .card.collapsed > h2:hover { background:rgba(240,191,58,.07); }
+  #side .card:last-of-type { border-bottom:0; }
   /* crisp solid triangle (CSS borders, not a font glyph): points down when open, rotates to
      point right when collapsed, same on every OS, scales cleanly. */
-  #side .card > h2::before { content:''; display:inline-block; width:0; height:0; margin:0 9px 3px 1px;
+  /* In a flex heading the chevron is a flex item, so it centres on the row instead of needing
+     a hand-tuned bottom margin. flex:none keeps it from being squashed by a long title. */
+  #side .card > h2::before { content:''; flex:none; width:0; height:0; margin:0 9px 0 0;
     border-left:6px solid transparent; border-right:6px solid transparent; border-top:9px solid var(--acc);
-    vertical-align:middle; transition:transform .15s ease; }
-  #side .card.collapsed > h2 { margin-bottom:-2px; }
+    transition:transform .15s ease; }
+  #side .card.collapsed > h2 { margin-bottom:0; }
   #side .card.collapsed > h2::before { transform:rotate(-90deg); }
   #side .card.collapsed > :not(h2) { display:none; }
   /* One guided rail, no mode toggle. The right rail is a flex column ordered top-to-bottom as the
@@ -115,7 +124,8 @@
   .tpcopy { width:100%; margin:0; }
   /* "Prepare data" bundles the 4 data cards: nested cards render as flat sub-rows, no double border. */
   /* box-shadow:none kills the glass 1px ring that read as a strange dark border on the nested rows */
-  #side .card.prep > .card { border:none; box-shadow:none; border-top:1px solid var(--line); border-radius:0;
+  #side .card.prep > .card { border:none; box-shadow:none; border-top:1px solid var(--hair2);
+    border-bottom:0; padding-left:0; padding-right:0; border-radius:0;
     margin:0; padding:10px 2px 6px; background:transparent; }
   #side .card.prep > .card:first-of-type { border-top:none; padding-top:2px; }
   /* nested Prepare sub-cards are flat, not dropdowns: no collapse arrow, no click affordance. */
