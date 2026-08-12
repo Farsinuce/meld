@@ -218,19 +218,27 @@ def start_server() -> int:
     # so the whole process is put on UTF-8 as the floor rather than relying on every call site.
     env = {**os.environ, "PORT": str(PORT), "PYTHONUTF8": "1"}
     url = f"http://127.0.0.1:{PORT}"
-    log(f"starting Meld -> {url}")
-    proc = subprocess.Popen([str(venv_python()), str(HERE / "server.py")], env=env)
+    # Prefer the ArnisXL entry point: same server, plus the tray icon, the single-instance
+    # guard and the wake lock. It opens the browser itself (with the session token in the URL),
+    # so this launcher must not also open one. server.py stays the fallback for a checkout that
+    # predates it.
+    entry = HERE / "arnisxl.py"
+    if not entry.is_file():
+        entry = HERE / "server.py"
+    log(f"starting ArnisXL -> {url}")
+    proc = subprocess.Popen([str(venv_python()), str(entry)], env=env)
     for _ in range(240):                       # up to ~2 min for first-run startup
         if _port_open():
             break
         if proc.poll() is not None:
             return proc.returncode or 1
         time.sleep(0.5)
-    try:
-        webbrowser.open(url)
-    except Exception:  # noqa: BLE001
-        pass
-    log("Meld is running. Close this window (or press Ctrl+C) to stop the server.")
+    if entry.name == "server.py":
+        try:
+            webbrowser.open(url)
+        except Exception:  # noqa: BLE001
+            pass
+    log("ArnisXL is running. Close this window (or press Ctrl+C) to stop the server.")
     try:
         return proc.wait()
     except KeyboardInterrupt:
