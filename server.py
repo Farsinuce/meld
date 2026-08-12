@@ -2296,6 +2296,78 @@ def index():
     return resp
 
 
+@app.route("/mini")
+def mini():
+    """The compact always-on-top preview the tray opens. Its own page, not a shrunken index.html:
+    it must stay readable at 430x580 and cheap enough to poll every second."""
+    resp = send_from_directory(str(BASE_DIR / "web"), "mini.html")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+
+@app.route("/api/mini")
+def api_mini():
+    """Everything the preview needs, and nothing else.
+
+    /api/status carries the full grid and per-cell health - 66 KB for a country-sized plan.
+    Polling that once a second from a window that shows six numbers would move 4 MB a minute and
+    keep a worker thread busy re-serialising a dict nobody reads. This answer is under a
+    kilobyte, so the preview can poll often enough to feel live.
+    """
+    with _RUN_LOCK:
+        run = dict(_RUN)
+    done = int(run.get("done") or 0)
+    failed = int(run.get("failed") or 0)
+    total = int(run.get("total") or 0)
+    finished = done + failed
+    started = run.get("started")
+    elapsed = (time.time() - started) if started else 0.0
+    # ETA from measured throughput, not from the size estimate: cells vary by an order of
+    # magnitude, so "what this machine has actually managed so far" is the honest predictor.
+    eta = None
+    if finished and total and not run.get("ended") and elapsed > 0:
+        remaining = max(0, total - finished)
+        eta = (elapsed / finished) * remaining if remaining else 0
+
+    busy = 0
+    try:
+        busy = sum(1 for s in POOL.get_states() if s.get("running"))
+    except Exception:
+        pass
+
+    with _RQ_LOCK:
+        rq = {"active": bool(_RQ.get("active")), "idx": int(_RQ.get("idx") or 0),
+              "total": int(_RQ.get("total") or 0), "pause": bool(_RQ.get("pause")),
+              "current": _RQ.get("current")}
+
+    try:
+        st = _sys_stats()
+    except Exception:
+        st = {}
+    ram_pct = st.get("ram_pct")
+    if ram_pct is None and st.get("ram_used_gb") and st.get("ram_total_gb"):
+        ram_pct = round(st["ram_used_gb"] / st["ram_total_gb"] * 100)
+    return jsonify({
+        "ok": True,
+        "app": "ArnisXL",
+        "project": PROJECT.root.name,
+        "world": PROJECT.master_world.name,
+        "phase": run.get("phase") or ("idle" if not run.get("started") else "done"),
+        "active": bool(total and not run.get("ended")),
+        "done": done, "failed": failed, "total": total,
+        "percent": round(100.0 * finished / total, 1) if total else 0.0,
+        "elapsed_s": int(elapsed),
+        "eta_s": int(eta) if eta is not None else None,
+        "workers_busy": busy,
+        "workers_max": POOL.max_workers,
+        "queue": rq,
+        "awake": power.active(),
+        "stats": {"cpu_pct": st.get("cpu_pct"), "ram_pct": ram_pct,
+                  "disk_free_gb": st.get("disk_free_gb")},
+        "log": _LOG[-6:],
+    })
+
+
 @app.route("/assets/<path:fname>")
 def assets(fname):
     """Serve static web assets (logo, etc.) from web/ under an explicit prefix so

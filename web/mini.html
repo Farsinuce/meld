@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ArnisXL</title>
+<style>
+  /* Deliberately self-contained: no shared stylesheet, no fonts to fetch, no framework. This
+     page is opened as a chrome-less window that must paint instantly and keep working when the
+     network is gone, which it always is - everything here is local. */
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --line: #2a2f3a;
+    --fg: #e7ebf2; --dim: #8b93a3; --accent: #6ee7a8; --warn: #f0a75f; --bad: #f06a6a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; padding: 12px; gap: 10px;
+    -webkit-user-select: none; user-select: none;
+  }
+  header { display: flex; align-items: baseline; gap: 8px; }
+  h1 { font-size: 15px; margin: 0; letter-spacing: .04em; }
+  .tag { font-size: 11px; color: var(--dim); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .dim { color: var(--dim); }
+  .bar { height: 8px; background: #262b35; border-radius: 99px; overflow: hidden; margin-top: 8px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent);
+             transition: width .4s ease; }
+  .bar.failed > i { background: var(--warn); }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat { text-align: center; }
+  .stat b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+  .log { flex: 1; min-height: 60px; overflow: auto; font-family: ui-monospace, Consolas, monospace;
+         font-size: 11px; color: var(--dim); white-space: pre-wrap; word-break: break-word; }
+  .log div { padding: 1px 0; }
+  footer { display: flex; gap: 6px; }
+  button { flex: 1; padding: 7px 4px; border-radius: 6px; border: 1px solid var(--line);
+           background: #232833; color: var(--fg); font: inherit; font-size: 12px; cursor: pointer; }
+  button:hover { background: #2b313d; }
+  button.primary { background: #1f4d38; border-color: #2c6b4d; }
+  button.danger:hover { background: #4a2626; border-color: #6b3434; }
+  button:disabled { opacity: .4; cursor: default; }
+  .dot { width: 7px; height: 7px; border-radius: 99px; background: var(--dim); display: inline-block; }
+  .dot.on { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .dot.err { background: var(--bad); }
+</style>
+</head>
+<body>
+  <header>
+    <span class="dot" id="dot"></span>
+    <h1>ArnisXL</h1>
+    <span class="tag" id="world">—</span>
+  </header>
+
+  <div class="card">
+    <div class="row">
+      <span class="big" id="pct">0%</span>
+      <span class="dim" id="counts">idle</span>
+    </div>
+    <div class="bar" id="bar"><i></i></div>
+    <div class="row" style="margin-top:8px">
+      <span class="dim" id="elapsed">—</span>
+      <span class="dim" id="eta"></span>
+    </div>
+  </div>
+
+  <div class="card grid3">
+    <div class="stat"><b id="cpu">—</b><span>cpu</span></div>
+    <div class="stat"><b id="ram">—</b><span>ram</span></div>
+    <div class="stat"><b id="free">—</b><span>free</span></div>
+  </div>
+
+  <div class="card log" id="log"></div>
+
+  <footer>
+    <button id="stop" class="danger">Stop</button>
+    <button id="open" class="primary">Open full UI</button>
+  </footer>
+
+<script>
+// Poll rather than stream: the server has no SSE/WebSocket path, and a 1 s poll of a
+// sub-kilobyte endpoint costs less than keeping a worker thread pinned to an open connection.
+const $ = id => document.getElementById(id);
+let failures = 0;
+
+function hms(s) {
+  if (s == null || s < 0) return '';
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+async function tick() {
+  try {
+    const r = await fetch('/api/mini', { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    failures = 0;
+
+    $('dot').className = 'dot' + (d.active ? ' on' : '');
+    $('world').textContent = d.world || d.project || '';
+    $('pct').textContent = (d.total ? d.percent : 0) + '%';
+    $('counts').textContent = d.total
+      ? `${d.done}/${d.total} cells` + (d.failed ? ` · ${d.failed} failed` : '')
+      : (d.phase || 'idle');
+    $('bar').firstElementChild.style.width = (d.total ? d.percent : 0) + '%';
+    $('bar').classList.toggle('failed', d.failed > 0);
+    $('elapsed').textContent = d.total ? 'elapsed ' + hms(d.elapsed_s) : '';
+    $('eta').textContent = d.eta_s != null && d.active ? 'eta ' + hms(d.eta_s)
+                         : (d.awake ? 'sleep blocked' : '');
+
+    const s = d.stats || {};
+    $('cpu').textContent = s.cpu_pct != null ? s.cpu_pct + '%' : '—';
+    $('ram').textContent = s.ram_pct != null ? s.ram_pct + '%' : '—';
+    $('free').textContent = s.disk_free_gb != null ? Math.round(s.disk_free_gb) + 'G' : '—';
+
+    const log = $('log');
+    const stuck = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+    log.innerHTML = '';
+    (d.log || []).forEach(line => {
+      const el = document.createElement('div');
+      el.textContent = line;
+      log.appendChild(el);
+    });
+    if (stuck) log.scrollTop = log.scrollHeight;   // follow the tail unless the user scrolled up
+
+    $('stop').disabled = !d.active;
+  } catch (e) {
+    // A refused fetch means ArnisXL quit from the tray while this window stayed open. Say so
+    // instead of freezing on stale numbers that look live.
+    if (++failures > 2) {
+      $('dot').className = 'dot err';
+      $('counts').textContent = 'ArnisXL is not running';
+      $('stop').disabled = true;
+    }
+  }
+}
+
+$('stop').onclick = async () => {
+  $('stop').disabled = true;
+  try { await fetch('/api/stop', { method: 'POST' }); } catch (e) {}
+  tick();
+};
+$('open').onclick = () => { window.open('/', '_blank'); };
+
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
