@@ -156,6 +156,23 @@ def _brand_window_async(before: set) -> None:
 
 
 def open_main_window(url: str) -> bool:
+    """Show the full Meld UI, reusing the window that is already open.
+
+    Every click used to start another browser process against the same profile, so a few taps on
+    the status bar left a stack of identical Meld windows. There is only ever one UI worth
+    having: if a window exists, it is raised instead.
+    """
+    if sys.platform == "win32":
+        try:
+            from . import winicon
+            if winicon.focus_existing("Meld"):
+                return True
+        except Exception:
+            pass
+    return _open_main_window(url)
+
+
+def _open_main_window(url: str) -> bool:
     """The full Meld UI in its own window."""
     return open_window(url, size=APP_SIZE, profile="app")
 

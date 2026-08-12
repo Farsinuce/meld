@@ -31,6 +31,52 @@ from .paths import data_dir, resource
 APP_NAME = "Meld"
 
 
+def use_dark_menus() -> bool:
+    """Ask Windows to draw this process's menus dark.
+
+    pystray builds a NATIVE Win32 popup menu (CreatePopupMenu/TrackPopupMenu), which Windows
+    paints itself - none of its colours are reachable from Python, so a tray menu comes up as a
+    bright white slab hanging off a black status bar.
+
+    What does work is telling Windows the whole process prefers dark mode. `SetPreferredAppMode`
+    and `FlushMenuThemes` live in uxtheme.dll and are exported BY ORDINAL ONLY (135 and 136) -
+    they have no public names, which is why this is done with GetProcAddress on an ordinal rather
+    than a normal ctypes call. Every widely-used dark-mode app on Windows does exactly this.
+
+    Undocumented means it can stop working, so the whole thing is best-effort: if the ordinals
+    move or the OS is too old (pre-1809), the menu stays light and nothing else changes.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        uxtheme = ctypes.WinDLL("uxtheme")
+        # GetProcAddress needs the ordinal as a pointer-sized value, not a string.
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetProcAddress.restype = ctypes.c_void_p
+        kernel32.GetProcAddress.argtypes = [wintypes.HMODULE, ctypes.c_char_p]
+
+        def by_ordinal(ordinal: int, restype, argtypes):
+            addr = kernel32.GetProcAddress(uxtheme._handle, ctypes.c_char_p(ordinal))
+            if not addr:
+                return None
+            return ctypes.WINFUNCTYPE(restype, *argtypes)(addr)
+
+        PREFERRED_APP_MODE_FORCE_DARK = 2
+        set_preferred = by_ordinal(135, ctypes.c_int, (ctypes.c_int,))
+        flush = by_ordinal(136, None, ())
+        if set_preferred is None:
+            return False
+        set_preferred(PREFERRED_APP_MODE_FORCE_DARK)
+        if flush is not None:
+            flush()
+        return True
+    except Exception:
+        return False
+
+
 def available() -> bool:
     """Can a tray icon actually be shown here?"""
     try:
@@ -232,6 +278,9 @@ class Tray:
         """Show the icon and block until Quit. MUST be called on the main thread."""
         import pystray
         from pystray import MenuItem as Item
+
+        # Before the menu exists: the preference is process-wide and is read when Windows paints.
+        use_dark_menus()
 
         # `default=True` is what a plain left-click on the icon runs. It toggles the status bar,
         # NOT the full UI: the overlay is the thing you flick in and out of view all day, and a

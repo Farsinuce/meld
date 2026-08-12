@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import sys
 import urllib.request
+from collections import deque
 from pathlib import Path
 
 # Palette shared with the web UI (index.html's own values), plus one colour per worker stage.
@@ -49,6 +50,7 @@ STAGE_ORDER = ("fetch", "prepare", "build", "save", "merge")
 
 POLL_MS = 1000
 CONSOLE_LINES = 8
+SITE = "meldmc.com"
 
 
 def _settings_path() -> Path:
@@ -76,7 +78,8 @@ class StatusBar:
     """One strip: mark, task, worker blocks, progress, and an optional console drawer."""
 
     WIDTH = 430
-    BAR_H = 58          # three rows: task, cells + worker blocks, machine load
+    BAR_H = 78          # rows at 18 / 38 / 60, with matching space above and below
+    GRAPH_H = 78
     CONSOLE_H = 130
 
     def __init__(self, url: str, token: str = "") -> None:
@@ -88,9 +91,13 @@ class StatusBar:
         self.cursor = 0
         self.locked = bool(self.cfg.get("locked", False))
         self.alpha = float(self.cfg.get("alpha", 1.0))
+        self.show_graph = bool(self.cfg.get("graph", False))
         self._drag = None
         self._fails = 0
         self._icon_img = None
+        # One sample per tick. 120 of them is two minutes of history at a 1 s poll, which is the
+        # span where "did that spike settle" is still a question worth answering.
+        self.history: deque = deque(maxlen=120)
 
     # ── server ───────────────────────────────────────────────────────────────
     def _get(self, path: str) -> dict:
@@ -140,7 +147,9 @@ class StatusBar:
             except Exception:
                 continue
 
-        w, h = self.WIDTH, self.BAR_H + (self.CONSOLE_H if self.show_console else 0)
+        w = self.WIDTH
+        h = (self.BAR_H + (self.GRAPH_H if self.show_graph else 0)
+             + (self.CONSOLE_H if self.show_console else 0))
         x = int(self.cfg.get("x", root.winfo_screenwidth() - w - 24))
         y = int(self.cfg.get("y", root.winfo_screenheight() - h - 80))
         root.geometry(f"{w}x{h}+{x}+{y}")
@@ -148,6 +157,11 @@ class StatusBar:
         self.canvas = tk.Canvas(root, width=w, height=self.BAR_H, bg=BG,
                                 highlightthickness=1, highlightbackground=HAIR)
         self.canvas.pack(fill="x", side="top")
+
+        self.graph = tk.Canvas(root, width=w, height=self.GRAPH_H, bg="#0d0c09",
+                               highlightthickness=1, highlightbackground=HAIR)
+        if self.show_graph:
+            self.graph.pack(fill="x", side="top")
 
         self.console = tk.Text(root, height=8, bg="#08070500" if False else "#0d0c09",
                                fg="#c9c0aa", insertbackground=FG, relief="flat",
@@ -158,12 +172,12 @@ class StatusBar:
             self.console.pack(fill="both", expand=True, side="bottom")
 
         # Left-drag moves it (there is no title bar to grab); right-click is the whole menu.
-        for widget in (self.canvas, self.console):
+        for widget in (self.canvas, self.graph, self.console):
             widget.bind("<Button-3>", self.popup)
             widget.bind("<Button-1>", self.grab)
             widget.bind("<B1-Motion>", self.drag)
             widget.bind("<ButtonRelease-1>", self.drop)
-        self.canvas.bind("<Double-Button-1>", lambda e: self._post("/api/open-ui"))
+        self.canvas.bind("<Double-Button-1>", lambda e: self.open_meld())
 
         # Menu styling has to be spelled out on every menu: tkinter does not inherit it, and an
         # unstyled popup comes up as a bright grey Windows menu hanging off a black bar.
@@ -182,11 +196,13 @@ class StatusBar:
         self.menu.add_cascade(label="Console", menu=self.consmenu)
 
         self.opacitymenu = tk.Menu(self.menu, **style)
-        for label, value in (("Solid", 1.0), ("Half", 0.5), ("Faint", 0.25)):
+        # 25% was near-invisible over a bright window; 75 and 50 are the two that stay readable.
+        for label, value in (("Solid", 1.0), ("Dimmed", 0.75), ("Half", 0.5)):
             self.opacitymenu.add_command(
                 label=f"{label}  ({int(value * 100)}%)",
                 command=lambda v=value: self.set_alpha(v))
         self.menu.add_cascade(label="Opacity", menu=self.opacitymenu)
+        self.menu.add_command(label="CPU / RAM graph", command=self.toggle_graph)
 
         self.menu.add_command(label="Stop render", command=lambda: self._post("/api/stop"))
         self.menu.add_separator()
@@ -213,15 +229,171 @@ class StatusBar:
         token; the bar has no way to put a token into a window it does not create."""
         self._post("/api/open-ui")
 
+    def open_site(self, *_):
+        import webbrowser
+        try:
+            webbrowser.open(f"https://{SITE}")
+        except Exception:
+            pass
+
+    def toggle_graph(self, *_):
+        self.show_graph = not self.show_graph
+        if self.show_graph:
+            # before=console keeps the order stable: bar, graph, console.
+            self.graph.pack(fill="x", side="top", after=self.canvas)
+        else:
+            self.graph.pack_forget()
+        self.resize()
+        self.cfg["graph"] = self.show_graph
+        save_settings(self.cfg)
+
+    def resize(self):
+        h = (self.BAR_H
+             + (self.GRAPH_H if self.show_graph else 0)
+             + (self.CONSOLE_H if self.show_console else 0))
+        self.root.geometry(f"{self.WIDTH}x{h}")
+
+    def paint_graph(self):
+        """CPU and RAM over the last two minutes.
+
+        A number tells you the instant; a line tells you the shape - whether a render is holding
+        the machine flat out, ramping, or stalling between cells. That shape is the reason to
+        look at a status bar at all while something long is running.
+        """
+        if not self.show_graph:
+            return
+        g = self.graph
+        g.delete("all")
+        w, h = self.WIDTH, self.GRAPH_H
+        # Room to breathe: the plot is inset on every side so the traces never touch the frame
+        # and the axis labels are not crammed against it.
+        pad_l, pad_r, pad_t, pad_b = 30, 62, 12, 14
+        plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
+        right = w - pad_r
+
+        for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+            y = pad_t + plot_h * (1 - frac)
+            major = frac in (0.0, 0.5, 1.0)
+            g.create_line(pad_l, y, right, y, fill="#221e17" if major else "#171410")
+            if major:
+                g.create_text(pad_l - 6, y, text=f"{int(frac * 100)}", anchor="e",
+                              fill=MUT, font=("Consolas", 6))
+
+        if len(self.history) < 2:
+            g.create_text((pad_l + right) / 2, h / 2, text="sampling…", fill=MUT,
+                          font=("Consolas", 7))
+            return
+
+        n = len(self.history)
+        step = plot_w / max(1, self.history.maxlen - 1)
+        # Right-aligned: the newest sample sits at the right edge and the trace grows leftwards,
+        # so "now" never moves while the window fills up.
+        x0 = right - (n - 1) * step
+
+        labels = []
+        for idx, colour, label in ((0, ACC, "CPU"), (1, "#3fa9a0", "RAM")):
+            pts = []
+            for i, sample in enumerate(self.history):
+                v = sample[idx]
+                if v is None:
+                    continue
+                pts += [x0 + i * step, pad_t + plot_h * (1 - min(100, max(0, v)) / 100)]
+            if len(pts) < 4:
+                continue
+            g.create_line(*pts, fill=colour, width=1, smooth=False)
+            cur = self.history[-1][idx]
+            if cur is not None:
+                labels.append([pad_t + plot_h * (1 - min(100, max(0, cur)) / 100),
+                               colour, f"{label} {int(cur)}%"])
+
+        # The current values park in the gutter on the trace's own line, so the two are read
+        # together. When the traces cross, the labels would print on top of each other, so they
+        # get pushed apart - the leader line still says which is which.
+        labels.sort(key=lambda item: item[0])
+        for i in range(1, len(labels)):
+            gap = labels[i][0] - labels[i - 1][0]
+            if gap < 10:
+                labels[i][0] = labels[i - 1][0] + 10
+        for y, colour, text in labels:
+            y = max(pad_t, min(pad_t + plot_h, y))
+            g.create_line(right, y, right + 5, y, fill=colour)
+            g.create_text(right + 9, y, text=text, anchor="w", fill=colour,
+                          font=("Consolas", 7))
+
+        g.create_text(pad_l, h - 4, text=f"{n}s", anchor="w", fill="#3a352b",
+                      font=("Consolas", 6))
+
     # ── interaction ──────────────────────────────────────────────────────────
     def popup(self, ev):
-        self.menu.entryconfigure(
-            self.menu.index("Lock position"),
-            label="Unlock position" if self.locked else "Lock position")
-        try:
-            self.menu.tk_popup(ev.x_root, ev.y_root)
-        finally:
-            self.menu.grab_release()
+        """A menu we draw ourselves, instead of tk_popup.
+
+        Tk's popup on Windows is wrapped in a system frame that stays bright whatever bg you
+        give the widget - a white rectangle hanging off a black bar. A borderless Toplevel with
+        our own hairline is the only way to control that edge, and it costs about as much code
+        as configuring the one we cannot fix.
+        """
+        tk = self.tk
+        self.dismiss_menu()
+
+        win = tk.Toplevel(self.root)
+        self._menu_win = win
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        win.configure(bg=HAIR)                       # the 1px hairline, as the outer background
+        inner = tk.Frame(win, bg=PANEL)
+        inner.pack(padx=1, pady=1)                   # ... and the panel inset inside it
+
+        def row(label, command=None, indent=False):
+            if label is None:
+                tk.Frame(inner, bg=HAIR, height=1).pack(fill="x", pady=3)
+                return
+            item = tk.Label(inner, text=("   " + label) if indent else label, anchor="w",
+                            bg=PANEL, fg=MUT if indent else FG, font=("Segoe UI", 9),
+                            padx=14, pady=4)
+            item.pack(fill="x")
+            item.bind("<Enter>", lambda _e: item.configure(bg=ACC, fg="#241b05"))
+            item.bind("<Leave>", lambda _e: item.configure(bg=PANEL, fg=MUT if indent else FG))
+            if command:
+                item.bind("<Button-1>", lambda _e: (self.dismiss_menu(), command()))
+
+        row("Open Meld", self.open_meld)
+        row(None)
+        # Submenus are flattened: at this size a cascade is more clicks and more chrome than the
+        # three items it would hide.
+        row("Console", None)
+        row("Meld log", lambda: self.set_console("meld"), indent=True)
+        row("Arnis output", lambda: self.set_console("arnis"), indent=True)
+        row("Hidden", lambda: self.set_console(None), indent=True)
+        row("CPU / RAM graph", self.toggle_graph)
+        row(None)
+        row("Opacity", None)
+        for label, value in (("Solid", 1.0), ("75%", 0.75), ("50%", 0.5)):
+            row(label, lambda v=value: self.set_alpha(v), indent=True)
+        row(None)
+        row("Stop render", lambda: self._post("/api/stop"))
+        row("Unlock position" if self.locked else "Lock position", self.toggle_lock)
+        row("Hide", self.close)
+
+        win.update_idletasks()
+        # Keep it on screen: near the bottom-right of a display, a menu dropped at the cursor
+        # would hang off the edge, and this bar lives in exactly that corner.
+        w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+        x = min(ev.x_root, win.winfo_screenwidth() - w - 4)
+        y = ev.y_root
+        if y + h > win.winfo_screenheight() - 4:
+            y = max(0, ev.y_root - h)
+        win.geometry(f"+{int(x)}+{int(y)}")
+        win.bind("<Escape>", lambda _e: self.dismiss_menu())
+        win.focus_force()
+        win.bind("<FocusOut>", lambda _e: self.dismiss_menu())
+
+    def dismiss_menu(self, *_):
+        win, self._menu_win = getattr(self, "_menu_win", None), None
+        if win is not None:
+            try:
+                win.destroy()
+            except Exception:
+                pass
 
     def grab(self, ev):
         self._drag = (ev.x_root - self.root.winfo_x(), ev.y_root - self.root.winfo_y())
@@ -253,8 +425,7 @@ class StatusBar:
             self.console.pack(fill="both", expand=True, side="bottom")
         else:
             self.console.pack_forget()
-        h = self.BAR_H + (self.CONSOLE_H if self.show_console else 0)
-        self.root.geometry(f"{self.WIDTH}x{h}")
+        self.resize()
         self.cfg.update(console=self.show_console, console_source=self.console_source)
         save_settings(self.cfg)
 
@@ -277,10 +448,10 @@ class StatusBar:
         # The mark is the real app icon, and it is a BUTTON: clicking it opens Meld. That is the
         # obvious place to reach for, and it saves the right-click menu for everything else.
         if self._icon_img is not None:
-            c.create_image(10, 11, image=self._icon_img, anchor="nw", tags="openbtn")
+            c.create_image(14, 18, image=self._icon_img, anchor="nw", tags="openbtn")
         else:
             # Flat-shaded fallback, same silhouette, for a build whose icon files are missing.
-            ox, oy, s = 10, 11, 11
+            ox, oy, s = 14, 18, 11
             c.create_polygon(ox + s, oy, ox + 2 * s, oy + s * .55, ox + s, oy + s * 1.1,
                              ox, oy + s * .55, fill="#f7dc95", outline="", tags="openbtn")
             c.create_polygon(ox, oy + s * .55, ox + s, oy + s * 1.1, ox + s, oy + s * 2,
@@ -293,58 +464,66 @@ class StatusBar:
         task = (d.get("task") or {})
         title = task.get("title") or "Idle"
 
-        # Row 1: what it is doing, and the numbers, at opposite ends.
-        c.create_text(42, 12, text=title, anchor="w", fill=FG, font=("Segoe UI Semibold", 10))
-        right = []
+        # Row 1: what it is doing on the left, what the machine is doing on the right, directly
+        # above the worker blocks those numbers explain.
+        c.create_text(50, 18, text=title, anchor="w", fill=FG, font=("Segoe UI Semibold", 10))
+        st = d.get("stats") or {}
+        load = []
+        if st.get("cpu_pct") is not None:
+            load.append(f"CPU {int(st['cpu_pct'])}%")
+        if st.get("ram_pct") is not None:
+            load.append(f"RAM {int(st['ram_pct'])}%")
+        if st.get("disk_free_gb") is not None:
+            load.append(f"{int(st['disk_free_gb'])}G free")
+        hot = (st.get("cpu_pct") or 0) >= 85 or (st.get("ram_pct") or 0) >= 85
+        c.create_text(w - 14, 18, text="   ".join(load), anchor="e",
+                      fill=ACC2 if hot else MUT, font=("Consolas", 8))
+
+        # Row 3: the run's own numbers. Cells done, how long it has been going, what is left.
+        counts = []
         if d.get("total"):
-            right.append(f"{d.get('done', 0)}/{d['total']}")
+            counts.append(f"{d.get('done', 0)}/{d['total']} cells")
+            if d.get("failed"):
+                counts.append(f"{d['failed']} failed")
             if d.get("eta_s") is not None and d.get("active"):
                 m = int(d["eta_s"]) // 60
-                right.append(f"{m // 60}h {m % 60}m" if m >= 60 else f"{m}m")
-        if d.get("failed"):
-            right.append(f"{d['failed']} failed")
-        c.create_text(w - 12, 12, text="  ".join(right), anchor="e", fill=MUT,
-                      font=("Consolas", 8))
+                counts.append(f"eta {m // 60}h {m % 60}m" if m >= 60 else f"eta {m}m")
+        if counts:
+            c.create_text(14, self.BAR_H - 20, text="   ".join(counts), anchor="w",
+                          fill=MUT, font=("Consolas", 7))
 
-        # CPU and RAM, bottom-left under the mark: this bar is the thing on screen while a
-        # render eats the machine, so "is it actually working the box" belongs on it. Coloured
-        # only when high, so the normal case stays quiet.
-        st = d.get("stats") or {}
-        gx, gy = 10, self.BAR_H - 14
-        for label, value, unit in (("CPU", st.get("cpu_pct"), "%"),
-                                   ("RAM", st.get("ram_pct"), "%"),
-                                   ("FREE", st.get("disk_free_gb"), "G")):
-            if value is None:
-                continue
-            hot = (label != "FREE" and value >= 85) or (label == "FREE" and value < 20)
-            c.create_text(gx, gy, text=f"{label} {int(value)}{unit}", anchor="w",
-                          fill=ACC2 if hot else MUT, font=("Consolas", 7))
-            gx += 58
-        # A slim load meter beside them, so CPU is readable without parsing a number.
-        cpu = st.get("cpu_pct")
-        if cpu is not None:
-            mx, mw = gx + 4, 70
-            c.create_rectangle(mx, gy - 3, mx + mw, gy + 3, fill="#141210", outline="")
-            c.create_rectangle(mx, gy - 3, mx + mw * min(100, cpu) / 100, gy + 3,
-                               fill=ACC2 if cpu >= 85 else "#6b5a2a", outline="")
+        # The site, quietly, on the bottom line under the worker blocks. It is the one surface
+        # that sits on screen for hours, so it is where a wordmark actually earns its place -
+        # and it is a link: clicking opens meldmc.com.
+        c.create_text(w - 14, self.BAR_H - 20, text=SITE, anchor="e", fill=MUT,
+                      font=("Consolas", 8), tags="site")
+        c.tag_bind("site", "<Button-1>", lambda _e: self.open_site())
+        c.tag_bind("site", "<Enter>",
+                   lambda _e: (c.itemconfigure("site", fill=ACC2), c.configure(cursor="hand2")))
+        c.tag_bind("site", "<Leave>",
+                   lambda _e: (c.itemconfigure("site", fill=MUT), c.configure(cursor="")))
 
         # Row 2: the worker blocks on the right, the cell detail filling whatever is left. One
         # square per slot, coloured by stage - the shape of the pool, readable sideways, which
         # is the whole reason this bar exists.
         blocks = d.get("workers") or []
-        bw, gap = 9, 3
-        total_w = max(0, len(blocks) * (bw + gap) - gap)
-        bx = w - 12 - total_w
-        top = 24
+        bw, gap, per_row = 13, 4, 8
+        rows = (len(blocks) + per_row - 1) // per_row or 1
+        row_len = min(per_row, len(blocks)) or 1
+        total_w = max(0, row_len * (bw + gap) - gap)
+        bx = w - 14 - total_w
+        top = 31 - (rows - 1) * 5          # two rows of eight straddle the same middle band
         for i, wk in enumerate(blocks):
             colour = STAGE_COLOURS.get(wk.get("stage") or "idle", STAGE_COLOURS["idle"])
-            x0 = bx + i * (bw + gap)
-            c.create_rectangle(x0, top, x0 + bw, top + bw, fill=colour, outline="")
+            col, row = i % per_row, i // per_row
+            x0 = bx + col * (bw + gap)
+            y0 = top + row * (bw + 5)
+            c.create_rectangle(x0, y0, x0 + bw, y0 + bw, fill=colour, outline="")
             # A quiet under-bar for how far that cell has got, so a stuck worker shows as a block
             # that keeps its colour AND stops filling.
             pct_w = max(0, min(100, int(wk.get("pct") or 0)))
             if pct_w:
-                c.create_rectangle(x0, top + bw + 2, x0 + bw * pct_w / 100, top + bw + 3,
+                c.create_rectangle(x0, y0 + bw + 1, x0 + bw * pct_w / 100, y0 + bw + 2,
                                    fill=colour, outline="")
 
         # Truncated to the space actually left, measured rather than guessed at a character
@@ -352,7 +531,7 @@ class StatusBar:
         detail = task.get("detail") or ""
         if detail:
             font = ("Consolas", 8)
-            avail = bx - 10 - 42
+            avail = bx - 12 - 50
             try:
                 from tkinter import font as tkfont
                 measure = tkfont.Font(font=font).measure
@@ -362,7 +541,7 @@ class StatusBar:
                     detail = detail[:-1] + "…"
             except Exception:
                 detail = detail[:40]
-            c.create_text(42, 29, text=detail, anchor="w", fill=MUT, font=font)
+            c.create_text(50, 38, text=detail, anchor="w", fill=MUT, font=font)
 
         # Overall progress: a hairline the full width, so it reads from the corner of an eye.
         pct = task.get("pct")
@@ -389,7 +568,17 @@ class StatusBar:
         self.cursor = d.get("next", self.cursor)
         lines = d.get("lines") or []
         if not lines:
+            # An idle server has genuinely logged nothing yet, and an empty black panel reads as
+            # broken rather than quiet. Say which it is.
+            if not self.console.get("1.0", "end-1c").strip():
+                self.console.configure(state="normal")
+                self.console.insert("end", f"(no {self.console_source} output yet)\n")
+                self.console.configure(state="disabled")
             return
+        if self.console.get("1.0", "end-1c").startswith("(no "):
+            self.console.configure(state="normal")
+            self.console.delete("1.0", "end")
+            self.console.configure(state="disabled")
         self.console.configure(state="normal")
         for line in lines:
             self.console.insert("end", line + "\n")
@@ -404,11 +593,14 @@ class StatusBar:
         try:
             d = self._get("/api/mini")
             self._fails = 0
+            st = d.get("stats") or {}
+            self.history.append((st.get("cpu_pct"), st.get("ram_pct")))
             self.paint(d)
         except Exception:
             self._fails += 1
             if self._fails > 2:
                 self.paint_offline()
+        self.paint_graph()
         self.pump_console()
         self.root.after(POLL_MS, self.tick)
 

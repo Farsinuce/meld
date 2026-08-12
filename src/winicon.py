@@ -83,6 +83,36 @@ def find_windows(title_prefix: str = "") -> set[int]:
     return out
 
 
+def focus_window(hwnd: int) -> bool:
+    """Bring an existing window to the front, un-minimising it first.
+
+    SetForegroundWindow alone is unreliable: Windows refuses foreground changes from a process
+    that does not own the current foreground window, and silently flashes the taskbar button
+    instead. Restoring first, then asking, covers the common cases without the AttachThreadInput
+    trickery that fights the OS for focus.
+    """
+    if not available():
+        return False
+    try:
+        u = ctypes.windll.user32
+        SW_RESTORE = 9
+        if u.IsIconic(hwnd):
+            u.ShowWindow(hwnd, SW_RESTORE)
+        u.SetForegroundWindow(hwnd)
+        u.BringWindowToTop(hwnd)
+        return True
+    except Exception:
+        return False
+
+
+def focus_existing(title_prefix: str = "Meld") -> bool:
+    """Focus an already-open Meld window if there is one. True if something was focused."""
+    for hwnd in find_windows(title_prefix):
+        if focus_window(hwnd):
+            return True
+    return False
+
+
 def _load_icon(path: Path, size: int):
     try:
         return ctypes.windll.user32.LoadImageW(
