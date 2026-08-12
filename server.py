@@ -2411,6 +2411,48 @@ def api_mini():
     })
 
 
+@app.route("/api/open-ui", methods=["POST"])
+def api_open_ui():
+    """Open the full Meld UI in its own window (or the browser, with ?browser=1).
+
+    Done server-side rather than with window.open() in the page: the preview is itself a
+    chrome-less window, and a window.open() from inside one produces a popup that inherits the
+    preview's frame instead of a proper app window. The server can ask for exactly the window it
+    wants, and it is the same call the tray makes.
+    """
+    from src import preview as _preview
+    url = f"http://127.0.0.1:{request.host.rsplit(':', 1)[-1]}/"
+    tok = request.cookies.get("meld_token") or request.args.get("t") or ""
+    if tok:
+        url += f"?t={tok}"
+    want_browser = (request.args.get("browser") or "").strip() in ("1", "true", "yes")
+    ok = _preview.open_in_browser(url) if want_browser else _preview.open_main_window(url)
+    return jsonify({"ok": bool(ok)})
+
+
+@app.route("/favicon.ico")
+def favicon():
+    """The Meld mark. Load-bearing for branding, not decoration: a Chromium `--app=` window
+    takes its TITLE-BAR and TASKBAR icon from the page's favicon, so without this Meld's own
+    window would sit in the taskbar wearing the browser's icon."""
+    p = BASE_DIR / "assets" / "icons" / "meld.ico"
+    if not p.is_file():
+        abort(404)
+    return send_file(str(p), mimetype="image/x-icon")
+
+
+@app.route("/icons/<path:fname>")
+def icons(fname):
+    """The generated icon sizes (meld-16.png … meld-512.png), for <link rel="icon">."""
+    if "/" in fname or "\\" in fname:
+        abort(404)
+    target = BASE_DIR / "assets" / "icons" / fname
+    if not target.is_file():
+        abort(404)
+    return send_from_directory(str(BASE_DIR / "assets" / "icons"), fname,
+                               max_age=86400)
+
+
 @app.route("/api/console")
 def api_console():
     """Live console feed for the preview window: ?source=meld|arnis&since=<cursor>.

@@ -111,6 +111,12 @@ class Tray:
 
     # ── menu actions ─────────────────────────────────────────────────────────
     def open_ui(self, *_):
+        """The default action (left-click / double-click): Meld in its own window."""
+        preview.open_main_window(self._authed("/"))
+
+    def open_in_browser(self, *_):
+        """For anyone who would rather have it in a tab - devtools, extensions, a second screen
+        full of tabs. Same server, same page; only the frame differs."""
         preview.open_in_browser(self._authed("/"))
 
     def open_preview(self, *_):
@@ -179,6 +185,7 @@ class Tray:
         menu = pystray.Menu(
             Item("Open Meld", self.open_ui, default=True),
             Item("Preview…", self.open_preview),
+            Item("Open in browser", self.open_in_browser),
             pystray.Menu.SEPARATOR,
             Item("Meld console", lambda *_: self.open_console("meld")),
             Item("Arnis console", lambda *_: self.open_console("arnis")),

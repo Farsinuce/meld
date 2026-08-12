@@ -54,7 +54,8 @@ a render, because the browser was never doing the work.
 
 | | |
 |---|---|
-| Tray menu | Open · Preview · **Meld console** · **Arnis console** · Stop render · Open log file · Data folder · Quit |
+| Its own window | Meld opens in an application window — no tabs, no address bar, its own taskbar entry and icon. The browser is still one menu item away, and `MELD_UI=browser` makes it the default |
+| Tray menu | Open Meld · Preview · Open in browser · **Meld console** · **Arnis console** · Stop render · Open log file · Data folder · Quit |
 | Preview window | 430×580, three tabs: progress/ETA/CPU/RAM, the Meld log, and the raw Arnis output |
 | No window anywhere | No console, no taskbar button. **The only way to quit is the tray's Quit** — closing the browser, the preview or a console leaves the render running |
 | No console flashing | A 3000-cell render used to pop a black window per cell; children get `CREATE_NO_WINDOW` |
@@ -67,12 +68,17 @@ put a console back in the taskbar — the one thing this app exists to avoid —
 show the log file, never the raw generator output, which is filtered out before it gets there.
 
 ```
-Meld.exe             tray app, no console, no taskbar button
+Meld.exe             tray app, no console; the UI opens in its own window
+Meld.exe --browser   open the UI in the normal browser instead
 Meld-console.exe     same app with the banner and a live log
 Meld.exe --console   open a console at runtime (single-file builds)
 Meld.exe --check     what is installed, where the data lives
 Meld.exe --no-tray   headless: server only
 ```
+
+The UI is a local web app either way — the only difference is the frame around it. The window is
+a Chromium app window against a private profile, so it never lands in a tab of your own browser,
+never inherits your extensions, and closing your browser cannot close Meld.
 
 ### One folder, or one file
 

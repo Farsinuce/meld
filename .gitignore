@@ -78,6 +78,7 @@ data/
 build/
 dist/
 
-# Private browser profile the preview window runs against (created at runtime, ~40 MB of Edge
-# state). Without a profile of its own, --app= hands the URL to the user's own browser.
+# Private browser profiles the app + preview windows run against (created at runtime, ~40 MB of
+# Edge state each). Without a profile of its own, --app= hands the URL to the user's own browser.
+ui-profiles/
 preview-profile/

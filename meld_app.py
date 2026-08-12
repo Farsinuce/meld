@@ -14,10 +14,15 @@ Two entry points are built from this one file. `Meld.exe` is frozen with --nocon
 has no console and no taskbar button - just the tray icon. `meld.exe` keeps its console and
 prints the banner, for anyone who wants to watch it work or script it. Same code, one flag apart.
 
-    python meld_app.py                 tray + server
+    python meld_app.py                 tray + server, UI in its own window
+    python meld_app.py --browser       open the UI in the normal browser instead
     python meld_app.py --no-tray       server only, banner in the terminal
     python meld_app.py --console       open a console window too (single-file builds)
     python meld_app.py --check         report what is installed and exit
+
+The UI is a local web app either way - the difference is only the frame around it. By default it
+gets its own window (no tabs, no address bar, its own taskbar entry); MELD_UI=browser makes the
+browser the default permanently, and the tray always offers both.
 
 Quitting is the tray's Quit item. Closing the browser tab, the preview window or a console does
 not stop it - none of them are doing the work, and a render that died because someone tidied
@@ -150,8 +155,14 @@ def main(argv: list[str] | None = None) -> int:
             if opened.is_set():
                 return
             opened.set()
-            if "--no-open" not in argv:
-                preview.open_in_browser(f"{u}/?t={token}")
+            if "--no-open" in argv:
+                return
+            target = f"{u}/?t={token}"
+            # Its own window by default; --browser (or MELD_UI=browser) puts it in a tab.
+            if "--browser" in argv:
+                preview.open_in_browser(target)
+            else:
+                preview.open_main_window(target)
 
         def serve() -> None:
             try:
