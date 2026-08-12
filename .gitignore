@@ -70,6 +70,8 @@ tools/height_test/_work/
 # file holding the live port + token, rotated logs, and the writable twin of assets/.
 *.lock
 session.json
+# Status bar position, opacity, console choice and hidden/shown state.
+statusbar.json
 logs/
 user-assets/
 data/

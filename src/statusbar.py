@@ -76,7 +76,7 @@ class StatusBar:
     """One strip: mark, task, worker blocks, progress, and an optional console drawer."""
 
     WIDTH = 430
-    BAR_H = 44
+    BAR_H = 58          # three rows: task, cells + worker blocks, machine load
     CONSOLE_H = 130
 
     def __init__(self, url: str, token: str = "") -> None:
@@ -87,8 +87,10 @@ class StatusBar:
         self.console_source = self.cfg.get("console_source", "meld")
         self.cursor = 0
         self.locked = bool(self.cfg.get("locked", False))
+        self.alpha = float(self.cfg.get("alpha", 1.0))
         self._drag = None
         self._fails = 0
+        self._icon_img = None
 
     # ── server ───────────────────────────────────────────────────────────────
     def _get(self, path: str) -> dict:
@@ -121,10 +123,22 @@ class StatusBar:
         root.overrideredirect(True)
         root.attributes("-topmost", True)
         root.configure(bg=BG)
-        try:
-            root.attributes("-alpha", float(self.cfg.get("alpha", 0.96)))
-        except Exception:
-            pass
+        self.apply_alpha(self.alpha)
+
+        # The real app icon, not a drawing of it. tkinter reads PNG directly (Tk 8.6+), so this
+        # costs no image library at runtime and the bar always wears exactly what the exe wears.
+        for name in ("meld-24.png", "meld-32.png", "meld-16.png"):
+            try:
+                from .paths import resource
+                p = resource("assets", "icons", name)
+                if p.is_file():
+                    img = tk.PhotoImage(file=str(p))
+                    if img.width() > 26:                    # subsample, never scale up: keeping
+                        img = img.subsample(2, 2)           # whole pixels keeps the edges crisp
+                    self._icon_img = img
+                    break
+            except Exception:
+                continue
 
         w, h = self.WIDTH, self.BAR_H + (self.CONSOLE_H if self.show_console else 0)
         x = int(self.cfg.get("x", root.winfo_screenwidth() - w - 24))
@@ -151,17 +165,29 @@ class StatusBar:
             widget.bind("<ButtonRelease-1>", self.drop)
         self.canvas.bind("<Double-Button-1>", lambda e: self._post("/api/open-ui"))
 
-        self.menu = tk.Menu(root, tearoff=0, bg=PANEL, fg=FG,
-                            activebackground=ACC, activeforeground="#241b05",
-                            borderwidth=0, font=("Segoe UI", 9))
-        self.menu.add_command(label="Open Meld", command=lambda: self._post("/api/open-ui"))
+        # Menu styling has to be spelled out on every menu: tkinter does not inherit it, and an
+        # unstyled popup comes up as a bright grey Windows menu hanging off a black bar.
+        style = dict(tearoff=0, bg=PANEL, fg=FG, activebackground=ACC,
+                     activeforeground="#241b05", activeborderwidth=0, borderwidth=0,
+                     relief="flat", font=("Segoe UI", 9),
+                     disabledforeground=MUT, selectcolor=ACC2)
+        self.menu = tk.Menu(root, **style)
+        self.menu.add_command(label="Open Meld", command=self.open_meld)
         self.menu.add_separator()
-        self.consmenu = tk.Menu(self.menu, tearoff=0, bg=PANEL, fg=FG,
-                                activebackground=ACC, activeforeground="#241b05")
+
+        self.consmenu = tk.Menu(self.menu, **style)
         self.consmenu.add_command(label="Meld log", command=lambda: self.set_console("meld"))
         self.consmenu.add_command(label="Arnis output", command=lambda: self.set_console("arnis"))
-        self.consmenu.add_command(label="Hide", command=lambda: self.set_console(None))
+        self.consmenu.add_command(label="Hidden", command=lambda: self.set_console(None))
         self.menu.add_cascade(label="Console", menu=self.consmenu)
+
+        self.opacitymenu = tk.Menu(self.menu, **style)
+        for label, value in (("Solid", 1.0), ("Half", 0.5), ("Faint", 0.25)):
+            self.opacitymenu.add_command(
+                label=f"{label}  ({int(value * 100)}%)",
+                command=lambda v=value: self.set_alpha(v))
+        self.menu.add_cascade(label="Opacity", menu=self.opacitymenu)
+
         self.menu.add_command(label="Stop render", command=lambda: self._post("/api/stop"))
         self.menu.add_separator()
         self.menu.add_command(label="Lock position", command=self.toggle_lock)
@@ -169,6 +195,23 @@ class StatusBar:
         # back. Nothing here can stop a render.
         self.menu.add_command(label="Hide", command=self.close)
         return root
+
+    def apply_alpha(self, value: float) -> None:
+        try:
+            self.root.attributes("-alpha", max(0.15, min(1.0, float(value))))
+        except Exception:
+            pass
+
+    def set_alpha(self, value: float) -> None:
+        self.alpha = value
+        self.apply_alpha(value)
+        self.cfg["alpha"] = value
+        save_settings(self.cfg)
+
+    def open_meld(self, *_):
+        """Open the full Meld UI. The server opens the window, so it can attach this session's
+        token; the bar has no way to put a token into a window it does not create."""
+        self._post("/api/open-ui")
 
     # ── interaction ──────────────────────────────────────────────────────────
     def popup(self, ev):
@@ -216,6 +259,9 @@ class StatusBar:
         save_settings(self.cfg)
 
     def close(self):
+        # Remembered, so hiding it is a decision that survives a restart rather than something
+        # you have to redo every launch. The tray's Show item brings it back and sets this again.
+        self.cfg["visible"] = False
         save_settings(self.cfg)
         try:
             self.root.destroy()
@@ -228,14 +274,21 @@ class StatusBar:
         c.delete("all")
         w = self.WIDTH
 
-        # The mark: three faces of the Meld block, flat-shaded. Same shape as the app icon.
-        ox, oy, s = 10, 10, 11
-        c.create_polygon(ox + s, oy, ox + 2 * s, oy + s * .55, ox + s, oy + s * 1.1,
-                         ox, oy + s * .55, fill="#f7dc95", outline="")
-        c.create_polygon(ox, oy + s * .55, ox + s, oy + s * 1.1, ox + s, oy + s * 2,
-                         ox, oy + s * 1.45, fill=ACC, outline="")
-        c.create_polygon(ox + 2 * s, oy + s * .55, ox + 2 * s, oy + s * 1.45, ox + s, oy + s * 2,
-                         ox + s, oy + s * 1.1, fill="#a9720f", outline="")
+        # The mark is the real app icon, and it is a BUTTON: clicking it opens Meld. That is the
+        # obvious place to reach for, and it saves the right-click menu for everything else.
+        if self._icon_img is not None:
+            c.create_image(10, 11, image=self._icon_img, anchor="nw", tags="openbtn")
+        else:
+            # Flat-shaded fallback, same silhouette, for a build whose icon files are missing.
+            ox, oy, s = 10, 11, 11
+            c.create_polygon(ox + s, oy, ox + 2 * s, oy + s * .55, ox + s, oy + s * 1.1,
+                             ox, oy + s * .55, fill="#f7dc95", outline="", tags="openbtn")
+            c.create_polygon(ox, oy + s * .55, ox + s, oy + s * 1.1, ox + s, oy + s * 2,
+                             ox, oy + s * 1.45, fill=ACC, outline="", tags="openbtn")
+            c.create_polygon(ox + 2 * s, oy + s * .55, ox + 2 * s, oy + s * 1.45, ox + s,
+                             oy + s * 2, ox + s, oy + s * 1.1, fill="#a9720f", outline="",
+                             tags="openbtn")
+        c.tag_bind("openbtn", "<Button-1>", lambda _e: self.open_meld())
 
         task = (d.get("task") or {})
         title = task.get("title") or "Idle"
@@ -252,6 +305,28 @@ class StatusBar:
             right.append(f"{d['failed']} failed")
         c.create_text(w - 12, 12, text="  ".join(right), anchor="e", fill=MUT,
                       font=("Consolas", 8))
+
+        # CPU and RAM, bottom-left under the mark: this bar is the thing on screen while a
+        # render eats the machine, so "is it actually working the box" belongs on it. Coloured
+        # only when high, so the normal case stays quiet.
+        st = d.get("stats") or {}
+        gx, gy = 10, self.BAR_H - 14
+        for label, value, unit in (("CPU", st.get("cpu_pct"), "%"),
+                                   ("RAM", st.get("ram_pct"), "%"),
+                                   ("FREE", st.get("disk_free_gb"), "G")):
+            if value is None:
+                continue
+            hot = (label != "FREE" and value >= 85) or (label == "FREE" and value < 20)
+            c.create_text(gx, gy, text=f"{label} {int(value)}{unit}", anchor="w",
+                          fill=ACC2 if hot else MUT, font=("Consolas", 7))
+            gx += 58
+        # A slim load meter beside them, so CPU is readable without parsing a number.
+        cpu = st.get("cpu_pct")
+        if cpu is not None:
+            mx, mw = gx + 4, 70
+            c.create_rectangle(mx, gy - 3, mx + mw, gy + 3, fill="#141210", outline="")
+            c.create_rectangle(mx, gy - 3, mx + mw * min(100, cpu) / 100, gy + 3,
+                               fill=ACC2 if cpu >= 85 else "#6b5a2a", outline="")
 
         # Row 2: the worker blocks on the right, the cell detail filling whatever is left. One
         # square per slot, coloured by stage - the shape of the pool, readable sideways, which
@@ -339,6 +414,8 @@ class StatusBar:
 
     def run(self):
         root = self.build()
+        self.cfg["visible"] = True
+        save_settings(self.cfg)
         self.tick()
         root.mainloop()
 

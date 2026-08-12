@@ -42,28 +42,80 @@ ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 GOLD_TOP = (247, 220, 149, 255)       # lit face
 GOLD_LEFT = (227, 164, 23, 255)       # the brand gold, #e3a417
 GOLD_RIGHT = (169, 114, 15, 255)      # shaded face
+INK = (58, 38, 6, 255)                # the edge between faces
+
+#: Where the lighter and darker flecks sit on each face, in face-local grid steps. Fixed rather
+#: than random so every rebuild produces a byte-identical icon.
+FLECKS_TOP = ((1, 1), (3, 0), (4, 2), (2, 3))
+FLECKS_LEFT = ((1, 2), (2, 5), (0, 4), (3, 7))
+FLECKS_RIGHT = ((1, 3), (3, 1), (2, 6), (0, 5))
+
+PIXEL_GRID = 32                       # the icon is drawn at 32x32 and then blown up
+
+
+def pixel_cube(size: int = MASTER, grid: int = PIXEL_GRID) -> Image.Image:
+    """The Meld block: an isometric cube drawn as pixel art, then scaled up with hard edges.
+
+    Drawn small and enlarged with NEAREST on purpose. Rendering the same shape at 1024 and
+    shrinking it gives smooth antialiased diagonals, which look like a vector logo; a Minecraft
+    block wants visible pixel steps on its edges, and the only way to get them is to make the
+    pixels big. Every intermediate size is generated from this same master, so the steps stay
+    consistent instead of resampling into mush.
+
+    Deterministic: the flecks come from a fixed table, so rebuilding never silently changes the
+    icon that is already embedded in a released executable.
+    """
+    g = grid
+    img = Image.new("RGBA", (g, g), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+
+    # A true 2:1 isometric cube. Half-width w spans the full grid; the top rhombus is w x w/2,
+    # and the side faces are that rhombus edge extruded straight down by h.
+    # For it to read as a CUBE and not a squat tile, the side faces have to be as tall as the
+    # top rhombus is deep: total height = w (the rhombus) + h (the extrusion), and h == w is what
+    # a real cube projects to in 2:1 isometric. w is sized so w + h still fits the grid.
+    cx = g / 2
+    w = g * 0.44                       # half width
+    h = w                              # vertical extrusion of the side faces
+    top_y = (g - (w + h)) / 2          # centre the whole silhouette vertically
+    mid_y = top_y + w / 2              # where the left and right corners sit
+
+    top = [(cx, top_y), (cx + w, mid_y), (cx, mid_y + w / 2), (cx - w, mid_y)]
+    left = [(cx - w, mid_y), (cx, mid_y + w / 2), (cx, mid_y + w / 2 + h), (cx - w, mid_y + h)]
+    right = [(cx + w, mid_y), (cx, mid_y + w / 2), (cx, mid_y + w / 2 + h), (cx + w, mid_y + h)]
+
+    d.polygon(top, fill=GOLD_TOP)
+    d.polygon(left, fill=GOLD_LEFT)
+    d.polygon(right, fill=GOLD_RIGHT)
+
+    def shade(colour, factor):
+        r, gg, b, a = colour
+        return (int(r * factor), int(gg * factor), int(b * factor), a)
+
+    # Flecks: two-pixel blocks of a lighter and darker tone per face, the ore-in-stone read that
+    # makes it look like a Minecraft block rather than a flat gem.
+    for flecks, base, origin, step in (
+            (FLECKS_TOP, GOLD_TOP, (cx - w * 0.45, top_y + w * 0.42), (2, 1.1)),
+            (FLECKS_LEFT, GOLD_LEFT, (cx - w * 0.75, mid_y + w * 0.55), (2, 1.6)),
+            (FLECKS_RIGHT, GOLD_RIGHT, (cx + w * 0.2, mid_y + w * 0.55), (2, 1.6))):
+        for i, (fx, fy) in enumerate(flecks):
+            x = origin[0] + fx * step[0]
+            y = origin[1] + fy * step[1]
+            tone = shade(base, 1.14 if i % 2 == 0 else 0.82)
+            d.rectangle([x, y, x + 1, y + 1], fill=tone)
+
+    # The vertical seam where the two side faces meet, and the silhouette. One pixel each: at
+    # this grid size anything thicker eats the faces.
+    d.line([(cx, mid_y + w / 2), (cx, mid_y + w / 2 + h)], fill=INK)
+    d.line([(cx, top_y), (cx + w, mid_y), (cx + w, mid_y + h), (cx, mid_y + w / 2 + h),
+            (cx - w, mid_y + h), (cx - w, mid_y), (cx, top_y)], fill=INK)
+
+    return img.resize((size, size), Image.NEAREST)
 
 
 def placeholder(size: int = MASTER) -> Image.Image:
-    """A flat gold block - the shipped icon reduced to its silhouette.
-
-    This is the fallback for a checkout with no artwork, not the real icon: `meld-source.png` is,
-    and it wins whenever it exists. Kept deliberately plain, because the only job here is to be
-    findable in a tray full of blue circles when the real file is missing.
-
-    Three faces, no outline: at 16px an outline eats the shape it is meant to define.
-    """
-    s = size
-    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-
-    def p(x, y):
-        return (s * x, s * y)
-
-    d.polygon([p(.50, .06), p(.94, .31), p(.50, .56), p(.06, .31)], fill=GOLD_TOP)
-    d.polygon([p(.06, .31), p(.50, .56), p(.50, .94), p(.06, .69)], fill=GOLD_LEFT)
-    d.polygon([p(.94, .31), p(.94, .69), p(.50, .94), p(.50, .56)], fill=GOLD_RIGHT)
-    return img
+    """The icon used when no artwork file is present. Same cube the brand uses."""
+    return pixel_cube(size)
 
 
 def load_source() -> tuple[Image.Image, bool]:

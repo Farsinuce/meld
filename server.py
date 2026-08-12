@@ -70,6 +70,7 @@ from src.merge import (merge_cell_into_master, strip_buffer_regions,
 from src.survey import survey_elevation
 from src.workers import WorkerPool
 from src import export as exportmod
+from src import appguard as appguard_mod
 from src import childproc
 from src import power
 
@@ -186,6 +187,10 @@ POOL.stagger_seconds = (float(PROJECT.settings().get("cpu_stagger_seconds", 2) o
 POOL.stagger_adaptive = bool(PROJECT.settings().get("cpu_stagger_adaptive", True))
 
 _LOG: list[str] = []
+
+# This session's access token, kept so the server can build its OWN authenticated URLs (see
+# /api/open-ui). Empty when token enforcement is off, which is the plain `python server.py` case.
+_UI_TOKEN = ""
 
 # Raw Arnis output, every line from every worker, for the console view in the preview window.
 # Separate from _LOG on purpose: _LOG is the curated feed the main UI shows, filtered down by
@@ -2526,7 +2531,13 @@ def api_open_ui():
     """
     from src import preview as _preview
     url = f"http://127.0.0.1:{request.host.rsplit(':', 1)[-1]}/"
-    tok = request.cookies.get("meld_token") or request.args.get("t") or ""
+    # The session's own token first. Reading it back off the REQUEST was the bug: the status bar
+    # authenticates with the X-Meld-Token header, so there was no cookie and no ?t= to copy, the
+    # window opened at a bare URL, and the page it loaded was
+    # {"error":"unauthorized: open Meld from the tray icon"}. The server already knows its token;
+    # it never needed the caller to hand it back.
+    tok = (_UI_TOKEN or request.cookies.get("meld_token")
+           or request.args.get("t") or request.headers.get(appguard_mod.HEADER) or "")
     if tok:
         url += f"?t={tok}"
     want_browser = (request.args.get("browser") or "").strip() in ("1", "true", "yes")
@@ -5837,6 +5848,8 @@ def run_server(port: int | None = None, host: str = "127.0.0.1", *,
     # Before anything can spawn: no console windows per cell, and every child in a group that
     # dies with us instead of surviving as an orphan pinning eight cores.
     childproc.install()
+    global _UI_TOKEN
+    _UI_TOKEN = token or ""
     from src import appguard
     if require_token is None:
         require_token = appguard.require_token_default()

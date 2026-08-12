@@ -214,8 +214,11 @@ def main(argv: list[str] | None = None) -> int:
         if t is not None:
             # The overlay is Meld's standing presence, not an extra you go and find: it comes up
             # with the app so that closing the big window still leaves something on screen
-            # telling you the render is alive. Hide it from the tray or from its own menu.
-            if "--no-statusbar" not in argv:
+            # telling you the render is alive. Hiding it is remembered, though - if you hid it
+            # last time, it stays hidden until you ask for it from the tray.
+            from src import statusbar as _sb
+            wanted = _sb.load_settings().get("visible", True)
+            if "--no-statusbar" not in argv and wanted:
                 threading.Timer(1.5, t.show_statusbar).start()
             t.run()             # blocks on the main thread until Quit
             shutdown()

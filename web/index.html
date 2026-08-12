@@ -676,7 +676,7 @@
         </select></label>
       <div class="stat" style="margin:-2px 0 4px 2px;color:var(--mut)">
         The world targets the version you pick. A NEWER client opens it fine; an OLDER one
-        does not — convert it with chunker.app instead.</div>
+        does not. Convert it with chunker.app instead.</div>
       <label>Extend build height
         <span class="i" title="Fit the world's vertical range to the terrain instead of vanilla's -64..319, via a generated datapack. Experimental: Minecraft prompts for 'Experimental Features' on first load and the pack can never be removed from that world. Needs 1.17+. If the terrain already fits vanilla, no datapack is written.">i</span>
         <input id="heightlimit" type="checkbox"></label>
@@ -701,7 +701,7 @@
         <input id="bakelight" type="checkbox"></label>
       <div class="stat" style="margin:-2px 0 4px 2px;color:var(--mut)">
         For LOD mods (Voxy, Distant Horizons) and map renderers only. Minecraft itself
-        re-lights chunks as you load them, so in normal play you will not see a difference —
+        re-lights chunks as you load them, so in normal play you will not see a difference;
         it is not a fix for a world that looks dark, and it does not affect buildings.</div>
       <label>Stream to disk (big tiles)
         <span class="i" title="Evict generated regions to disk during generation instead of holding the whole world in RAM (upstream Arnis --stream-to-disk). Needed for 8x8 / 16x16 test tiles without running out of memory. Ignored automatically if this arnis.exe doesn't support it yet.">i</span>
@@ -1571,7 +1571,7 @@ function estBuildSeconds(todoRegions, todoCells, workers, bake) {
   const w = Math.max(1, Math.min(64, workers || 4));
   const wf = Math.sqrt(12 / Math.max(6, Math.min(16, w)));   // mild: 8-16 workers ~ same
   // An extended-height world writes proportionally more sections per region, and cave
-  // carving is extra work per column — the flat figure below was measured on a
+  // carving is extra work per column; the flat figure below was measured on a
   // vanilla-height, cave-less build and read far too low for either.
   const hf = Math.max(1, (projHeightBlocks || 384) / 384);
   const cf = projCaves ? 1.35 : 1;
@@ -1736,7 +1736,7 @@ function showRunDone(run, elapsed) {
     + `<b style="color:var(--acc2)">Putting it on a server?</b><br>`
     + `1. Open it once in single-player first (accept the experimental-features prompt if it appears) and check it looks right.<br>`
     + `2. Stop the server. Never overwrite a world folder while it runs.<br>`
-    + `3. Either import it with a plugin like Multiverse-Core, or copy the whole folder in — including <code>level.dat</code> and <code>datapacks/</code>, not just <code>region/</code>.<br>`
+    + `3. Either import it with a plugin like Multiverse-Core, or copy the whole folder in, including <code>level.dat</code> and <code>datapacks/</code>, not just <code>region/</code>.<br>`
     + `4. Run the server on the same Minecraft version you generated for. An older server cannot read a newer world.`
     + `</div>`;
   _meldModal({ title: run.failed ? 'Finished, with failures' : 'World ready',
