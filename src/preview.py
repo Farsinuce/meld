@@ -15,7 +15,10 @@ The browser is still there for anyone who wants it: the tray has "Open in browse
 MELD_UI=browser makes that the default everywhere.
 
 Falls back to the default browser when no Chromium is found (a Mac with only Safari, a bare
-Linux box). Both pages are built to work either way.
+Linux box); the UI is built to work either way.
+
+This module is only about the FULL UI now. The compact view is src/statusbar.py, which is not a
+browser window at all.
 """
 from __future__ import annotations
 
@@ -29,10 +32,9 @@ from pathlib import Path
 
 from .paths import data_dir
 
-# The preview: a panel meant to sit in a corner of the screen. Wide enough for a full Arnis line
-# without wrapping it into unreadable ribbons, tall enough for two log panes to be worth having.
-PREVIEW_SIZE = (470, 720)
 # The full UI: a map, a sidebar and a log. Smaller than this and the map is not worth having.
+# (There is no second size any more - the compact view is src/statusbar.py, which is not a
+# browser window at all.)
 APP_SIZE = (1360, 880)
 
 
@@ -151,12 +153,6 @@ def _brand_window_async(before: set) -> None:
         return
     threading.Thread(target=winicon.brand_new_windows, args=(before, ico),
                      kwargs={"title_prefix": "Meld"}, daemon=True).start()
-
-
-def open_app_window(url: str, *, width: int | None = None, height: int | None = None) -> bool:
-    """The compact preview panel."""
-    size = (width or PREVIEW_SIZE[0], height or PREVIEW_SIZE[1])
-    return open_window(url, size=size, profile="preview")
 
 
 def open_main_window(url: str) -> bool:

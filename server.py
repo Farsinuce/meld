@@ -2339,13 +2339,10 @@ def index():
     return resp
 
 
-@app.route("/mini")
-def mini():
-    """The compact always-on-top preview the tray opens. Its own page, not a shrunken index.html:
-    it must stay readable at 430x580 and cheap enough to poll every second."""
-    resp = send_from_directory(str(BASE_DIR / "web"), "mini.html")
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    return resp
+# The /mini preview window is gone. It was a browser window that duplicated what the status bar
+# now does natively and better: the bar is frameless, always on top, costs no browser process,
+# and cannot be closed by reflex. /api/mini and /api/console remain - they are what the bar
+# reads, and they are cheaper than /api/status by two orders of magnitude.
 
 
 #: Worker lifecycle, in the order a cell passes through it. The status bar colours a block per

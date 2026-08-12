@@ -55,19 +55,18 @@ a render, because the browser was never doing the work.
 | | |
 |---|---|
 | Its own window | Meld opens in an application window — no tabs, no address bar, its own taskbar entry and icon. The browser is still one menu item away, and `MELD_UI=browser` makes it the default |
-| **Status bar** | A frameless strip that floats above other windows: one coloured block per worker, the current task, ETA. **No title bar, no X** — drag to move, right-click for everything, and it cannot be closed by reflex. Optional console drawer |
-| Tray menu | Open Meld · **Status bar** · Preview · Open in browser · **Meld console** · **Arnis console** · Stop render · Open log file · Data folder · Quit |
-| Preview window | 430×580, three tabs: progress/ETA/CPU/RAM, the Meld log, and the raw Arnis output |
-| No window anywhere | No console, no taskbar button. **The only way to quit is the tray's Quit** — closing the browser, the preview or a console leaves the render running |
+| **Status bar** | The overlay: a frameless strip above other windows with one coloured block per worker, the task and the ETA. Comes up with Meld and stays. **No title bar, no X** — drag to move, right-click for everything. **Clicking the tray icon shows/hides it**; the full UI is a menu item, so a stray click never throws a big window over your work |
+| Tray menu | **Show/Hide status bar** (click) · Open Meld · Open in browser · Stop render · Open log file · Data folder · Quit |
+| No window anywhere | No console, no taskbar button. **The only way to quit is the tray's Quit** — closing the browser or hiding the status bar leaves the render running |
 | No console flashing | A 3000-cell render used to pop a black window per cell; children get `CREATE_NO_WINDOW` |
 | No orphans | Every `arnis` child sits in a job that dies with the app, however the app dies |
 | Sleep is blocked | While a render runs — hours of compute with no keypress looks idle to every power policy |
 | Desktop shortcut | `packaging\Create-Shortcut.ps1` (Windows) · `packaging/install-shortcut.sh` (macOS/Linux) |
 
-The consoles live **inside** the preview window and the status bar, not in a spawned terminal. A
-`tail` window would put a console back in the taskbar — the one thing this app exists to avoid —
-and could only ever show the log file, never the raw generator output, which is filtered out
-before it gets there.
+The console lives **inside** the status bar (right-click → Console), not in a spawned terminal.
+A `tail` window would put a console back in the taskbar — the one thing this app exists to
+avoid — and could only ever show the log file, never the raw generator output, which is
+filtered out before it gets there.
 
 **Worker colours** on the status bar, in the order a cell moves through them:
 

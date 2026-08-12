@@ -81,6 +81,7 @@ class Tray:
         self._on_quit = on_quit
         self._icon = None
         self._statusbar = None          # the frameless HUD, when the user has it up
+        self._sb_lock = threading.Lock()
 
     # ── talking to our own server ────────────────────────────────────────────
     def _post(self, path: str) -> dict:
@@ -113,7 +114,12 @@ class Tray:
 
     # ── menu actions ─────────────────────────────────────────────────────────
     def open_ui(self, *_):
-        """The default action (left-click / double-click): Meld in its own window."""
+        """Meld's full UI in its own window.
+
+        Deliberately NOT what clicking the tray icon does. A stray click on a tray icon should
+        not throw a 1360x880 window over whatever you were working on; the click toggles the
+        status bar, and the big window is a menu item you choose on purpose.
+        """
         preview.open_main_window(self._authed("/"))
 
     def open_in_browser(self, *_):
@@ -121,19 +127,9 @@ class Tray:
         full of tabs. Same server, same page; only the frame differs."""
         preview.open_in_browser(self._authed("/"))
 
-    def open_preview(self, *_):
-        preview.open_app_window(self._authed("/mini"))
-
-    def open_console(self, which: str = "meld"):
-        """Open the preview on a console tab.
-
-        The consoles live INSIDE the preview window rather than in a spawned terminal. A
-        `powershell -NoExit Get-Content -Wait` tail works, but it puts a console window back in
-        the taskbar - the exact thing this app exists to avoid - and it can only ever show the
-        log file, never the raw generator output, which is filtered out before anything reaches
-        that file's curated feed.
-        """
-        preview.open_app_window(self._authed("/mini") + f"#{which}")
+    def statusbar_running(self) -> bool:
+        p = self._statusbar
+        return p is not None and p.poll() is None
 
     def toggle_statusbar(self, *_):
         """Show or hide the frameless status strip.
@@ -142,14 +138,29 @@ class Tray:
         src/statusbar.py for why it has to be a separate process (tkinter and the tray both want
         the main thread; macOS insists on it for AppKit).
         """
-        proc = self._statusbar
-        if proc is not None and proc.poll() is None:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-            self._statusbar = None
-            return
+        with self._sb_lock:
+            if self.statusbar_running():
+                try:
+                    self._statusbar.terminate()
+                except Exception:
+                    pass
+                self._statusbar = None
+                return
+            self._spawn_statusbar()
+
+    def show_statusbar(self, *_):
+        """Start the status bar if it is not already up.
+
+        Serialised, not merely guarded: the check and the spawn are two steps, and the startup
+        timer and a tray click can hit them at the same moment - which is how two bars got
+        launched in the same second, both seeing `self._statusbar` still None.
+        """
+        with self._sb_lock:
+            if self.statusbar_running():
+                return
+            self._spawn_statusbar()
+
+    def _spawn_statusbar(self) -> None:
         if getattr(sys, "frozen", False):
             cmd = [sys.executable, "--statusbar"]
         else:
@@ -163,6 +174,7 @@ class Tray:
             cmd += ["--token", self.token]
         try:
             self._statusbar = subprocess.Popen(cmd)
+            print(f"[tray] status bar started (pid {self._statusbar.pid})")
         except Exception as ex:                                   # noqa: BLE001
             print(f"[tray] could not start the status bar: {ex}")
 
@@ -221,14 +233,15 @@ class Tray:
         import pystray
         from pystray import MenuItem as Item
 
+        # `default=True` is what a plain left-click on the icon runs. It toggles the status bar,
+        # NOT the full UI: the overlay is the thing you flick in and out of view all day, and a
+        # mis-click that opens a 1360x880 window over your work is the wrong cost for that.
         menu = pystray.Menu(
-            Item("Open Meld", self.open_ui, default=True),
-            Item("Status bar", self.toggle_statusbar),
-            Item("Preview…", self.open_preview),
-            Item("Open in browser", self.open_in_browser),
+            Item(lambda _: "Hide status bar" if self.statusbar_running() else "Show status bar",
+                 self.toggle_statusbar, default=True),
             pystray.Menu.SEPARATOR,
-            Item("Meld console", lambda *_: self.open_console("meld")),
-            Item("Arnis console", lambda *_: self.open_console("arnis")),
+            Item("Open Meld", self.open_ui),
+            Item("Open in browser", self.open_in_browser),
             pystray.Menu.SEPARATOR,
             Item("Stop render", self.stop_render),
             Item("Open log file", self.open_log_file),

@@ -165,7 +165,9 @@ class StatusBar:
         self.menu.add_command(label="Stop render", command=lambda: self._post("/api/stop"))
         self.menu.add_separator()
         self.menu.add_command(label="Lock position", command=self.toggle_lock)
-        self.menu.add_command(label="Close status bar", command=self.close)
+        # "Hide", not "Close": it is not going anywhere, and the tray icon brings it straight
+        # back. Nothing here can stop a render.
+        self.menu.add_command(label="Hide", command=self.close)
         return root
 
     # ── interaction ──────────────────────────────────────────────────────────
@@ -347,9 +349,13 @@ def main(url: str, token: str = "") -> int:
     except Exception as ex:                                   # noqa: BLE001
         print(f"[statusbar] tkinter is unavailable ({ex}); on Linux install python3-tk")
         return 1
-    # One bar, not four. It has no taskbar button and no close box, so stacked copies are
-    # invisible except as slightly bolder text where they overlap - which is exactly how four of
-    # them accumulated during testing before anyone noticed.
+    # One bar, ever. It has no taskbar button and no close box, so a second copy is invisible
+    # except as slightly bolder text where the two overlap - which is how a stacked pair went
+    # unnoticed during testing until the text looked wrong.
+    #
+    # (Counting processes is misleading here: a Windows venv's pythonw.exe is a trampoline that
+    # runs the base interpreter as a CHILD, so every bar shows up as two processes. The number
+    # of Tk windows is the honest count.)
     from .single_instance import SingleInstance
 
     lock = SingleInstance("statusbar.lock")
