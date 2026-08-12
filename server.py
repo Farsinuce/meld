@@ -35,8 +35,19 @@ for _stream in (sys.stdout, sys.stderr):
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, Response
 
-BASE_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(BASE_DIR))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from src.paths import (resource_dir, exe_dir, data_dir, projects_root, logs_dir,
+                       user_assets_dir, is_frozen)
+
+# BASE_DIR = the read-only bundled files (web/, assets/, site/). From source this is the repo
+# root exactly as before; frozen it is the unpacked PyInstaller payload, which must never be
+# written to. Anything the user creates goes under data_dir() instead - see src/paths.py.
+BASE_DIR = resource_dir()
+# APP_DIR = the folder the app lives in (repo root from source, the folder holding ArnisXL.exe
+# when frozen). Used as the child-process working directory and as an arnis-binary search root:
+# the unpacked payload is a temp directory on some platforms, so it is the wrong answer for both.
+APP_DIR = exe_dir()
 
 from src.project import Project, default_settings
 from src.grid import cells_for_bbox, cells_for_polygons, _point_in_poly, TooManyCells
@@ -58,6 +69,8 @@ from src.merge import (merge_cell_into_master, strip_buffer_regions,
 from src.survey import survey_elevation
 from src.workers import WorkerPool
 from src import export as exportmod
+from src import childproc
+from src import power
 
 # psutil powers the live CPU/RAM gauges. Optional: Flask must boot without it (disk still
 # works via shutil, RAM via the ctypes fallback).
@@ -73,7 +86,7 @@ app = Flask(__name__)   # no static catch-all — assets served via /assets/<f> 
 # cells/, logs/, osm_cache/, cell_health.json). One project = one world's workspace, so you
 # can keep a small "test" project and a big "country" project side by side and switch between
 # them without losing either's settings/origin/grid/suspects.
-PROJECTS_ROOT = BASE_DIR / "projects"
+PROJECTS_ROOT = projects_root()
 _ACTIVE_FILE = PROJECTS_ROOT / ".active"
 
 
@@ -1681,8 +1694,11 @@ def resolve_arnis_exe() -> Path | None:
     """Find the Arnis binary next to Meld. Platform-aware: on Linux/macOS we look for `arnis`
     (no extension) and NEVER pick up a stray Windows `arnis.exe`, which would die with
     '[Errno 8] Exec format error'. On Windows we prefer `arnis.exe` then a bare `arnis`."""
-    roots = [BASE_DIR, BASE_DIR.parent,
-             BASE_DIR.parent / "arnis-source" / "target" / "release"]
+    # APP_DIR first: in a frozen install the binary ships next to ArnisXL.exe, and BASE_DIR is
+    # the unpacked payload, which on some platforms is a temp folder. From source both are the
+    # repo root, so the search order is unchanged.
+    roots = [APP_DIR, APP_DIR.parent, BASE_DIR, BASE_DIR.parent,
+             APP_DIR.parent / "arnis-source" / "target" / "release"]
     if sys.platform == "win32":
         names = ["arnis.exe", "arnis"]
     else:
@@ -1829,7 +1845,9 @@ def _runner(job: dict, state: dict) -> bool:
     # detail (auto = scale-matched). Matches the zoom the data pack downloaded, so it's a cache hit.
     child_env["ARNIS_ELEV_ZOOM"] = str(effective_elev_zoom(settings, float(origin.get("lat", 45.0))))
 
-    ok = run_arnis(cmd, cwd=str(BASE_DIR), on_line=on_line, on_proc=on_proc, env=child_env)
+    # cwd = APP_DIR, not the bundled payload: arnis resolves cave-pack/ and tree-packs/ relative
+    # to where it lives, and a temp _MEIPASS cwd would also strand any relative path it writes.
+    ok = run_arnis(cmd, cwd=str(APP_DIR), on_line=on_line, on_proc=on_proc, env=child_env)
     if cell_log_fp is not None:
         try:
             cell_log_fp.write(f"\n=== arnis exit ok={ok} ===\n")
@@ -2136,7 +2154,7 @@ def _maybe_write_map_item() -> None:
         cmd = [str(exe), "--bbox", "0.0,0.0,0.001,0.001",
                "--output-dir", str(world), "--map-item-only"]
         log("[MapItem] writing world map item into the player inventory…")
-        r = subprocess.run(cmd, cwd=str(BASE_DIR), capture_output=True, text=True,
+        r = subprocess.run(cmd, cwd=str(APP_DIR), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=1800)
         if r.returncode == 0:
             log("[MapItem] done — locked filled-map added to the world")
@@ -2250,6 +2268,7 @@ def _on_complete(job, ok, err):
             write_world_meta()
             run_done = True
     if run_done:
+        power.release()             # the machine may sleep again
         _record_size_calibration()  # what a region ACTUALLY costs here, for the next estimate
         _write_run_report()   # benchmark JSON + HTML into the world folder (best-effort)
         _maybe_write_map_item()  # add the world map item (before export may convert regions)
@@ -3138,6 +3157,9 @@ def _submit_cells(cells: list[dict], osm_files: dict | None = None,
         _RUN.update(started=started, ended=None, total=len(cells), done=0, failed=0,
                     est_regions=est_regions, est_mb=est_regions * _mb_per_region(),
                     actual_mb=None, phase="generating")
+    # Hours of work with no input events looks exactly like an idle machine to every power
+    # policy there is. Released when the run ends (or is stopped) in _on_cell_complete.
+    power.acquire()
     _reset_export_status()   # a fresh run resets the export progress + the one-pass guard
     queued = []
     for c in cells:
@@ -4012,6 +4034,7 @@ def api_render_queue_kill():
         _RQ["note"] = "killed — aborting the current render"
     killed = POOL.terminate_all()   # terminate the running arnis processes NOW (not just drain queue)
     POOL.clear()                    # then drop everything still pending
+    power.reset()
     return jsonify({"ok": True, "was_running": running, "terminated": killed})
 
 
@@ -4059,6 +4082,7 @@ def api_queue_clear():
 def api_stop():
     POOL.clear()
     n = POOL.terminate_all()
+    power.reset()          # a stopped run never reaches the "finished" path that would release it
     # Finalize a PARTIAL benchmark report for a run stopped mid-way, so the work so far (and where
     # it broke) is still saveable — cells that never finished show as running/incomplete.
     finalize = False
@@ -4455,7 +4479,12 @@ def _loot_default() -> dict:
     global _LOOT_DEFAULT_CACHE
     if _LOOT_DEFAULT_CACHE is not None:
         return _LOOT_DEFAULT_CACHE
+    # Read the shipped copy if it is there; otherwise generate one, and generate it into the
+    # WRITABLE user-assets folder. The bundled assets/ dir is read-only in a frozen install, so
+    # writing the generated table back next to the shipped one would raise on every boot.
     cache_path = BASE_DIR / "assets" / "loot_table_default.json"
+    if not cache_path.exists():
+        cache_path = user_assets_dir() / "loot_table_default.json"
     if not cache_path.exists():
         exe = resolve_arnis_exe()
         if exe:
@@ -5436,14 +5465,14 @@ def api_mcs_opts():
                     "machine": m}})
 
 
-if __name__ == "__main__":
-    # Restart-safe continuation: KEEP the plan so a run interrupted by a restart / PC close can be
-    # resumed (the whole point — losing it forced a full re-plan). A run that was mid-flight leaves
-    # cells "queued"/"running" but the worker pool is gone, so just RESET those back to "planned" (a
-    # clean, re-runnable state — no stale "running" cell that no worker owns). "merged" (real generated
-    # content), "planned" and "failed" are left as-is. Generation is NOT auto-started on boot, so the
-    # cells simply reappear on the map; hit Generate / Resume unfinished to continue. Runs only on an
-    # actual server start, never on `import server`.
+def resume_after_restart() -> None:
+    """Restart-safe continuation: KEEP the plan so a run interrupted by a restart / PC close can be
+    resumed (the whole point — losing it forced a full re-plan). A run that was mid-flight leaves
+    cells "queued"/"running" but the worker pool is gone, so just RESET those back to "planned" (a
+    clean, re-runnable state — no stale "running" cell that no worker owns). "merged" (real generated
+    content), "planned" and "failed" are left as-is. Generation is NOT auto-started on boot, so the
+    cells simply reappear on the map; hit Generate / Resume unfinished to continue. Called only on an
+    actual server start, never on `import server`."""
     try:
         _g = PROJECT.load_grid()
         _fixed = {k: ("planned" if v in ("queued", "running") else v) for k, v in _g.items()}
@@ -5457,13 +5486,97 @@ if __name__ == "__main__":
     except Exception:
         pass
     _load_cell_health()   # restore suspect-cell flags so "Redo suspect" survives a restart
-    port = int(os.environ.get("PORT", 5630))
-    print(f"light-meld -> http://127.0.0.1:{port}")
+
+
+_HTTP_SERVER = None          # the live waitress server, so stop_server() can shut it down
+
+
+def stop_server() -> None:
+    """Ask the HTTP server to stop accepting and unwind run_server(). Safe to call from another
+    thread (the tray's Quit item) and safe to call twice."""
+    global _HTTP_SERVER
+    srv, _HTTP_SERVER = _HTTP_SERVER, None
+    if srv is not None:
+        try:
+            srv.close()
+        except Exception:
+            pass
+
+
+def run_server(port: int | None = None, host: str = "127.0.0.1", *,
+               on_ready=None, token: str = "", require_token: bool | None = None) -> None:
+    """Start serving and block until the server stops.
+
+    Served by waitress rather than Flask's built-in server: the Werkzeug dev server prints a
+    scary banner, is explicitly not meant to stay up for days, and its threading model gets
+    unhappy when a request holds a worker for the length of a region merge. waitress is pure
+    Python (no C extension to freeze), ships on every platform, and lets us bind the socket
+    BEFORE the loop starts, so `on_ready` can hand the tray an address that is genuinely live.
+
+    channel_timeout is raised well past the 120 s default on purpose: exports and merges can hold
+    a single request open for many minutes, and the default would cut them off mid-write.
+    """
+    global _HTTP_SERVER
+    port = int(port if port is not None else os.environ.get("PORT", 5630))
+    url = f"http://{host}:{port}"
+    # Before anything can spawn: no console windows per cell, and every child in a group that
+    # dies with us instead of surviving as an orphan pinning eight cores.
+    childproc.install()
+    from src import appguard
+    if require_token is None:
+        require_token = appguard.require_token_default()
+    appguard.install(app, port=port, token=token, require_token=bool(require_token and token))
+    resume_after_restart()
+    print(f"ArnisXL -> {url}")
     _exe = resolve_arnis_exe()
     if _exe:
         print(f"arnis binary: {_exe}")
     else:
         _want = "arnis.exe" if sys.platform == "win32" else "arnis"
-        print(f"arnis binary: NOT FOUND — put '{_want}' next to server.py. On Linux/macOS the "
+        print(f"arnis binary: NOT FOUND — put '{_want}' next to the app. On Linux/macOS the "
               f"file must be named 'arnis' (no .exe) and be the matching OS build.")
-    app.run(host="127.0.0.1", port=port, threaded=True)
+    try:
+        from waitress import create_server
+    except Exception:
+        # No waitress (a partial dev install) — the dev server still works, just noisily.
+        print("waitress not installed; falling back to the Flask development server")
+        if on_ready:
+            on_ready(url)
+        app.run(host=host, port=port, threaded=True)
+        return
+    srv = create_server(app, host=host, port=port, threads=16,
+                        channel_timeout=3600, ident="ArnisXL")
+    _HTTP_SERVER = srv
+    from src.single_instance import write_session
+    write_session(port=port, url=url, token=token)
+    if on_ready:
+        try:
+            on_ready(url)
+        except Exception:
+            pass
+    try:
+        srv.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop_server()
+        power.reset()
+        n = childproc.kill_all()
+        if n:
+            print(f"stopped {n} running arnis process(es)")
+
+
+if __name__ == "__main__":
+    # Same guard the tray entry point uses: a second copy would fight the first for the port and
+    # for the project folder. Running `python server.py` deliberately keeps token enforcement off
+    # (see src/appguard.py), so typing the address into a browser still works.
+    from src.single_instance import SingleInstance, running_url
+
+    _inst = SingleInstance()
+    if not _inst.acquire():
+        print(f"ArnisXL is already running — open {running_url() or 'http://127.0.0.1:5630'}")
+        sys.exit(1)
+    try:
+        run_server()
+    finally:
+        _inst.release()

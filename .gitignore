@@ -65,3 +65,11 @@ server-run.*
 # Seam-test renders (multi-GB region files, regenerated on demand)
 tools/seam_test/_work/
 tools/height_test/_work/
+
+# ArnisXL runtime state (per-machine, never committed): the single-instance lock, the session
+# file holding the live port + token, rotated logs, and the writable twin of assets/.
+arnisxl.lock
+session.json
+logs/
+user-assets/
+data/
