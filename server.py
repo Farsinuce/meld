@@ -2430,6 +2430,32 @@ def api_open_ui():
     return jsonify({"ok": bool(ok)})
 
 
+@app.route("/manifest.webmanifest")
+def manifest():
+    """Web-app manifest.
+
+    Two jobs. It is what lets a user pick "Install this site as an app" in the browser menu and
+    get a REAL installed app - own Start-menu entry, own taskbar identity, Meld's icon - which is
+    the only fully-supported way to get that on Windows. And even un-installed, it gives the
+    window a proper name and theme colour instead of a URL.
+    """
+    return jsonify({
+        "name": "Meld",
+        "short_name": "Meld",
+        "description": "Turn the real world into one seamless Minecraft world",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#0b0a08",
+        "theme_color": "#e3a417",
+        "icons": [
+            {"src": f"/icons/meld-{n}.png", "sizes": f"{n}x{n}", "type": "image/png"}
+            for n in (32, 48, 64, 128, 256, 512)
+        ] + [{"src": "/icons/meld-512.png", "sizes": "512x512", "type": "image/png",
+              "purpose": "maskable"}],
+    })
+
+
 @app.route("/favicon.ico")
 def favicon():
     """The Meld mark. Load-bearing for branding, not decoration: a Chromium `--app=` window

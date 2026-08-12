@@ -23,6 +23,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import webbrowser
 from pathlib import Path
 
@@ -97,23 +98,58 @@ def open_window(url: str, *, size: tuple[int, int] = APP_SIZE, profile: str = "a
         return open_in_browser(url)
     width, height = size
     profile_dir = data_dir() / "ui-profiles" / profile
+    args = [
+        exe,
+        f"--app={url}",
+        f"--window-size={width},{height}",
+        f"--user-data-dir={profile_dir}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        # Nothing here should nag: no "set me as default", no what's-new tab stealing focus
+        # from a window the user opened to watch a render.
+        "--disable-features=Translate,ChromeWhatsNewUI,GlobalMediaControls",
+        "--disable-background-networking",
+    ]
+    if sys.platform.startswith("linux"):
+        # WM_CLASS is how a Linux desktop matches a window to its .desktop file. Set it to the
+        # same id install-shortcut.sh registers and the window gets Meld's icon in the dock and
+        # in Alt-Tab instead of the browser's.
+        args.append("--class=Meld")
     try:
         profile_dir.mkdir(parents=True, exist_ok=True)
-        subprocess.Popen([
-            exe,
-            f"--app={url}",
-            f"--window-size={width},{height}",
-            f"--user-data-dir={profile_dir}",
-            "--no-first-run",
-            "--no-default-browser-check",
-            # Nothing here should nag: no "set me as default", no what's-new tab stealing focus
-            # from a window the user opened to watch a render.
-            "--disable-features=Translate,ChromeWhatsNewUI,GlobalMediaControls",
-            "--disable-background-networking",
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Snapshot the existing windows BEFORE launching, so the icon fix can tell which window
+        # is ours rather than branding any browser window that happens to be titled "Meld".
+        before: set = set()
+        if sys.platform == "win32":
+            from . import winicon
+            before = winicon.find_windows("Meld")
+        subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if sys.platform == "win32":
+            _brand_window_async(before)
         return True
     except Exception:
         return open_in_browser(url)
+
+
+def _brand_window_async(before: set) -> None:
+    """Replace the browser's window icon with Meld's, once the window exists.
+
+    A `--app=` window is still a browser window, so Windows draws the BROWSER's icon in its title
+    bar and on its taskbar button - which is why it reads as "a stray Edge window" rather than as
+    Meld. A favicon does not change that; only an installed web app or WM_SETICON does, and the
+    former needs the user to click Install.
+
+    Fire-and-forget on a thread: the window takes a moment to appear, and the tray menu handler
+    that called us must not sit and wait for it.
+    """
+    from . import winicon
+    from .paths import resource
+
+    ico = resource("assets", "icons", "meld.ico")
+    if not ico.is_file():
+        return
+    threading.Thread(target=winicon.brand_new_windows, args=(before, ico),
+                     kwargs={"title_prefix": "Meld"}, daemon=True).start()
 
 
 def open_app_window(url: str, *, width: int | None = None, height: int | None = None) -> bool:
