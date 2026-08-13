@@ -306,3 +306,81 @@ def stage(info: dict, *, render_active: bool = False) -> dict:
 def _fail(msg: str) -> dict:
     _set(phase="failed", error=msg)
     return progress()
+
+
+# ── the generator, on its own schedule ────────────────────────────────────────────────────────
+
+def stage_arnis(info: dict, *, render_active: bool = False) -> dict:
+    """Download a newer arnis into bin_dir(), verified, and prove it runs.
+
+    Separate from the app update, and far cheaper: the generator is one binary in a writable
+    directory Meld already owns, so nothing is replaced in place and nothing needs a restart of
+    anything. `resolve_arnis_exe()` prefers a bin_dir() copy only when it is strictly NEWER, so
+    the moment this lands the next render uses it - and if it turns out to be worse, deleting one
+    file reverts to the bundled generator.
+
+    This is what lets a generator fix reach users without shipping a whole new Meld.
+    """
+    from .paths import bin_dir
+    from .arnis_cmd import arnis_version
+
+    if render_active:
+        return _fail("a render is running - update the generator when it finishes")
+    if busy():
+        return progress()
+
+    url, sha, version = info.get("download_url"), info.get("sha256"), info.get("latest")
+    if not url:
+        return _fail("no generator download for this platform in the latest release")
+    if not sha:
+        return _fail("the release has no checksum for the generator - refusing to download it")
+
+    _set(phase="downloading", pct=0, note="generator", error="", path="", version=version or "")
+    work = staging_dir()
+    tmp = work / (url.rsplit("/", 1)[-1] or "arnis.bin")
+    try:
+        _download(url, tmp, int(info.get("size_mb") or 0) * 1_000_000)
+
+        _set(phase="verifying", pct=100)
+        got = _sha256(tmp)
+        if got.lower() != sha.lower():
+            tmp.unlink(missing_ok=True)
+            return _fail(f"generator checksum mismatch - discarded (expected {sha[:12]}…, "
+                         f"got {got[:12]}…)")
+
+        name = "arnis.exe" if sys.platform == "win32" else "arnis"
+        dest = bin_dir() / name
+        _set(phase="extracting")
+        if tmp.name.endswith(".tar.gz"):
+            unpack = work / "_arnis"
+            shutil.rmtree(unpack, ignore_errors=True)
+            unpack.mkdir(parents=True)
+            _extract(tmp, unpack)
+            inner = next((p for p in unpack.rglob("*") if p.is_file()), None)
+            if inner is None:
+                return _fail("the generator archive was empty")
+            shutil.move(str(inner), str(dest))
+            shutil.rmtree(unpack, ignore_errors=True)
+        else:
+            shutil.move(str(tmp), str(dest))
+        tmp.unlink(missing_ok=True)
+        if sys.platform != "win32":
+            dest.chmod(dest.stat().st_mode | 0o755)
+        if sys.platform == "darwin":
+            subprocess.run(["xattr", "-d", "com.apple.quarantine", str(dest)],
+                           capture_output=True, check=False)
+
+        # Prove it runs before letting it be chosen. A generator that cannot report its version
+        # is one resolve_arnis_exe() will refuse to prefer anyway, so a silent failure here would
+        # look like "the update did nothing" rather than an error.
+        _set(phase="testing", note="checking the new generator")
+        got_ver = arnis_version(str(dest))
+        if not got_ver:
+            dest.unlink(missing_ok=True)
+            return _fail("the downloaded generator would not run - kept the existing one")
+
+        _set(phase="done", pct=100, path=str(dest), error="",
+             note=f"generator {'.'.join(map(str, got_ver))} installed - the next render uses it")
+    except Exception as ex:                                       # noqa: BLE001
+        return _fail(str(ex))
+    return progress()

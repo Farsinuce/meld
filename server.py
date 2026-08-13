@@ -1756,12 +1756,35 @@ def resolve_arnis_exe() -> Path | None:
         names = ["arnis.exe", "arnis"]
     else:
         names = ["arnis"]                  # a .exe on Linux/macOS is the wrong arch — skip it
+    found = None
     for root in roots:
         for name in names:
             c = root / name
             if c.exists() and c.is_file():
-                return c
-    return None
+                found = c
+                break
+        if found:
+            break
+    if found is None:
+        return None
+
+    # bin_dir() is both the single-file build's unpack target AND where an updated generator is
+    # downloaded to, so it cannot simply come first (that would let a stale unpacked copy beat a
+    # binary the user deliberately dropped in) and it cannot simply come last (that was the bug:
+    # a freshly downloaded 3.0.9 always lost to the bundled 3.0.6 and the download did nothing).
+    #
+    # So: keep the existing precedence, and let bin_dir() win ONLY when it is strictly newer.
+    # A generator that will not report a version never displaces one that does.
+    try:
+        cand = next((bin_dir() / n for n in names if (bin_dir() / n).is_file()), None)
+        if cand is not None and cand != found:
+            from src.arnis_cmd import arnis_version
+            newer, cur = arnis_version(str(cand)), arnis_version(str(found))
+            if newer and cur and newer > cur:
+                return cand
+    except Exception:
+        pass
+    return found
 
 
 _ARNIS_HELP_CACHE: dict = {}
@@ -4569,6 +4592,43 @@ def api_update_start():
 
 @app.route("/api/update/progress")
 def api_update_progress():
+    return jsonify({"ok": True, **updater.progress()})
+
+
+@app.route("/api/update/arnis")
+def api_update_arnis():
+    """Is there a newer generator? Checked on demand, not on a timer.
+
+    The generator moves independently of Meld: it is one binary in a directory Meld already owns,
+    so a fix can reach users without shipping a whole new application. Not folded into the
+    background check because it is a second request against a 60-per-hour budget, and nobody
+    needs to be told about a generator release the moment it happens.
+    """
+    from src.arnis_cmd import arnis_version
+    exe = resolve_arnis_exe()
+    return jsonify({"ok": True, "exe": str(exe) if exe else "",
+                    **update.check_arnis(arnis_version(str(exe)) if exe else ())})
+
+
+@app.route("/api/update/arnis/start", methods=["POST"])
+def api_update_arnis_start():
+    """Download the newer generator into bin_dir(), verified, and check it runs.
+
+    Nothing is overwritten: the bundled generator stays exactly where it is, and
+    resolve_arnis_exe() prefers the downloaded one only while it is strictly newer. Deleting one
+    file reverts.
+    """
+    from src.arnis_cmd import arnis_version
+    exe = resolve_arnis_exe()
+    info = update.check_arnis(arnis_version(str(exe)) if exe else ())
+    if info.get("state") != "available":
+        return jsonify({"ok": False, "error": "the generator is already up to date"}), 400
+    if updater.busy():
+        return jsonify({"ok": True, **updater.progress()})
+    active = bool(POOL.is_running() or POOL.queue_size())
+    threading.Thread(target=updater.stage_arnis, args=(info,),
+                     kwargs={"render_active": active},
+                     name="meld-arnis-update", daemon=True).start()
     return jsonify({"ok": True, **updater.progress()})
 
 

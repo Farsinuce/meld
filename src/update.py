@@ -209,6 +209,56 @@ def check(force: bool = False) -> dict:
 
 # ── background use ────────────────────────────────────────────────────────────────────────────
 
+ARNIS_REPO = "Teddy563/arnis"
+
+
+def arnis_asset_names() -> list[str]:
+    """Release asset names for this platform, best first.
+
+    Mac takes the universal binary: the fork builds per-arch versions as CI artifacts but only
+    ever attaches the lipo'd universal one, and asking for the per-arch name is what broke every
+    mac build of Meld 1.8.4.
+    """
+    if sys.platform == "win32":
+        return ["arnis-windows.exe"]
+    if sys.platform == "darwin":
+        return ["arnis-mac-universal.tar.gz"]
+    return ["arnis-linux.tar.gz"]
+
+
+def check_arnis(current: tuple[int, ...] = ()) -> dict:
+    """Is there a newer generator than the one installed?
+
+    Separate from the Meld check on purpose. The generator is a single binary in a writable
+    directory, so replacing it is far less risky than replacing the application - which means it
+    can be updated on its own schedule, and a user does not have to take a whole new Meld to get
+    a generator fix.
+    """
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{ARNIS_REPO}/releases/latest",
+            headers={"User-Agent": "meld-update-check", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            rel = json.loads(r.read())
+    except Exception:
+        return {"state": "offline", "current": ".".join(map(str, current)), "latest": ""}
+
+    tag = (rel.get("tag_name") or "").strip()
+    latest = parse_version(tag)
+    have = {a.get("name"): a for a in rel.get("assets", [])}
+    asset = next((have[n] for n in arnis_asset_names() if n in have), None)
+    return {
+        "state": "available" if (latest and current and latest > current) else "up-to-date",
+        "current": ".".join(map(str, current)) or "?",
+        "latest": ".".join(map(str, latest)) or tag,
+        "url": rel.get("html_url", ""),
+        "asset": (asset or {}).get("name", ""),
+        "download_url": (asset or {}).get("browser_download_url", ""),
+        "sha256": ((asset or {}).get("digest") or "").removeprefix("sha256:"),
+        "size_mb": round(((asset or {}).get("size") or 0) / 1e6, 1),
+    }
+
+
 def cached_state() -> dict:
     """The last answer, for a caller that must not block - every /api/status hit takes this path.
 

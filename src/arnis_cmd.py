@@ -171,6 +171,37 @@ def arnis_supports(arnis_exe: str, flag: str) -> bool:
     return flag in _HELP_CACHE[key]
 
 
+_VER_CACHE: dict[str, tuple] = {}
+
+
+def arnis_version(arnis_exe: str) -> tuple[int, ...]:
+    """(3, 0, 8) for this generator, or () if it will not say.
+
+    `arnis --version` prints an ASCII banner and then a plain `arnis 3.0.8` line, so the last
+    match wins rather than the first - the banner contains a version too, and picking that one
+    would work today and break the moment the banner changes.
+
+    Used to decide whether a downloaded generator is newer than the bundled one. Numeric per
+    component, because "3.0.10" sorts before "3.0.9" as text.
+    """
+    if not arnis_exe:
+        return ()
+    key = str(arnis_exe)
+    if key not in _VER_CACHE:
+        ver: tuple[int, ...] = ()
+        try:
+            r = subprocess.run([key, "--version"], capture_output=True, text=True, timeout=20,
+                               encoding="utf-8", errors="replace")
+            found = re.findall(r"arnis\s+v?(\d+(?:\.\d+)*)", (r.stdout or "") + (r.stderr or ""),
+                               re.IGNORECASE)
+            if found:
+                ver = tuple(int(p) for p in found[-1].split("."))
+        except Exception:
+            ver = ()
+        _VER_CACHE[key] = ver
+    return _VER_CACHE[key]
+
+
 def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
                     settings: dict, origin: dict, elevation: dict | None,
                     seed: int, osm_file: str | None = None,
