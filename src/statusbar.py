@@ -95,6 +95,11 @@ class StatusBar:
         self._drag = None
         self._fails = 0
         self._icon_img = None
+        # Mirrored off /api/mini each tick. Empty until the server's background check has run, so
+        # no pill and no menu item for the first few seconds - the right failure. A surface that
+        # flashed a notice on every launch would be trained away inside a week.
+        self.update_state = ""
+        self.update_latest = ""
         # One sample per tick. 120 of them is two minutes of history at a 1 s poll, which is the
         # span where "did that spike settle" is still a question worth answering.
         self.history: deque = deque(maxlen=120)
@@ -179,37 +184,11 @@ class StatusBar:
             widget.bind("<ButtonRelease-1>", self.drop)
         self.canvas.bind("<Double-Button-1>", lambda e: self.open_meld())
 
-        # Menu styling has to be spelled out on every menu: tkinter does not inherit it, and an
-        # unstyled popup comes up as a bright grey Windows menu hanging off a black bar.
-        style = dict(tearoff=0, bg=PANEL, fg=FG, activebackground=ACC,
-                     activeforeground="#241b05", activeborderwidth=0, borderwidth=0,
-                     relief="flat", font=("Segoe UI", 9),
-                     disabledforeground=MUT, selectcolor=ACC2)
-        self.menu = tk.Menu(root, **style)
-        self.menu.add_command(label="Open Meld", command=self.open_meld)
-        self.menu.add_separator()
-
-        self.consmenu = tk.Menu(self.menu, **style)
-        self.consmenu.add_command(label="Meld log", command=lambda: self.set_console("meld"))
-        self.consmenu.add_command(label="Arnis output", command=lambda: self.set_console("arnis"))
-        self.consmenu.add_command(label="Hidden", command=lambda: self.set_console(None))
-        self.menu.add_cascade(label="Console", menu=self.consmenu)
-
-        self.opacitymenu = tk.Menu(self.menu, **style)
-        # 25% was near-invisible over a bright window; 75 and 50 are the two that stay readable.
-        for label, value in (("Solid", 1.0), ("Dimmed", 0.75), ("Half", 0.5)):
-            self.opacitymenu.add_command(
-                label=f"{label}  ({int(value * 100)}%)",
-                command=lambda v=value: self.set_alpha(v))
-        self.menu.add_cascade(label="Opacity", menu=self.opacitymenu)
-        self.menu.add_command(label="CPU / RAM graph", command=self.toggle_graph)
-
-        self.menu.add_command(label="Stop render", command=lambda: self._post("/api/stop"))
-        self.menu.add_separator()
-        self.menu.add_command(label="Lock position", command=self.toggle_lock)
-        # "Hide", not "Close": it is not going anywhere, and the tray icon brings it straight
-        # back. Nothing here can stop a render.
-        self.menu.add_command(label="Hide", command=self.close)
+        # There used to be a second, tk.Menu-based copy of the right-click menu here. Nothing
+        # opened it: right-click binds to popup() above, which draws its own Toplevel for the
+        # reason given in that method's docstring. It was dead from the moment popup() replaced
+        # it, and it had already drifted out of sync with the live menu's item order - so an edit
+        # aimed at "the menu" had even odds of landing in the copy nobody sees. Deleted.
         return root
 
     def apply_alpha(self, value: float) -> None:
@@ -235,6 +214,15 @@ class StatusBar:
             webbrowser.open(f"https://{SITE}")
         except Exception:
             pass
+
+    def open_update(self, *_):
+        """Open the Meld UI, where the update panel lives.
+
+        Deliberately not "start downloading 70 MB". The pill is a few pixels tall in a strip that
+        people drag around by grabbing anywhere on it, so a mis-click has to be free; committing
+        to a download from a target that small would be the wrong bargain. The UI asks first.
+        """
+        self._post("/api/open-ui")
 
     def toggle_graph(self, *_):
         self.show_graph = not self.show_graph
@@ -358,18 +346,24 @@ class StatusBar:
 
         row("Open Meld", self.open_meld)
         row(None)
+        # Order: the two view toggles first, then the appearance group, then the actions. The
+        # graph leads because it is the one item people hit repeatedly.
+        row("CPU / RAM graph", self.toggle_graph)
         # Submenus are flattened: at this size a cascade is more clicks and more chrome than the
         # three items it would hide.
         row("Console", None)
         row("Meld log", lambda: self.set_console("meld"), indent=True)
         row("Arnis output", lambda: self.set_console("arnis"), indent=True)
         row("Hidden", lambda: self.set_console(None), indent=True)
-        row("CPU / RAM graph", self.toggle_graph)
         row(None)
         row("Opacity", None)
         for label, value in (("Solid", 1.0), ("75%", 0.75), ("50%", 0.5)):
             row(label, lambda v=value: self.set_alpha(v), indent=True)
         row(None)
+        # Only when there is one, and it opens the panel rather than starting a download - see
+        # the note on the bottom-row pill.
+        if self.update_state == "available" and self.update_latest:
+            row(f"Update to {self.update_latest}…", self.open_update)
         row("Stop render", lambda: self._post("/api/stop"))
         row("Unlock position" if self.locked else "Lock position", self.toggle_lock)
         row("Hide", self.close)
@@ -491,6 +485,17 @@ class StatusBar:
         if counts:
             c.create_text(14, self.BAR_H - 20, text="   ".join(counts), anchor="w",
                           fill=MUT, font=("Consolas", 7))
+        elif self.update_state == "available" and self.update_latest:
+            # Only when idle, and only in the space the cell counts would otherwise hold. During
+            # a render that line is telling the user how their six-hour job is going; a version
+            # notice does not get to compete with it, and it will still be here afterwards.
+            c.create_text(14, self.BAR_H - 20, text=f"▲ Update {self.update_latest}",
+                          anchor="w", fill=ACC, font=("Consolas", 8), tags="upd")
+            c.tag_bind("upd", "<Button-1>", lambda _e: self.open_update())
+            c.tag_bind("upd", "<Enter>",
+                       lambda _e: (c.itemconfigure("upd", fill=FG), c.configure(cursor="hand2")))
+            c.tag_bind("upd", "<Leave>",
+                       lambda _e: (c.itemconfigure("upd", fill=ACC), c.configure(cursor="")))
 
         # The site, quietly, on the bottom line under the worker blocks. It is the one surface
         # that sits on screen for hours, so it is where a wordmark actually earns its place -
@@ -593,6 +598,9 @@ class StatusBar:
         try:
             d = self._get("/api/mini")
             self._fails = 0
+            u = d.get("update") or {}
+            self.update_state = u.get("state") or ""
+            self.update_latest = u.get("latest") or ""
             st = d.get("stats") or {}
             self.history.append((st.get("cpu_pct"), st.get("ram_pct")))
             self.paint(d)

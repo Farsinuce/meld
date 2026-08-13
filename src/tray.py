@@ -87,7 +87,24 @@ def available() -> bool:
     return True
 
 
-def _icon_image(size: int = 64):
+def _pip(img):
+    """Stamp a small badge in the corner: "there is something new", without a notification.
+
+    Drawn rather than shipped as a second asset so it works on the procedural fallback icon too.
+    A ring of background colour separates it from whatever is underneath, because a bare dot on a
+    gold icon is invisible at the 16 px the tray actually renders.
+    """
+    from PIL import ImageDraw
+    d = ImageDraw.Draw(img)
+    s = img.width
+    r = max(3, s // 5)
+    box = (s - r * 2 - 1, s - r * 2 - 1, s - 1, s - 1)
+    d.ellipse(box, fill=(20, 20, 22, 255))
+    d.ellipse((box[0] + 2, box[1] + 2, box[2] - 2, box[3] - 2), fill=(247, 220, 149, 255))
+    return img
+
+
+def _icon_image(size: int = 64, pip: bool = False):
     """The tray image: the shipped icon if present, else a drawn placeholder.
 
     The placeholder is not decoration - it is what keeps the tray working on a build where the
@@ -101,7 +118,8 @@ def _icon_image(size: int = 64):
                 if p.is_file():
                     img = Image.open(p).convert("RGBA")
                     if img.width == img.height:
-                        return img.resize((size, size), Image.LANCZOS)
+                        img = img.resize((size, size), Image.LANCZOS)
+                        return _pip(img) if pip else img
             except Exception:
                 pass
     # The Meld block reduced to three flat faces - the shipped icon's silhouette, drawn from
@@ -117,7 +135,7 @@ def _icon_image(size: int = 64):
     d.polygon([p(.50, .06), p(.94, .31), p(.50, .56), p(.06, .31)], fill=(247, 220, 149, 255))
     d.polygon([p(.06, .31), p(.50, .56), p(.50, .94), p(.06, .69)], fill=(227, 164, 23, 255))
     d.polygon([p(.94, .31), p(.94, .69), p(.50, .94), p(.50, .56)], fill=(169, 114, 15, 255))
-    return img
+    return _pip(img) if pip else img
 
 
 class Tray:
@@ -128,6 +146,9 @@ class Tray:
         self._icon = None
         self._statusbar = None          # the frameless HUD, when the user has it up
         self._sb_lock = threading.Lock()
+        # Filled by the tooltip poll. Empty means the menu row stays hidden and the icon stays
+        # plain, which is what a fresh launch and an offline machine should both look like.
+        self._update: dict = {}
 
     # ── talking to our own server ────────────────────────────────────────────
     def _post(self, path: str) -> dict:
@@ -270,9 +291,16 @@ class Tray:
         d = self._get("/api/mini")
         if not d:
             return APP_NAME
+        # Cached off the same poll the tooltip already makes, so the menu's visible= gate and the
+        # icon pip both read it without a request of their own.
+        self._update = d.get("update") or {}
         if d.get("active"):
-            return f"{APP_NAME} — {d.get('percent', 0)}% ({d.get('done')}/{d.get('total')})"
-        return f"{APP_NAME} — idle"
+            base = f"{APP_NAME} — {d.get('percent', 0)}% ({d.get('done')}/{d.get('total')})"
+        else:
+            base = f"{APP_NAME} — idle"
+        if self._update.get("state") == "available" and self._update.get("latest"):
+            base += f" · update {self._update['latest']} available"
+        return base
 
     def run(self) -> None:
         """Show the icon and block until Quit. MUST be called on the main thread."""
@@ -291,6 +319,13 @@ class Tray:
             pystray.Menu.SEPARATOR,
             Item("Open Meld", self.open_ui),
             Item("Open in browser", self.open_in_browser),
+            # Same dynamic-label pattern as the toggle above, plus a visible gate so the row is
+            # absent rather than greyed when there is nothing to update to. It opens the UI's
+            # update panel; nothing here starts a download.
+            Item(lambda _: f"Update to {self._update.get('latest', '')}…",
+                 self.open_ui,
+                 visible=lambda _: self._update.get("state") == "available"
+                 and bool(self._update.get("latest"))),
             pystray.Menu.SEPARATOR,
             Item("Stop render", self.stop_render),
             Item("Open log file", self.open_log_file),
@@ -310,6 +345,14 @@ class Tray:
             if self._icon is None:
                 return
             try:
+                was = self._update.get("state")
                 self._icon.title = self._title()
+                # Repaint only on the transition. The icon is the one surface that is always on
+                # screen, so a pip appearing there is the least intrusive way to say "there is
+                # something new" - and, unlike a balloon notification, it does not interrupt.
+                # Left-click still toggles the status bar: the notice must not cost the click.
+                if self._update.get("state") != was:
+                    self._icon.icon = _icon_image(pip=self._update.get("state") == "available")
+                    self._icon.update_menu()
             except Exception:
                 return
