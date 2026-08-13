@@ -59,23 +59,33 @@ def os_tag() -> tuple[str, str]:
     return "linux", arch
 
 
-def arnis_asset() -> tuple[str | None, str]:
-    """(release asset name for this OS/CPU, filename to save it as)."""
+def arnis_assets() -> tuple[list[str], str]:
+    """(release asset names to try in order, filename to save it as).
+
+    A list rather than one name because macOS has two plausible layouts and only one of them is
+    real: the fork builds arnis-mac-intel/arnis-mac-arm64 as CI *artifacts*, then lipos them into
+    arnis-mac-universal.tar.gz - which is the only mac file the release attaches. Asking for the
+    per-arch name failed on every mac runner with "release v3.0.7 has no arnis-mac-arm64.tar.gz",
+    and because the missing generator is a hard error, both mac archives were lost. The per-arch
+    names stay in the list after the universal so a future release that does attach them is
+    picked up without another edit.
+    """
     mach = (platform.machine() or "").lower()
     arm = mach in ("arm64", "aarch64")
     if IS_WIN:
-        return "arnis-windows.exe", "arnis.exe"
+        return ["arnis-windows.exe"], "arnis.exe"
     if IS_MAC:
-        return ("arnis-mac-arm64.tar.gz" if arm else "arnis-mac-intel.tar.gz"), "arnis"
+        return ["arnis-mac-universal.tar.gz",
+                "arnis-mac-arm64.tar.gz" if arm else "arnis-mac-intel.tar.gz"], "arnis"
     if sys.platform.startswith("linux"):
-        return "arnis-linux.tar.gz", "arnis"
-    return None, "arnis"
+        return ["arnis-linux.tar.gz"], "arnis"
+    return [], "arnis"
 
 
 def fetch_arnis(dest_dir: Path) -> bool:
     """Put the matching arnis binary in dest_dir. A local copy next to the repo wins, so an
     offline build (or a locally built fork) does not go to the network."""
-    asset, outname = arnis_asset()
+    wanted, outname = arnis_assets()
     target = dest_dir / outname
     if target.is_file():
         log(f"arnis already present: {target}")
@@ -89,7 +99,7 @@ def fetch_arnis(dest_dir: Path) -> bool:
                 os.chmod(target, 0o755)
             return True
 
-    if not asset:
+    if not wanted:
         log(f"no arnis asset defined for {sys.platform}")
         return False
     try:
@@ -97,11 +107,16 @@ def fetch_arnis(dest_dir: Path) -> bool:
                                      headers={"User-Agent": "meld-build"})
         with urllib.request.urlopen(req, timeout=30) as r:
             rel = json.loads(r.read())
-        url = next((x["browser_download_url"] for x in rel.get("assets", [])
-                    if x.get("name") == asset), None)
-        if not url:
-            log(f"release {rel.get('tag_name')} has no '{asset}'")
+        have = {x.get("name"): x.get("browser_download_url") for x in rel.get("assets", [])}
+        asset = next((n for n in wanted if have.get(n)), None)
+        if not asset:
+            # Name the assets that ARE there. "has no arnis-mac-arm64.tar.gz" on its own reads
+            # like an empty release, and the release was in fact full - of differently named
+            # files. One line of output here would have saved two rounds of runner-relabelling.
+            log(f"release {rel.get('tag_name')} has none of: {', '.join(wanted)}")
+            log(f"       it does have: {', '.join(sorted(have)) or '(no assets at all)'}")
             return False
+        url = have[asset]
         log(f"downloading {asset} from {rel.get('tag_name')}")
         with urllib.request.urlopen(urllib.request.Request(
                 url, headers={"User-Agent": "meld-build"}), timeout=300) as r:

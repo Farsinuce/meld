@@ -73,15 +73,19 @@ never pick up a newer one.
 
 **Three defects in the download path:**
 
-1. `releases/latest` was **v3.0.3 with zero assets** — tags v3.0.4/3.0.5/3.0.6 existed but no
-   GitHub Release was ever created for them, so the download failed on every OS. Fixed by cutting
-   a real Release: `release.yml` fires on `release: created` and attaches all four assets.
-   **v3.0.7 is tagged and pushed; someone with repo access still has to publish the Release**
-   (GitHub UI → Draft a new release → pick `v3.0.7` → Publish, or `gh release create v3.0.7`).
-2. **macOS asset names do not match.** `_arnis_asset()` asks for `arnis-mac-arm64.tar.gz` /
-   `arnis-mac-intel.tar.gz`; `release.yml` attaches only `arnis-mac-universal.tar.gz` (the
-   per-arch tarballs are internal CI artifacts). Mac fails even against a healthy release. Fix is
-   one line: return `arnis-mac-universal.tar.gz` for Darwin on both arches.
+1. ~~`releases/latest` was **v3.0.3 with zero assets**~~ — **FIXED 2026-08-13.** Tags
+   v3.0.4/3.0.5/3.0.6 existed with no Release behind them, and v3.0.7's first three attempts
+   published empty. Four causes, all in `release.yml`: `fail-fast` cancelling three healthy
+   platforms over one broken AppImage; a release-triggered run reading the workflow **from the
+   tag**, so the fix on main was invisible; a non-optional Linux download in the release job; and
+   the one that actually broke the build — `cache: "true"` restoring ubuntu-24.04 build-script
+   binaries (glibc 2.39) onto ubuntu-22.04 (glibc 2.35). v3.0.7 now carries all four assets.
+2. ~~**macOS asset names do not match.**~~ **FIXED 2026-08-13**, in both copies. `_arnis_asset()`
+   in `meld_launch.py` was corrected first; `packaging/build.py` — the one CI runs — was not, and
+   it took down both macOS jobs of meld-v1.8.4 with `release v3.0.7 has no
+   'arnis-mac-arm64.tar.gz'`. Both now ask for `arnis-mac-universal.tar.gz`; the per-arch names
+   remain as fallbacks. `tests/test_build_assets.py` fails if the two lists drift apart again,
+   and a miss now prints the asset names the release *does* have.
 3. **The frozen app cannot self-update.** If it should, note the resolution order in
    `server.resolve_arnis_exe()`: `[APP_DIR, APP_DIR.parent, BASE_DIR, BASE_DIR.parent,
    arnis-source/target/release, bin_dir()]`. `bin_dir()` is **last**, so a freshly downloaded
