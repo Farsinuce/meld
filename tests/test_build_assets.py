@@ -76,3 +76,40 @@ def test_windows_saves_with_an_exe_extension(build):
     names, out = _as(build, win=True, platform_name="win32")
     assert names == ["arnis-windows.exe"] and out == "arnis.exe", \
         "Windows will not execute a file without the extension"
+
+
+# --- archive naming -------------------------------------------------------------------------
+# v1.8.4 published its Windows archive as "Meld-1.8.zip". Path.with_suffix(".zip") on the stem
+# "Meld-1.8.4-win-x64" replaces everything after the last dot, so the patch version, the OS and
+# the arch all vanished at once. The release notes advertised Meld-*-win-x64.zip and the upload
+# glob dist/Meld-*.zip matched the wrong name, so it shipped without a single error.
+
+def _archive_name(mod, monkeypatch, *, win, machine, version="1.8.4"):
+    monkeypatch.setattr(mod, "IS_WIN", win)
+    monkeypatch.setattr(mod, "IS_MAC", False)
+    monkeypatch.setattr(mod, "version", lambda: version)
+    monkeypatch.setattr(mod.platform, "machine", lambda: machine)
+    return mod.archive_path().name
+
+
+def test_windows_archive_keeps_the_whole_version_and_platform(build, monkeypatch):
+    assert _archive_name(build, monkeypatch, win=True, machine="AMD64") \
+        == "Meld-1.8.4-win-x64.zip"
+
+
+def test_a_three_part_version_survives_on_every_platform(build, monkeypatch):
+    """The dots in the version are the whole trap: a two-part version would have hidden it."""
+    assert _archive_name(build, monkeypatch, win=False, machine="x86_64") \
+        == "Meld-1.8.4-linux-x64.tar.gz"
+    assert _archive_name(build, monkeypatch, win=False, machine="aarch64",
+                         version="10.20.30") == "Meld-10.20.30-linux-arm64.tar.gz"
+
+
+def test_the_name_matches_what_the_release_notes_promise(build, monkeypatch):
+    """release.yml's download table names these files literally; a mismatch points users at a
+    file that does not exist."""
+    import fnmatch
+    for win, machine, promised in ((True, "AMD64", "Meld-*-win-x64.zip"),
+                                   (False, "x86_64", "Meld-*-linux-x64.tar.gz")):
+        got = _archive_name(build, monkeypatch, win=win, machine=machine)
+        assert fnmatch.fnmatch(got, promised), f"{got} does not match {promised}"

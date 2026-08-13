@@ -188,17 +188,29 @@ def write_build_info() -> dict:
     return info
 
 
-def archive(folder: Path) -> Path:
+def archive_path() -> Path:
+    """Where the release archive for this machine goes, and what it is called.
+
+    The name is what a user downloads, and the release notes name it explicitly - so it is
+    built by concatenation, never Path.with_suffix(). The stem contains dots, and with_suffix()
+    replaces everything after the LAST one: "Meld-1.8.4-win-x64".with_suffix(".zip") is
+    "Meld-1.8.zip", losing the patch version, the OS and the arch in one go. v1.8.4 shipped
+    under that name while its own release table advertised Meld-*-win-x64.zip, and the upload
+    glob dist/Meld-*.zip matched it, so nothing failed loudly.
+    """
     osname, arch = os_tag()
-    base = ROOT / "dist" / f"Meld-{version()}-{osname}-{arch}"
+    ext = ".zip" if IS_WIN else ".tar.gz"
+    return ROOT / "dist" / f"Meld-{version()}-{osname}-{arch}{ext}"
+
+
+def archive(folder: Path) -> Path:
+    out = archive_path()
     if IS_WIN:
-        out = base.with_suffix(".zip")
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
             for p in folder.rglob("*"):
                 if p.is_file():
                     z.write(p, Path("Meld") / p.relative_to(folder))
     else:
-        out = Path(str(base) + ".tar.gz")
         # tar, not zip, on Unix: it is the only common format that preserves the executable bit,
         # and a Meld that unzips without +x is a support ticket, not an app.
         with tarfile.open(out, "w:gz") as t:
