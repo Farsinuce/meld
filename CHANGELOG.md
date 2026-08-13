@@ -6,9 +6,77 @@ All notable changes to Meld are documented here. The format is based on
 
 ## [1.8.4] - unreleased
 
-Groundwork for the Arnis fork's 3.0.7 upstream-port wave. Nothing about generation
-changes in this release; it makes the generator binary Meld runs traceable, and states
-where Meld has to move once the fork's CLI does.
+**Meld is a desktop app.** Download a folder, run it, and it lives in the tray: no
+Python to install, no repository to clone, no terminal. Closing the window stops
+nothing, because the window was never doing the work.
+
+Also groundwork for the Arnis fork's 3.0.7 upstream-port wave. Nothing about
+generation changes in this release; it makes the generator binary Meld runs traceable,
+and states where Meld has to move once the fork's CLI does.
+
+### Added
+
+- **Portable builds for Windows, macOS and Linux.** `packaging/build.py` produces a
+  folder you extract anywhere, carrying its own Python runtime and its own `arnis`
+  binary, so the target machine needs nothing installed. `--onefile` produces a single
+  64 MB executable instead, with the generator embedded and unpacked on first launch.
+  There is no installer, so there is nothing to uninstall and nothing that can delete
+  a project folder on the way out.
+- **Tray app.** `Meld.exe` starts with no console and no taskbar button. Clicking the
+  tray icon shows or hides the status bar; the full UI is a menu item, so a stray click
+  on a 16 px target never throws a 1360x880 window over your work. Quitting is the
+  tray's Quit and nothing else.
+- **Status bar.** A frameless strip that floats above other windows with one coloured
+  block per worker — idle, queued, fetch, prepare, **build** (gold), save, merge,
+  failed — plus the current task, ETA, CPU/RAM/disk and an optional two-minute
+  CPU/RAM history graph. No title bar and no close box: it is dismissed from its own
+  right-click menu, so it cannot be shut by reflex six hours into a render. Position,
+  opacity and hidden state are remembered.
+- **Its own window.** The UI opens as an application window with no tabs and no address
+  bar. `MELD_UI=browser` or the tray's *Open in browser* keeps the old behaviour, and
+  an already-open window is raised rather than a second one opened.
+- **Build stamp.** Every build records its version, UTC build time and commit; shown by
+  `--check`, in the console banner and in the UI footer. The UI is baked into the
+  bundle, so without this a stale binary serves a stale page with no outward sign.
+- Desktop and Start-menu shortcuts (`packaging/Create-Shortcut.ps1`), a Linux `.desktop`
+  entry and a macOS `/Applications` link (`packaging/install-shortcut.sh`), and a CI
+  matrix that builds and smoke-tests all four targets.
+
+### Fixed
+
+- **The app could not survive being packaged.** `Path(__file__).parent` resolves inside
+  the PyInstaller payload, which is read-only and temporary, so every write there works
+  from source and fails for every packaged user. `src/paths.py` now separates read-only
+  bundled files from the writable data directory. A source checkout resolves both to the
+  repo root, so existing `projects/` and `cache/` do not move.
+- **Orphaned generators.** Quitting — or crashing, or being killed — left `arnis`
+  children running: eight processes, every core pinned, no window to close them from.
+  They now sit in a Windows Job Object that dies with the app however it dies, and in
+  their own process group on POSIX.
+- **A console window per cell.** A windowed process that starts a console program gets a
+  new console for it, so a 3000-cell render flashed 3000 black windows. Children are
+  spawned with `CREATE_NO_WINDOW`.
+- **Renders died when the machine slept.** Hours of compute with no keypress looks idle
+  to every power policy. Sleep is blocked while a run is active and released when it
+  ends, is stopped, or the app quits.
+- **The local API was open to any page you had open.** Binding to 127.0.0.1 stops the
+  network, not the browser: any site could POST to it, and this API writes files and
+  launches processes. Host and Origin checks are always on, plus a per-session token for
+  the packaged app.
+- **A second launch fought the first** for the port and the project folder. An OS file
+  lock — not a PID file, which a crash leaves behind — now makes the second launch open
+  the running copy instead.
+- Werkzeug's development server is replaced by waitress, with the channel timeout raised
+  well past its 120 s default so a multi-minute export is not cut off mid-write.
+
+### Changed
+
+- The launcher starts the tray app and detaches once the port answers, instead of
+  waiting on it, which is what pinned a console window to the taskbar for a whole
+  session.
+- The UI is squarer and darker to match the status bar: solid panels instead of
+  translucent ones, no rounded corners, visible hairlines, and section headings that sit
+  on the rail as rows rather than as a column of raised buttons.
 
 ### Fixed
 - **The launcher could build and deploy a half-finished generator without saying so.**
