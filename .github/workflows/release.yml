@@ -45,13 +45,19 @@ jobs:
           - os: ubuntu-latest
             tag: linux-x64
             archive: tar.gz
-          # macos-13 is the last Intel runner; macos-14+ are Apple Silicon. Both are built
-          # because a universal2 binary would need universal Python and universal wheels for
-          # every dependency, which Pillow and shapely do not reliably ship.
-          - os: macos-13
+          # Both architectures are built because a universal2 binary would need universal Python
+          # and universal wheels for every dependency, which Pillow and shapely do not reliably
+          # ship.
+          #
+          # The labels match the arnis fork's release workflow, which builds green on both.
+          # macos-13 sat 18 minutes on "Waiting for a runner to pick up this job" and would have
+          # queued until the 6-hour timeout: that image is retired, so the label has nothing to
+          # answer it. A retired runner label fails by hanging, not by erroring, which is the
+          # part that wastes an afternoon.
+          - os: macos-15-intel
             tag: mac-x64
             archive: tar.gz
-          - os: macos-14
+          - os: macos-latest
             tag: mac-arm64
             archive: tar.gz
 
@@ -108,15 +114,21 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    # Publish whatever built. `needs: build` alone skips this job entirely when any platform
+    # fails, so one dead runner costs every archive rather than its own - which is exactly what
+    # happened to the arnis fork's release and cost it four platforms of binaries.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           path: artifacts
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          # A platform that failed simply has no archive here; it must not sink the release.
+          fail_on_unmatched_files: false
           files: artifacts/*
           draft: ${{ inputs.draft || false }}
           generate_release_notes: true
