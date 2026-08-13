@@ -321,6 +321,18 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     # pre-fills the regional provider's tile cache so parallel cells read disk.
     elif settings.get("terrain", True) and settings.get("regional_elevation_only"):
         cmd.append("--regional-elevation-only")
+    # Cached-elevation-only. Bake the region first, then this guarantees the render uses the
+    # bake and nothing else: no cell waits on the tile server, none is rate-limited, and none
+    # receives a truncated tile - which is the documented cause of flat terrain seams.
+    #
+    # It does NOT make a missing tile fail loudly, whatever the flag name suggests: both
+    # providers return an error and arnis's existing fallback turns that into flat/NaN ground
+    # (mapterhorn.rs:528 says so). The cell log does print "offline: ... not cached", so
+    # _scan_cell_health picks it up and marks the cell suspect - that is what makes the
+    # otherwise-silent case visible.
+    if settings.get("terrain", True) and settings.get("offline_elevation") \
+            and arnis_supports(arnis_exe, "--offline"):
+        cmd.append("--offline")
 
     # Road detail — auto: compact below scale 0.7, clean at/above. max => omit.
     rd = (settings.get("road_detail_level") or "auto").strip().lower()

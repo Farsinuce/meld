@@ -740,6 +740,12 @@ def _scan_cell_health(cell_key: str, out: str) -> None:
         reasons.append("terrain-tile-retry")     # truncated AWS elevation tile -> possible flat seam
     if "Failed to read ESA tile" in txt:          # the actual ESA WorldCover failure line (not the
         reasons.append("landcover-404")           # always-printed "Fetching ... ESA" banner)
+    if "offline: " in txt and "not cached" in txt:
+        # Cached-elevation-only ran and a tile was missing from the bake. arnis does NOT fail on
+        # this - its fallback turns the miss into flat/NaN ground - so without this marker the
+        # cell renders flat and says nothing. That is the exact silent failure the bake exists to
+        # prevent, and the fix is to make it visible rather than to pretend the flag prevents it.
+        reasons.append("elevation-not-baked")
     with _CELL_HEALTH_LOCK:
         if reasons:
             _CELL_HEALTH[cell_key] = {"suspect": True, "reasons": reasons}

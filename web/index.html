@@ -467,6 +467,20 @@
         <span class="i" title="Parallel Arnis runs. Generation is mostly CPU bound: keep workers x threads at or under your CPU cores, going over slows it down. Recommend tunes it to your machine; RAM and save-disk speed are secondary caps. Auto-clamped to 2 below scale 0.5.">i</span>
         <input id="workers" type="number" min="1" max="64" step="1" list="workerpresets"></label>
       <datalist id="workerpresets"><option value="4"></option><option value="8"></option><option value="16"></option><option value="32"></option><option value="64"></option></datalist>
+      <!-- Both of these were already plumbed all the way to the generator from a project key that
+           no control ever wrote, so the only way to use them was hand-editing project.json. -->
+      <details class="drawer">
+        <summary>OSM source &middot; timeout
+          <span class="i" title="Where the map data comes from, and how long a single cell may spend on its heaviest step. Leave both blank unless a country-sized batch is being rate-limited by the public Overpass servers, or dense cells keep timing out.">i</span></summary>
+        <div class="dbody">
+          <label style="font-size:12px">Overpass endpoints
+            <span class="i" title="Comma-separated Overpass API URLs, tried in order. The point of this is a private or self-hosted mirror: the public servers rate-limit hard during a country-sized batch, which is what turns a long render into a stalled one. Blank = the built-in public endpoints.">i</span>
+            <input id="overpassUrl" type="text" placeholder="https://overpass.example.org/api/interpreter, …" style="width:100%;font-size:11px"></label>
+          <label style="font-size:12px;margin-top:6px">Cell timeout (seconds)
+            <span class="i" title="How long one cell may spend before it is given up on. The generator's own default is 600 s. Raise it for very dense cells that keep failing at the flood-fill step; blank keeps the default.">i</span>
+            <input id="cellTimeout" type="number" min="60" max="7200" step="60" placeholder="600" style="width:110px"></label>
+        </div>
+      </details>
       <label>CPU budget <span id="cpuPctVal" style="float:right;color:var(--acc2)">90%</span>
         <span class="i" title="Share of CPU cores Meld hands to Arnis across all workers. Lower = quieter machine + headroom; higher = faster. Capped at 95% for safety so the OS + disk save phase never starve. Each worker still gets at least the min-threads floor.">i</span>
         <input id="cpuPct" type="range" min="10" max="95" step="5" style="width:100%"></label>
@@ -527,6 +541,9 @@
       <label>Regional elevation only (no AWS)
         <span class="i" title="Use ONLY the regional high-res providers (USGS 1m, IGN France 1m, IGN Spain 5m, Japan GSI 5m) plus the global Mapterhorn tiles, and NEVER legacy AWS Terrain Tiles, for areas where the old AWS terrarium set has broken no-data tiles that carve holes/cliffs into the terrain. The terrain warm-up pre-fills the selected provider's tile cache in one polite pass, so parallel cells read from disk instead of rate-limiting the provider. If a fetch still fails, the cell ERRORS and is retried instead of silently using AWS.">i</span>
         <input id="regionalonly" type="checkbox"></label>
+      <label>Cached elevation only (offline)
+        <span class="i" title="Never fetch terrain tiles during a render — use only what is already baked into the cache. Bake the region first (Prepare data → elevation), then turn this on: no cell can be slowed or rate-limited by the tile server, and no cell can quietly receive a truncated tile. It does NOT invent missing terrain: a tile that was never baked still produces flat ground for that cell, but Meld now flags those cells as suspect instead of leaving it silent.">i</span>
+        <input id="offlineelev" type="checkbox"></label>
       <details id="climateWrap" class="drawer">
         <summary>Climate (Köppen)
           <span class="i" title="The whole map's biome tint and arid/polar surface blocks (desert sand, tundra gravel, ice cap snow, and so on) follow the real Köppen-Geiger climate, sampled per block so it varies smoothly across a large region instead of jumping cell-to-cell. Always on. Preview renders the exact grouped climate this area will get, straight from the bundled climate grid, one colour per group, with measured percentages.">i</span></summary>
@@ -1996,6 +2013,10 @@ async function refreshState() {
   // place props at every scale. An empty box has to stay empty.
   if ($('propsMinScale') && document.activeElement !== $('propsMinScale'))
     $('propsMinScale').value = (st.props_min_scale ?? '');
+  if ($('overpassUrl') && document.activeElement !== $('overpassUrl'))
+    $('overpassUrl').value = (st.overpass_url || []).join(', ');
+  if ($('cellTimeout') && document.activeElement !== $('cellTimeout'))
+    $('cellTimeout').value = (st.timeout ?? '');
   propsScaleWarn();
   if (document.activeElement !== $('size')) $('size').value = snapSize(st.job_size_regions);
   $('ground').value = st.ground_level; $('road').value = st.road_detail_level;
@@ -2097,10 +2118,10 @@ async function refreshState() {
   const ckmap = { terrain:'terrain', buildings:'buildings', roof:'roof', interior:'interior',
                   landcover:'land_cover', fillground:'fill_ground', caves:'caves', heightlimit:'disable_height_limit',
                   bakelight:'bake_lighting', streamdisk:'stream_to_disk', awsonly:'aws_only_elevation', regionalonly:'regional_elevation_only',
-                  trees:'trees', overture:'overture' };
+                  trees:'trees', overture:'overture', offlineelev:'offline_elevation' };
   for (const [id, key] of Object.entries(ckmap))
     if ($(id) && document.activeElement !== $(id)) $(id).checked = key === 'interior' || key === 'fill_ground'
-      || key === 'disable_height_limit' || key === 'stream_to_disk' || key === 'aws_only_elevation' || key === 'regional_elevation_only'
+      || key === 'disable_height_limit' || key === 'stream_to_disk' || key === 'aws_only_elevation' || key === 'regional_elevation_only' || key === 'offline_elevation'
       ? !!st[key] : st[key] !== false;
   // Re-apply the child gate after a restore, so a project saved with Buildings off reopens with
   // Additional buildings greyed rather than looking live.
@@ -2787,7 +2808,7 @@ async function saveAllSettings() {
     elevation_mode: $('emode').value,
     max_workers: num($('workers').value, 4),
     seed: num($('seed').value, 1),
-    terrain: $('terrain').checked, buildings: $('buildings').checked, overture: $('overture').checked, aws_only_elevation: $('awsonly').checked, regional_elevation_only: $('regionalonly').checked,
+    terrain: $('terrain').checked, buildings: $('buildings').checked, overture: $('overture').checked, aws_only_elevation: $('awsonly').checked, regional_elevation_only: $('regionalonly').checked, offline_elevation: $('offlineelev').checked,
     roof: $('roof').checked, interior: $('interior').checked,
     land_cover: $('landcover').checked, fill_ground: $('fillground').checked, caves: $('caves').checked,
     disable_height_limit: $('heightlimit').checked, generate_3d_models: $('m3d').checked,
@@ -2824,7 +2845,7 @@ $('btnSave').onclick = saveAllSettings;
 })();
 $('m3d').addEventListener('change', () => api('/api/settings', { generate_3d_models: $('m3d').checked }));
 // Arnis toggles auto-save on change (so they apply even without clicking Save).
-[['terrain','terrain'],['buildings','buildings'],['overture','overture'],['awsonly','aws_only_elevation'],['regionalonly','regional_elevation_only'],['roof','roof'],['interior','interior'],['landcover','land_cover'],
+[['terrain','terrain'],['buildings','buildings'],['overture','overture'],['awsonly','aws_only_elevation'],['regionalonly','regional_elevation_only'],['offlineelev','offline_elevation'],['roof','roof'],['interior','interior'],['landcover','land_cover'],
  ['fillground','fill_ground'],['caves','caves'],['heightlimit','disable_height_limit'],
  ['bakelight','bake_lighting'],['streamdisk','stream_to_disk']].forEach(([id, key]) =>
   $(id) && $(id).addEventListener('change', () => api('/api/settings', { [key]: $(id).checked })));
@@ -4173,6 +4194,12 @@ function propsScaleWarn() {
     `No props at 1:${Math.round(1 / s)} — this world's scale is below ${gate}. `
     + `Lower the number to place them anyway.`;
 }
+if ($('overpassUrl')) $('overpassUrl').addEventListener('change', () =>
+  api('/api/settings', { overpass_url: $('overpassUrl').value.split(',').map(x => x.trim()).filter(Boolean) }));
+if ($('cellTimeout')) $('cellTimeout').addEventListener('change', () => {
+  const raw = ($('cellTimeout').value || '').trim();
+  api('/api/settings', { timeout: raw === '' ? null : parseInt(raw, 10) });
+});
 if ($('propsMinScale')) {
   $('propsMinScale').addEventListener('input', propsScaleWarn);
   $('propsMinScale').addEventListener('change', () => {
