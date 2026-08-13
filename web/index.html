@@ -325,6 +325,10 @@
         <button id="btnDocs" class="sec" style="flex:1;margin:0;padding:5px 8px;font-size:11px;white-space:nowrap" title="Open the Meld documentation.">📖 Docs</button>
       </div>
       <button id="btnProjectGalleryL" class="sec" style="width:100%;margin-top:6px;padding:6px;font-size:12px" title="Open the projects gallery: see, clone, rename, locate every world on the map, and queue several to render in order.">🌍 Projects</button>
+      <!-- Hidden until the background check finds something. In the logo cluster because that is
+           where the identity of the running build already lives, and out of the way of the
+           controls: a notice in the middle of the settings column would read as an error. -->
+      <button id="updBanner" class="sec" style="display:none;width:100%;margin-top:6px;padding:6px;font-size:12px;border-color:var(--acc);color:var(--acc)" title="A newer version of Meld is available.">⬆ Update available</button>
     </div>
     <div class="sub" style="font-size:10px;line-height:1.3;margin:0 0 10px">From a city block to a whole continent, in Minecraft.</div>
     <div class="sub" style="margin:0 0 12px">Live status</div>
@@ -4996,6 +5000,74 @@ function renderExport(ex){
 }
 
 let _pollN = 0, _pollTimer = null, _pollActive = false, _workersSig = '', _logSig = '';
+// ── Update notice ────────────────────────────────────────────────────────────────
+// The server checks once per day on a background thread; this only renders the answer that
+// already rides along in /api/status. Clicking opens a dialog rather than downloading, because
+// this build is unsigned and the honest version of "update" has caveats the user should read
+// before a 70 MB transfer starts.
+let _upd = null;
+
+function renderUpdate(u) {
+  _upd = u || null;
+  const b = $('updBanner');
+  if (!b) return;
+  const on = u && u.state === 'available' && u.latest;
+  b.style.display = on ? '' : 'none';
+  if (on) b.textContent = `⬆ Update to ${u.latest}`;
+}
+
+function showUpdateDialog() {
+  const u = _upd;
+  if (!u || u.state !== 'available') return;
+  const size = u.size_mb ? ` · ${u.size_mb} MB` : '';
+  // The data path is quoted verbatim rather than described. "Your projects are safe" is a
+  // promise; the actual folder is something the user can go and look at, and for anyone with a
+  // 100 GB tile cache that is the only reassurance worth giving.
+  const notes = (u.notes || '').trim().slice(0, 700);
+  const win = document.createElement('div');
+  win.id = 'updModal';
+  win.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
+  win.innerHTML = `
+    <div style="width:min(560px,92vw);background:var(--panel,#141416);border:1px solid var(--hair);box-shadow:var(--ring);max-height:86vh;overflow:auto">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--hair)">
+        <div style="font-weight:700;font-size:14px;color:var(--acc2,#d6ba58)">Meld ${u.latest} is available</div>
+        <div style="flex:1"></div>
+        <button class="sec xbtn" id="updClose" style="width:auto;padding:4px 10px;font-size:12px">✕</button>
+      </div>
+      <div style="padding:14px;font-size:12px;line-height:1.5">
+        <div style="color:var(--mut)">You are running <b style="color:var(--fg)">${u.current || '?'}</b>${size}</div>
+        ${notes ? `<pre style="white-space:pre-wrap;margin:10px 0;padding:9px;background:var(--bg,#0d0d0f);border:1px solid var(--hair);max-height:220px;overflow:auto;font-size:11px">${notes.replace(/[<&]/g, c => ({'<':'&lt;','&':'&amp;'}[c]))}</pre>` : ''}
+        <div id="updPaths" style="color:var(--mut);margin:10px 0"></div>
+        <div style="color:var(--mut);margin:10px 0">
+          Meld is unsigned, so Windows shows a SmartScreen warning the first time each new
+          version runs: <i>More info</i> → <i>Run anyway</i>. macOS needs
+          <i>System Settings → Privacy &amp; Security → Open Anyway</i>.
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--hair)">
+        <button class="sec" id="updLater" style="width:auto;padding:6px 12px;font-size:12px">Later</button>
+        <div style="flex:1"></div>
+        <button id="updOpen" style="width:auto;padding:6px 14px;font-size:12px">Download ${u.latest}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(win);
+  const close = () => win.remove();
+  win.querySelector('#updClose').onclick = close;
+  win.querySelector('#updLater').onclick = close;
+  win.addEventListener('click', e => { if (e.target === win) close(); });
+  // Downloading is all this does today. Installing over a running application needs a verified
+  // archive, a smoke test and a rollback path, and until those exist the honest button is one
+  // that hands the user the release page.
+  win.querySelector('#updOpen').onclick = () => { window.open(u.url, '_blank', 'noopener'); close(); };
+  api('/api/build').then(p => {
+    const el = win.querySelector('#updPaths');
+    if (el && p && p.data) el.innerHTML =
+      `Your projects and cached OSM/elevation stay at <b style="color:var(--fg)">${p.data}</b> — a new version does not touch them.`;
+  }).catch(() => {});
+}
+
+if ($('updBanner')) $('updBanner').onclick = showUpdateDialog;
+
 async function poll() {
   try {
     const s = await api('/api/status');
@@ -5004,6 +5076,7 @@ async function poll() {
     renderStats(s.stats);        // live CPU / RAM / disk gauges (left rail)
     { const br = $('btnReport2'); if (br) br.style.display = s.report_ready ? '' : 'none'; }
     renderExport(s.export);      // compression/export progress line (post-pass)
+    renderUpdate(s.update);      // left-rail update banner (hidden unless there is one)
     renderMcServer(s.mcserver);  // Leaf server setup card (status + console tail)
     const ws = (s.workers || []).filter(w => w.running || w.success != null);
     const nRun = ws.filter(w => w.running).length;

@@ -2564,6 +2564,11 @@ def api_build():
     from src.paths import build_info
     info = dict(build_info())
     info["frozen"] = is_frozen()
+    # Where this install keeps its projects and caches. The update dialog quotes it verbatim:
+    # "your projects are safe" is a promise, whereas a path is something the user can go and
+    # look at - which for anyone holding a 100 GB tile cache is the only reassurance worth
+    # giving before they replace the application folder.
+    info["data"] = str(data_dir())
     return jsonify(info)
 
 
