@@ -65,3 +65,23 @@ server-run.*
 # Seam-test renders (multi-GB region files, regenerated on demand)
 tools/seam_test/_work/
 tools/height_test/_work/
+
+# Meld runtime state (per-machine, never committed): the single-instance lock, the session
+# file holding the live port + token, rotated logs, and the writable twin of assets/.
+*.lock
+session.json
+# Status bar position, opacity, console choice and hidden/shown state.
+statusbar.json
+logs/
+user-assets/
+data/
+
+# PyInstaller output (packaging/build.py) — ~150 MB per build, rebuilt on demand.
+build/
+dist/
+
+# Private browser profiles the app + preview windows run against (created at runtime, ~40 MB of
+# Edge state each). Without a profile of its own, --app= hands the URL to the user's own browser.
+ui-profiles/
+preview-profile/
+assets/build-info.json

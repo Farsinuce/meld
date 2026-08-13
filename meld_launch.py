@@ -24,6 +24,7 @@ import ssl
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.request
 import webbrowser
@@ -48,6 +49,18 @@ def log(msg: str) -> None:
 # ── virtual environment + Python dependencies ─────────────────────────────────
 def venv_python() -> Path:
     return VENV / ("Scripts" if IS_WIN else "bin") / ("python.exe" if IS_WIN else "python")
+
+
+def venv_pythonw() -> Path:
+    """The windowless interpreter (Windows only).
+
+    python.exe is a CONSOLE program: starting it always gives it a console, and when the parent
+    has none Windows creates a fresh window for it - which is the black box that kept appearing
+    in the taskbar even when the launcher itself was hidden. pythonw.exe is the same interpreter
+    built as a GUI subsystem binary, so it gets no console and no taskbar button.
+    """
+    p = VENV / "Scripts" / "pythonw.exe"
+    return p if p.is_file() else venv_python()
 
 
 def in_target_venv() -> bool:
@@ -93,16 +106,17 @@ def arnis_present() -> Path | None:
 
 
 def _arnis_asset() -> tuple[str | None, str]:
-    """(release asset name for this OS/CPU, local filename to save it as)."""
+    """(release asset name for this OS, local filename to save it as)."""
     sysname = platform.system()
-    mach = platform.machine().lower()
     if sysname == "Windows":
         return "arnis-windows.exe", "arnis.exe"
     if sysname == "Linux":
         return "arnis-linux.tar.gz", "arnis"
     if sysname == "Darwin":
-        arm = mach in ("arm64", "aarch64")
-        return ("arnis-mac-arm64.tar.gz" if arm else "arnis-mac-intel.tar.gz"), "arnis"
+        # One universal binary covers both arches, and it is the only mac asset the fork's
+        # release workflow actually attaches - the per-arch tarballs stay CI artifacts, so
+        # asking for arnis-mac-arm64/intel here failed on every mac.
+        return "arnis-mac-universal.tar.gz", "arnis"
     return None, "arnis"
 
 
@@ -164,6 +178,27 @@ def download_arnis() -> Path | None:
     return target
 
 
+def _source_provenance(src: Path) -> str:
+    """Cargo version + git description of a fork checkout, for the build log."""
+    ver = ""
+    try:
+        for line in (src / "Cargo.toml").read_text(encoding="utf-8").splitlines():
+            if line.startswith("version"):
+                ver = line.split("=", 1)[1].strip().strip('"')
+                break
+    except OSError:
+        pass
+    desc = ""
+    try:
+        r = subprocess.run(["git", "describe", "--tags", "--always", "--dirty"],
+                           cwd=src, capture_output=True, text=True, timeout=15)
+        if r.returncode == 0:
+            desc = r.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return " ".join(p for p in (ver, f"({desc})" if desc else "") if p) or "unknown"
+
+
 def build_arnis() -> Path | None:
     if not shutil.which("cargo"):
         return None
@@ -171,19 +206,31 @@ def build_arnis() -> Path | None:
                             HERE.parent / "arnis") if (c / "Cargo.toml").is_file()), None)
     if not src:
         return None
-    log(f"building arnis from source ({src}) — this can take a few minutes the first time ...")
+    prov = _source_provenance(src)
+    log(f"building arnis from source ({src}) at {prov} — this can take a few minutes the "
+        "first time ...")
+    if prov.endswith("-dirty)"):
+        log("NOTE: that checkout has uncommitted changes, so this binary is an unreleased "
+            "build. Delete arnis.exe and re-run the launcher to fall back to a published "
+            "release.")
+    # Build into a launcher-owned target dir outside the checkout. The fork's own target/
+    # belongs to whoever is developing it; writing there would hand them a binary they did not
+    # build, and hand us one from a half-finished edit. Keeping it out of the repo also leaves
+    # `git status` there clean.
     flags = [] if IS_WIN else ["--no-default-features"]   # headless CLI build (no desktop GUI)
-    if subprocess.run(["cargo", "build", "--release", *flags], cwd=src).returncode != 0:
+    target_dir = Path(tempfile.gettempdir()) / "meld-arnis-build"
+    cmd = ["cargo", "build", "--release", "--target-dir", str(target_dir), *flags]
+    if subprocess.run(cmd, cwd=src).returncode != 0:
         return None
     binname = "arnis.exe" if IS_WIN else "arnis"
-    built = src / "target" / "release" / binname
+    built = target_dir / "release" / binname
     if not built.is_file():
         return None
     target = HERE / binname
     shutil.copy2(built, target)
     if not IS_WIN:
         os.chmod(target, 0o755)
-    log(f"arnis built: {target}")
+    log(f"arnis built: {target} ({prov})")
     return target
 
 
@@ -218,14 +265,38 @@ def start_server() -> int:
     # so the whole process is put on UTF-8 as the floor rather than relying on every call site.
     env = {**os.environ, "PORT": str(PORT), "PYTHONUTF8": "1"}
     url = f"http://127.0.0.1:{PORT}"
+    # Prefer the Meld entry point: same server, plus the tray icon, the single-instance
+    # guard and the wake lock. It opens the browser itself (with the session token in the URL),
+    # so this launcher must not also open one. server.py stays the fallback for a checkout that
+    # predates it.
+    entry = HERE / "meld_app.py"
+    if not entry.is_file():
+        entry = HERE / "server.py"
     log(f"starting Meld -> {url}")
-    proc = subprocess.Popen([str(venv_python()), str(HERE / "server.py")], env=env)
+    # meld_app.py goes to the tray, so it must start windowless: pythonw plus CREATE_NO_WINDOW,
+    # because either one alone still leaves a console window in some launch paths. server.py is
+    # the console fallback and keeps the visible window it has always had.
+    if entry.name == "meld_app.py":
+        interp, flags = venv_pythonw(), (0x08000000 if IS_WIN else 0)   # CREATE_NO_WINDOW
+    else:
+        interp, flags = venv_python(), 0
+    proc = subprocess.Popen([str(interp), str(entry)], env=env, creationflags=flags) if IS_WIN \
+        else subprocess.Popen([str(interp), str(entry)], env=env)
     for _ in range(240):                       # up to ~2 min for first-run startup
         if _port_open():
             break
         if proc.poll() is not None:
             return proc.returncode or 1
         time.sleep(0.5)
+    if entry.name == "meld_app.py":
+        # DETACH. The launcher's job - virtual environment, dependencies, arnis binary - is
+        # finished once the port answers, and waiting on the child is what kept a console
+        # window pinned to the taskbar for the entire session. Meld lives in the tray from
+        # here; quitting it is the tray's Quit item, not closing a window. On Windows the child
+        # survives the parent exiting, so there is nothing to keep alive for.
+        log("Meld is running in the tray. This window can close; "
+            "quit from the tray icon (near the clock).")
+        return 0
     try:
         webbrowser.open(url)
     except Exception:  # noqa: BLE001

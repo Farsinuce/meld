@@ -945,8 +945,10 @@ def resolve_region_converter() -> Path | None:
     Windows, bare on Linux/macOS; arch picks x86_64 vs arm64. Returns None if nothing is found."""
     import platform
     import shutil as _sh
-    here = Path(__file__).resolve().parent.parent       # light-meld/
-    rc = here / "region-convert"
+    from .paths import exe_dir, resource_dir
+    # Frozen, the converter ships next to Meld.exe (exe_dir); from source both of these are
+    # the repo root, so the search order below is unchanged for a normal checkout.
+    roots = list(dict.fromkeys([exe_dir(), resource_dir()]))
     sysname = sys.platform
     mach = (platform.machine() or "").lower()
     arm = mach in ("arm64", "aarch64")
@@ -962,9 +964,12 @@ def resolve_region_converter() -> Path | None:
         a = "arm64" if arm else "x86_64"
         names = [f"region_converter-linux-{a}", "region_converter-linux", "region_converter"]
         built = "region_converter"
-    search = [(rc / "bin" / n) for n in names]
-    search.append(rc / "target" / "release" / built)
-    search.append(here / built)                          # legacy: binary at the light-meld root
+    search = []
+    for root in roots:
+        r = root / "region-convert"
+        search += [(r / "bin" / n) for n in names]
+        search.append(r / "target" / "release" / built)
+        search.append(root / built)                      # legacy: binary at the repo root
     for p in search:
         if p.is_file():
             return p

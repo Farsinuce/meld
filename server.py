@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 # Windows consoles default to cp1252; Arnis stdout and log lines can contain
@@ -35,8 +36,19 @@ for _stream in (sys.stdout, sys.stderr):
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, Response
 
-BASE_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(BASE_DIR))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from src.paths import (resource_dir, exe_dir, data_dir, projects_root, logs_dir,
+                       user_assets_dir, is_frozen)
+
+# BASE_DIR = the read-only bundled files (web/, assets/, site/). From source this is the repo
+# root exactly as before; frozen it is the unpacked PyInstaller payload, which must never be
+# written to. Anything the user creates goes under data_dir() instead - see src/paths.py.
+BASE_DIR = resource_dir()
+# APP_DIR = the folder the app lives in (repo root from source, the folder holding Meld.exe
+# when frozen). Used as the child-process working directory and as an arnis-binary search root:
+# the unpacked payload is a temp directory on some platforms, so it is the wrong answer for both.
+APP_DIR = exe_dir()
 
 from src.project import Project, default_settings
 from src.grid import cells_for_bbox, cells_for_polygons, _point_in_poly, TooManyCells
@@ -58,6 +70,9 @@ from src.merge import (merge_cell_into_master, strip_buffer_regions,
 from src.survey import survey_elevation
 from src.workers import WorkerPool
 from src import export as exportmod
+from src import appguard as appguard_mod
+from src import childproc
+from src import power
 
 # psutil powers the live CPU/RAM gauges. Optional: Flask must boot without it (disk still
 # works via shutil, RAM via the ctypes fallback).
@@ -73,7 +88,7 @@ app = Flask(__name__)   # no static catch-all — assets served via /assets/<f> 
 # cells/, logs/, osm_cache/, cell_health.json). One project = one world's workspace, so you
 # can keep a small "test" project and a big "country" project side by side and switch between
 # them without losing either's settings/origin/grid/suspects.
-PROJECTS_ROOT = BASE_DIR / "projects"
+PROJECTS_ROOT = projects_root()
 _ACTIVE_FILE = PROJECTS_ROOT / ".active"
 
 
@@ -96,6 +111,19 @@ def _setup_shared_cache() -> None:
     # can never re-run the move (and so it never fights a running generation after the first time).
     sentinel = root / ".cache_migrated"
     if sentinel.exists():
+        return
+    if is_frozen():
+        # A packaged Meld must not adopt caches it did not create. The move made sense when
+        # there was exactly one install, editing files in place; a portable folder is copied to
+        # a second machine, run from a USB stick, or unpacked next to an existing source
+        # checkout, and any of those silently emptying %LOCALAPPDATA% into itself is theft, not
+        # migration - the first run of a test build here moved 189 MB of live tile cache out
+        # from under the source install. A packaged install that wants an existing cache points
+        # at it with MELD_CACHE_DIR or the meld-data.txt pointer file.
+        try:
+            sentinel.write_text("")
+        except Exception:
+            pass
         return
     appdata = os.environ.get("LOCALAPPDATA")
     if not appdata:
@@ -159,6 +187,32 @@ POOL.stagger_seconds = (float(PROJECT.settings().get("cpu_stagger_seconds", 2) o
 POOL.stagger_adaptive = bool(PROJECT.settings().get("cpu_stagger_adaptive", True))
 
 _LOG: list[str] = []
+
+# This session's access token, kept so the server can build its OWN authenticated URLs (see
+# /api/open-ui). Empty when token enforcement is off, which is the plain `python server.py` case.
+_UI_TOKEN = ""
+
+# Raw Arnis output, every line from every worker, for the console view in the preview window.
+# Separate from _LOG on purpose: _LOG is the curated feed the main UI shows, filtered down by
+# _arnis_should_surface() so a 3000-cell run does not bury the RUN/MERGE lines under a million
+# per-tile messages. The console wants exactly what was filtered out - what the generator
+# actually said - which is otherwise only reachable by opening a per-cell file on disk.
+#
+# A deque with a running total, not a list that gets sliced: the console polls with a cursor, and
+# a client that falls behind has to be told it missed lines rather than silently handed the wrong
+# ones. Bounded, so an overnight run cannot grow it without limit.
+_ARNIS_LOG: deque = deque(maxlen=4000)
+_ARNIS_TOTAL = 0                    # lines ever appended, including the ones aged out
+_ARNIS_LOCK = threading.Lock()
+_LOG_TOTAL = 0                      # same idea for the curated feed
+
+
+def arnis_console(line: str) -> None:
+    """Record one raw line of generator output."""
+    global _ARNIS_TOTAL
+    with _ARNIS_LOCK:
+        _ARNIS_LOG.append(line)
+        _ARNIS_TOTAL += 1
 
 # Generation run stats (for the live timer + final report).
 _RUN_LOCK = threading.Lock()
@@ -1639,8 +1693,10 @@ def read_world_meta(path):
 
 
 def log(msg: str) -> None:
+    global _LOG_TOTAL
     line = str(msg)
     _LOG.append(line)
+    _LOG_TOTAL += 1
     if len(_LOG) > 2000:
         del _LOG[:1000]
     print(line, flush=True)
@@ -1681,8 +1737,13 @@ def resolve_arnis_exe() -> Path | None:
     """Find the Arnis binary next to Meld. Platform-aware: on Linux/macOS we look for `arnis`
     (no extension) and NEVER pick up a stray Windows `arnis.exe`, which would die with
     '[Errno 8] Exec format error'. On Windows we prefer `arnis.exe` then a bare `arnis`."""
-    roots = [BASE_DIR, BASE_DIR.parent,
-             BASE_DIR.parent / "arnis-source" / "target" / "release"]
+    # APP_DIR first: in a frozen install the binary ships next to Meld.exe, and BASE_DIR is
+    # the unpacked payload, which on some platforms is a temp folder. From source both are the
+    # repo root, so the search order is unchanged. bin_dir() is where a single-file build
+    # unpacks its embedded copy, and comes last so a binary the user dropped in themselves wins.
+    from src.paths import bin_dir
+    roots = [APP_DIR, APP_DIR.parent, BASE_DIR, BASE_DIR.parent,
+             APP_DIR.parent / "arnis-source" / "target" / "release", bin_dir()]
     if sys.platform == "win32":
         names = ["arnis.exe", "arnis"]
     else:
@@ -1787,6 +1848,9 @@ def _runner(job: dict, state: dict) -> bool:
             return
         state["message"] = text[:140]
         state["progress"] = parse_progress(text, state.get("progress", 0))
+        # Unfiltered, into the console ring: this is the generator's own voice, which the
+        # surfacing filter below deliberately throws most of away.
+        arnis_console(f"[{cell_tag}] {text}")
         if cell_log_fp is not None:
             try:
                 cell_log_fp.write(text + "\n")
@@ -1829,7 +1893,9 @@ def _runner(job: dict, state: dict) -> bool:
     # detail (auto = scale-matched). Matches the zoom the data pack downloaded, so it's a cache hit.
     child_env["ARNIS_ELEV_ZOOM"] = str(effective_elev_zoom(settings, float(origin.get("lat", 45.0))))
 
-    ok = run_arnis(cmd, cwd=str(BASE_DIR), on_line=on_line, on_proc=on_proc, env=child_env)
+    # cwd = APP_DIR, not the bundled payload: arnis resolves cave-pack/ and tree-packs/ relative
+    # to where it lives, and a temp _MEIPASS cwd would also strand any relative path it writes.
+    ok = run_arnis(cmd, cwd=str(APP_DIR), on_line=on_line, on_proc=on_proc, env=child_env)
     if cell_log_fp is not None:
         try:
             cell_log_fp.write(f"\n=== arnis exit ok={ok} ===\n")
@@ -2136,7 +2202,7 @@ def _maybe_write_map_item() -> None:
         cmd = [str(exe), "--bbox", "0.0,0.0,0.001,0.001",
                "--output-dir", str(world), "--map-item-only"]
         log("[MapItem] writing world map item into the player inventory…")
-        r = subprocess.run(cmd, cwd=str(BASE_DIR), capture_output=True, text=True,
+        r = subprocess.run(cmd, cwd=str(APP_DIR), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=1800)
         if r.returncode == 0:
             log("[MapItem] done — locked filled-map added to the world")
@@ -2250,6 +2316,7 @@ def _on_complete(job, ok, err):
             write_world_meta()
             run_done = True
     if run_done:
+        power.release()             # the machine may sleep again
         _record_size_calibration()  # what a region ACTUALLY costs here, for the next estimate
         _write_run_report()   # benchmark JSON + HTML into the world folder (best-effort)
         _maybe_write_map_item()  # add the world map item (before export may convert regions)
@@ -2275,6 +2342,298 @@ def index():
     resp.headers.pop("ETag", None)
     resp.headers.pop("Last-Modified", None)
     return resp
+
+
+# The /mini preview window is gone. It was a browser window that duplicated what the status bar
+# now does natively and better: the bar is frameless, always on top, costs no browser process,
+# and cannot be closed by reflex. /api/mini and /api/console remain - they are what the bar
+# reads, and they are cheaper than /api/status by two orders of magnitude.
+
+
+#: Worker lifecycle, in the order a cell passes through it. The status bar colours a block per
+#: worker from this, so the pool becomes readable at a glance without any text.
+WORKER_STAGES = ("idle", "queued", "fetch", "prepare", "build", "save", "merge", "failed")
+
+
+def _worker_stage(state: dict) -> str:
+    """Which stage a worker is in, from the line Arnis last printed.
+
+    Arnis announces its phases in prose rather than as a machine-readable field, so this reads
+    the same keywords parse_progress() keys its percentage off - one source of truth for "what
+    does this line mean", even if that source is English text. Falls back to the percentage,
+    which is monotonic, when a line does not name its phase.
+    """
+    msg = (state.get("message") or "").lower()
+    if "fail" in msg or "error" in msg or "panic" in msg:
+        return "failed"
+    if "merg" in msg:
+        return "merge"
+    if "saving" in msg or "writing region" in msg:
+        return "save"
+    if "generating" in msg or "painting" in msg or "tile" in msg:
+        return "build"
+    if "processing" in msg or "ground" in msg or "elevation" in msg or "terrain" in msg:
+        return "prepare"
+    if "fetch" in msg or "download" in msg or "osm" in msg or "overpass" in msg:
+        return "fetch"
+    pct = int(state.get("progress") or 0)
+    if pct >= 90:
+        return "save"
+    if pct >= 35:
+        return "build"
+    if pct >= 15:
+        return "prepare"
+    if pct > 0:
+        return "fetch"
+    return "queued"
+
+
+def _RQ_note_safe(rq: dict) -> str:
+    """'3/12 · romania-north' for the render queue, tolerating a half-filled state dict."""
+    bits = []
+    if rq.get("total"):
+        bits.append(f"{rq.get('idx', 0) + 1}/{rq['total']}")
+    if rq.get("current"):
+        bits.append(str(rq["current"]))
+    if rq.get("pause"):
+        bits.append("paused")
+    return " · ".join(bits) or "running"
+
+
+@app.route("/api/mini")
+def api_mini():
+    """Everything the preview needs, and nothing else.
+
+    /api/status carries the full grid and per-cell health - 66 KB for a country-sized plan.
+    Polling that once a second from a window that shows six numbers would move 4 MB a minute and
+    keep a worker thread busy re-serialising a dict nobody reads. This answer is under a
+    kilobyte, so the preview can poll often enough to feel live.
+    """
+    with _RUN_LOCK:
+        run = dict(_RUN)
+    done = int(run.get("done") or 0)
+    failed = int(run.get("failed") or 0)
+    total = int(run.get("total") or 0)
+    finished = done + failed
+    started = run.get("started")
+    elapsed = (time.time() - started) if started else 0.0
+    # ETA from measured throughput, not from the size estimate: cells vary by an order of
+    # magnitude, so "what this machine has actually managed so far" is the honest predictor.
+    eta = None
+    if finished and total and not run.get("ended") and elapsed > 0:
+        remaining = max(0, total - finished)
+        eta = (elapsed / finished) * remaining if remaining else 0
+
+    busy = 0
+    tasks = []
+    workers = []
+    try:
+        for s in POOL.get_states():
+            running = bool(s.get("running"))
+            stage = _worker_stage(s) if running else "idle"
+            # EVERY slot, not just the busy ones: the status bar draws one block per worker, and
+            # an idle block is information - it says the pool has room, or is winding down.
+            workers.append({"id": s.get("worker_id"), "stage": stage,
+                            "cell": s.get("cell_key") if running else None,
+                            "pct": int(s.get("progress") or 0) if running else 0})
+            if not running:
+                continue
+            busy += 1
+            if len(tasks) < 4:
+                tasks.append({"worker": s.get("worker_id"),
+                              "cell": s.get("cell_key"),
+                              "message": (s.get("message") or "")[:90],
+                              "stage": stage,
+                              "pct": int(s.get("progress") or 0)})
+    except Exception:
+        pass
+
+    with _RQ_LOCK:
+        rq = {"active": bool(_RQ.get("active")), "idx": int(_RQ.get("idx") or 0),
+              "total": int(_RQ.get("total") or 0), "pause": bool(_RQ.get("pause")),
+              "current": _RQ.get("current")}
+
+    try:
+        st = _sys_stats()
+    except Exception:
+        st = {}
+    ram_pct = st.get("ram_pct")
+    if ram_pct is None and st.get("ram_used_gb") and st.get("ram_total_gb"):
+        ram_pct = round(st["ram_used_gb"] / st["ram_total_gb"] * 100)
+
+    # The headline: one sentence for "what is Meld doing right now". Worked out here rather than
+    # in the page because the tray tooltip wants the same answer, and because the precedence
+    # between the phases (export beats prefetch beats generating) is a property of the pipeline,
+    # not of any one view. Ordered by what is actually happening LAST in the pipeline first, so
+    # the most advanced stage wins when two overlap.
+    with _PREFETCH_LOCK:
+        pf_active, pf_phase, pf_note = (bool(_PREFETCH.get("active")),
+                                        _PREFETCH.get("phase") or "", _PREFETCH.get("note") or "")
+    ex_phase = _EXPORT.get("phase") or "idle"
+    if ex_phase not in ("idle", "done", ""):
+        task = {"title": "Exporting", "detail": (_EXPORT.get("message")
+                                                 or f"{_EXPORT.get('format', '')} · "
+                                                    f"{_EXPORT.get('done', 0)}/{_EXPORT.get('total', 0)}"),
+                "pct": round(100.0 * (_EXPORT.get("done") or 0) / (_EXPORT.get("total") or 1), 1)}
+    elif pf_active:
+        what = {"osm": "Fetching map data", "terrain": "Fetching elevation",
+                "generating": "Preparing"}.get(pf_phase, "Preparing")
+        task = {"title": what, "detail": pf_note, "pct": None}
+    elif total and not run.get("ended"):
+        # Separated by a middot, not a comma: a cell key IS "42,-17,2", so comma-joining two of
+        # them reads as one six-number key.
+        detail = " · ".join(str(t["cell"]) for t in tasks[:2] if t.get("cell"))
+        if busy > 2:
+            detail += f"  +{busy - 2} more"
+        task = {"title": "Building the world", "detail": detail or f"{busy} worker(s) running",
+                "pct": round(100.0 * finished / total, 1)}
+    elif rq["active"]:
+        task = {"title": "Render queue", "detail": _RQ_note_safe(rq), "pct": None}
+    elif run.get("ended") and total:
+        task = {"title": "Finished", "detail": f"{done} of {total} cells"
+                                               + (f", {failed} failed" if failed else ""),
+                "pct": 100.0}
+    else:
+        task = {"title": "Idle", "detail": "nothing running", "pct": None}
+
+    return jsonify({
+        "ok": True,
+        "app": "Meld",
+        "project": PROJECT.root.name,
+        "world": PROJECT.master_world.name,
+        "phase": run.get("phase") or ("idle" if not run.get("started") else "done"),
+        "active": bool(total and not run.get("ended")),
+        "done": done, "failed": failed, "total": total,
+        "percent": round(100.0 * finished / total, 1) if total else 0.0,
+        "elapsed_s": int(elapsed),
+        "eta_s": int(eta) if eta is not None else None,
+        "workers_busy": busy,
+        "workers_max": POOL.max_workers,
+        "queue": rq,
+        "awake": power.active(),
+        "task": task,
+        "tasks": tasks,
+        "workers": workers,
+        "stats": {"cpu_pct": st.get("cpu_pct"), "ram_pct": ram_pct,
+                  "disk_free_gb": st.get("disk_free_gb")},
+        "log": _LOG[-6:],
+    })
+
+
+@app.route("/api/open-ui", methods=["POST"])
+def api_open_ui():
+    """Open the full Meld UI in its own window (or the browser, with ?browser=1).
+
+    Done server-side rather than with window.open() in the page: the preview is itself a
+    chrome-less window, and a window.open() from inside one produces a popup that inherits the
+    preview's frame instead of a proper app window. The server can ask for exactly the window it
+    wants, and it is the same call the tray makes.
+    """
+    from src import preview as _preview
+    url = f"http://127.0.0.1:{request.host.rsplit(':', 1)[-1]}/"
+    # The session's own token first. Reading it back off the REQUEST was the bug: the status bar
+    # authenticates with the X-Meld-Token header, so there was no cookie and no ?t= to copy, the
+    # window opened at a bare URL, and the page it loaded was
+    # {"error":"unauthorized: open Meld from the tray icon"}. The server already knows its token;
+    # it never needed the caller to hand it back.
+    tok = (_UI_TOKEN or request.cookies.get("meld_token")
+           or request.args.get("t") or request.headers.get(appguard_mod.HEADER) or "")
+    if tok:
+        url += f"?t={tok}"
+    want_browser = (request.args.get("browser") or "").strip() in ("1", "true", "yes")
+    ok = _preview.open_in_browser(url) if want_browser else _preview.open_main_window(url)
+    return jsonify({"ok": bool(ok)})
+
+
+@app.route("/api/build")
+def api_build():
+    """Which build is serving this page.
+
+    Shown in the UI footer so "is this the new one?" is answerable by looking, rather than by
+    comparing file timestamps against a bundle you cannot see into. The UI is baked into the
+    frozen app, so a stale binary serves a stale page with no other outward sign.
+    """
+    from src.paths import build_info
+    info = dict(build_info())
+    info["frozen"] = is_frozen()
+    return jsonify(info)
+
+
+@app.route("/manifest.webmanifest")
+def manifest():
+    """Web-app manifest.
+
+    Two jobs. It is what lets a user pick "Install this site as an app" in the browser menu and
+    get a REAL installed app - own Start-menu entry, own taskbar identity, Meld's icon - which is
+    the only fully-supported way to get that on Windows. And even un-installed, it gives the
+    window a proper name and theme colour instead of a URL.
+    """
+    return jsonify({
+        "name": "Meld",
+        "short_name": "Meld",
+        "description": "Turn the real world into one seamless Minecraft world",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#0b0a08",
+        "theme_color": "#e3a417",
+        "icons": [
+            {"src": f"/icons/meld-{n}.png", "sizes": f"{n}x{n}", "type": "image/png"}
+            for n in (32, 48, 64, 128, 256, 512)
+        ] + [{"src": "/icons/meld-512.png", "sizes": "512x512", "type": "image/png",
+              "purpose": "maskable"}],
+    })
+
+
+@app.route("/favicon.ico")
+def favicon():
+    """The Meld mark. Load-bearing for branding, not decoration: a Chromium `--app=` window
+    takes its TITLE-BAR and TASKBAR icon from the page's favicon, so without this Meld's own
+    window would sit in the taskbar wearing the browser's icon."""
+    p = BASE_DIR / "assets" / "icons" / "meld.ico"
+    if not p.is_file():
+        abort(404)
+    return send_file(str(p), mimetype="image/x-icon")
+
+
+@app.route("/icons/<path:fname>")
+def icons(fname):
+    """The generated icon sizes (meld-16.png … meld-512.png), for <link rel="icon">."""
+    if "/" in fname or "\\" in fname:
+        abort(404)
+    target = BASE_DIR / "assets" / "icons" / fname
+    if not target.is_file():
+        abort(404)
+    return send_from_directory(str(BASE_DIR / "assets" / "icons"), fname,
+                               max_age=86400)
+
+
+@app.route("/api/console")
+def api_console():
+    """Live console feed for the preview window: ?source=meld|arnis&since=<cursor>.
+
+    Cursor-based rather than "last N lines" so the window can sit open for a six-hour render
+    without re-fetching the whole buffer every second, and so a client that falls behind is
+    TOLD it fell behind (`dropped`) instead of being handed a feed with a silent hole in it.
+    """
+    source = (request.args.get("source") or "meld").lower()
+    try:
+        since = int(request.args.get("since") or 0)
+    except ValueError:
+        since = 0
+
+    if source == "arnis":
+        with _ARNIS_LOCK:
+            buf, total = list(_ARNIS_LOG), _ARNIS_TOTAL
+    else:
+        source = "meld"
+        buf, total = list(_LOG), _LOG_TOTAL
+
+    oldest = total - len(buf)              # cursor of the first line still held
+    dropped = since < oldest and since > 0
+    start = max(0, min(len(buf), since - oldest)) if since > 0 else max(0, len(buf) - 300)
+    return jsonify({"ok": True, "source": source, "lines": buf[start:],
+                    "next": total, "dropped": dropped})
 
 
 @app.route("/assets/<path:fname>")
@@ -3138,6 +3497,9 @@ def _submit_cells(cells: list[dict], osm_files: dict | None = None,
         _RUN.update(started=started, ended=None, total=len(cells), done=0, failed=0,
                     est_regions=est_regions, est_mb=est_regions * _mb_per_region(),
                     actual_mb=None, phase="generating")
+    # Hours of work with no input events looks exactly like an idle machine to every power
+    # policy there is. Released when the run ends (or is stopped) in _on_cell_complete.
+    power.acquire()
     _reset_export_status()   # a fresh run resets the export progress + the one-pass guard
     queued = []
     for c in cells:
@@ -4012,6 +4374,7 @@ def api_render_queue_kill():
         _RQ["note"] = "killed — aborting the current render"
     killed = POOL.terminate_all()   # terminate the running arnis processes NOW (not just drain queue)
     POOL.clear()                    # then drop everything still pending
+    power.reset()
     return jsonify({"ok": True, "was_running": running, "terminated": killed})
 
 
@@ -4059,6 +4422,7 @@ def api_queue_clear():
 def api_stop():
     POOL.clear()
     n = POOL.terminate_all()
+    power.reset()          # a stopped run never reaches the "finished" path that would release it
     # Finalize a PARTIAL benchmark report for a run stopped mid-way, so the work so far (and where
     # it broke) is still saveable — cells that never finished show as running/incomplete.
     finalize = False
@@ -4455,7 +4819,12 @@ def _loot_default() -> dict:
     global _LOOT_DEFAULT_CACHE
     if _LOOT_DEFAULT_CACHE is not None:
         return _LOOT_DEFAULT_CACHE
+    # Read the shipped copy if it is there; otherwise generate one, and generate it into the
+    # WRITABLE user-assets folder. The bundled assets/ dir is read-only in a frozen install, so
+    # writing the generated table back next to the shipped one would raise on every boot.
     cache_path = BASE_DIR / "assets" / "loot_table_default.json"
+    if not cache_path.exists():
+        cache_path = user_assets_dir() / "loot_table_default.json"
     if not cache_path.exists():
         exe = resolve_arnis_exe()
         if exe:
@@ -5436,14 +5805,14 @@ def api_mcs_opts():
                     "machine": m}})
 
 
-if __name__ == "__main__":
-    # Restart-safe continuation: KEEP the plan so a run interrupted by a restart / PC close can be
-    # resumed (the whole point — losing it forced a full re-plan). A run that was mid-flight leaves
-    # cells "queued"/"running" but the worker pool is gone, so just RESET those back to "planned" (a
-    # clean, re-runnable state — no stale "running" cell that no worker owns). "merged" (real generated
-    # content), "planned" and "failed" are left as-is. Generation is NOT auto-started on boot, so the
-    # cells simply reappear on the map; hit Generate / Resume unfinished to continue. Runs only on an
-    # actual server start, never on `import server`.
+def resume_after_restart() -> None:
+    """Restart-safe continuation: KEEP the plan so a run interrupted by a restart / PC close can be
+    resumed (the whole point — losing it forced a full re-plan). A run that was mid-flight leaves
+    cells "queued"/"running" but the worker pool is gone, so just RESET those back to "planned" (a
+    clean, re-runnable state — no stale "running" cell that no worker owns). "merged" (real generated
+    content), "planned" and "failed" are left as-is. Generation is NOT auto-started on boot, so the
+    cells simply reappear on the map; hit Generate / Resume unfinished to continue. Called only on an
+    actual server start, never on `import server`."""
     try:
         _g = PROJECT.load_grid()
         _fixed = {k: ("planned" if v in ("queued", "running") else v) for k, v in _g.items()}
@@ -5457,13 +5826,99 @@ if __name__ == "__main__":
     except Exception:
         pass
     _load_cell_health()   # restore suspect-cell flags so "Redo suspect" survives a restart
-    port = int(os.environ.get("PORT", 5630))
-    print(f"light-meld -> http://127.0.0.1:{port}")
+
+
+_HTTP_SERVER = None          # the live waitress server, so stop_server() can shut it down
+
+
+def stop_server() -> None:
+    """Ask the HTTP server to stop accepting and unwind run_server(). Safe to call from another
+    thread (the tray's Quit item) and safe to call twice."""
+    global _HTTP_SERVER
+    srv, _HTTP_SERVER = _HTTP_SERVER, None
+    if srv is not None:
+        try:
+            srv.close()
+        except Exception:
+            pass
+
+
+def run_server(port: int | None = None, host: str = "127.0.0.1", *,
+               on_ready=None, token: str = "", require_token: bool | None = None) -> None:
+    """Start serving and block until the server stops.
+
+    Served by waitress rather than Flask's built-in server: the Werkzeug dev server prints a
+    scary banner, is explicitly not meant to stay up for days, and its threading model gets
+    unhappy when a request holds a worker for the length of a region merge. waitress is pure
+    Python (no C extension to freeze), ships on every platform, and lets us bind the socket
+    BEFORE the loop starts, so `on_ready` can hand the tray an address that is genuinely live.
+
+    channel_timeout is raised well past the 120 s default on purpose: exports and merges can hold
+    a single request open for many minutes, and the default would cut them off mid-write.
+    """
+    global _HTTP_SERVER
+    port = int(port if port is not None else os.environ.get("PORT", 5630))
+    url = f"http://{host}:{port}"
+    # Before anything can spawn: no console windows per cell, and every child in a group that
+    # dies with us instead of surviving as an orphan pinning eight cores.
+    childproc.install()
+    global _UI_TOKEN
+    _UI_TOKEN = token or ""
+    from src import appguard
+    if require_token is None:
+        require_token = appguard.require_token_default()
+    appguard.install(app, port=port, token=token, require_token=bool(require_token and token))
+    resume_after_restart()
+    print(f"Meld -> {url}")
     _exe = resolve_arnis_exe()
     if _exe:
         print(f"arnis binary: {_exe}")
     else:
         _want = "arnis.exe" if sys.platform == "win32" else "arnis"
-        print(f"arnis binary: NOT FOUND — put '{_want}' next to server.py. On Linux/macOS the "
+        print(f"arnis binary: NOT FOUND — put '{_want}' next to the app. On Linux/macOS the "
               f"file must be named 'arnis' (no .exe) and be the matching OS build.")
-    app.run(host="127.0.0.1", port=port, threaded=True)
+    try:
+        from waitress import create_server
+    except Exception:
+        # No waitress (a partial dev install) — the dev server still works, just noisily.
+        print("waitress not installed; falling back to the Flask development server")
+        if on_ready:
+            on_ready(url)
+        app.run(host=host, port=port, threaded=True)
+        return
+    srv = create_server(app, host=host, port=port, threads=16,
+                        channel_timeout=3600, ident="Meld")
+    _HTTP_SERVER = srv
+    from src.single_instance import write_session
+    write_session(port=port, url=url, token=token)
+    if on_ready:
+        try:
+            on_ready(url)
+        except Exception:
+            pass
+    try:
+        srv.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop_server()
+        power.reset()
+        n = childproc.kill_all()
+        if n:
+            print(f"stopped {n} running arnis process(es)")
+
+
+if __name__ == "__main__":
+    # Same guard the tray entry point uses: a second copy would fight the first for the port and
+    # for the project folder. Running `python server.py` deliberately keeps token enforcement off
+    # (see src/appguard.py), so typing the address into a browser still works.
+    from src.single_instance import SingleInstance, running_url
+
+    _inst = SingleInstance()
+    if not _inst.acquire():
+        print(f"Meld is already running — open {running_url() or 'http://127.0.0.1:5630'}")
+        sys.exit(1)
+    try:
+        run_server()
+    finally:
+        _inst.release()

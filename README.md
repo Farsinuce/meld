@@ -46,6 +46,84 @@ Then: draw an area, set the cell size, press **Generate world**.
 
 ---
 
+## The desktop app
+
+Meld also ships as a desktop app: a portable folder, no installer, no Python required. Extract it
+anywhere and run it. It starts **in the tray with no window** — closing the browser does not stop
+a render, because the browser was never doing the work.
+
+| | |
+|---|---|
+| Its own window | Meld opens in an application window — no tabs, no address bar, its own taskbar entry and icon. The browser is still one menu item away, and `MELD_UI=browser` makes it the default |
+| **Status bar** | The overlay: a frameless strip above other windows with one coloured block per worker, the task and the ETA. Comes up with Meld and stays. **No title bar, no X** — drag to move, right-click for everything. **Clicking the tray icon shows/hides it**; the full UI is a menu item, so a stray click never throws a big window over your work |
+| Tray menu | **Show/Hide status bar** (click) · Open Meld · Open in browser · Stop render · Open log file · Data folder · Quit |
+| No window anywhere | No console, no taskbar button. **The only way to quit is the tray's Quit** — closing the browser or hiding the status bar leaves the render running |
+| No console flashing | A 3000-cell render used to pop a black window per cell; children get `CREATE_NO_WINDOW` |
+| No orphans | Every `arnis` child sits in a job that dies with the app, however the app dies |
+| Sleep is blocked | While a render runs — hours of compute with no keypress looks idle to every power policy |
+| Desktop shortcut | `packaging\Create-Shortcut.ps1` (Windows) · `packaging/install-shortcut.sh` (macOS/Linux) |
+
+The console lives **inside** the status bar (right-click → Console), not in a spawned terminal.
+A `tail` window would put a console back in the taskbar — the one thing this app exists to
+avoid — and could only ever show the log file, never the raw generator output, which is
+filtered out before it gets there.
+
+**Worker colours** on the status bar, in the order a cell moves through them:
+
+| | | | | | |
+|---|---|---|---|---|---|
+| ⬛ idle | 🟦 fetch | 🟩 prepare | 🟨 **build** | 🟢 save | 🟩 merge |
+
+Gold is the one that means "generating right now". A worker that keeps its colour *and* stops
+filling its under-bar is stuck — which is the thing you want to spot from across the room.
+
+```
+Meld.exe             tray app, no console; the UI opens in its own window
+Meld.exe --browser   open the UI in the normal browser instead
+Meld-console.exe     same app with the banner and a live log
+Meld.exe --console   open a console at runtime (single-file builds)
+Meld.exe --check     what is installed, where the data lives
+Meld.exe --no-tray   headless: server only
+```
+
+The UI is a local web app either way — the only difference is the frame around it. The window is
+a Chromium app window against a private profile, so it never lands in a tab of your own browser,
+never inherits your extensions, and closing your browser cannot close Meld.
+
+### One folder, or one file
+
+| | `--onefile` | default (onedir) |
+|---|---|---|
+| Ships as | **one 58 MB `.exe`**, generator inside | a 152 MB folder |
+| Start-up | **~2.8 s** (unpacks to temp every launch) | **~0.7 s** |
+| Copy it anywhere and run | yes | yes, but the whole folder |
+| Swap in your own `arnis` build | no | drop it next to the exe |
+
+```
+python packaging/build.py --onefile     # one file, generator embedded
+python packaging/build.py               # folder (default)
+```
+
+The generator cannot live *inside* the running executable — it is a separate program, and the OS
+only runs programs that exist on disk. The single-file build carries it as a payload and unpacks
+it once to `<data>/bin` on first launch.
+
+**Where your data goes.** A source checkout is unchanged — `projects/` and `cache/` stay in the
+repo. A packaged install keeps them in `Meld/data/` next to the app, or in the OS user-data
+folder if the app folder is read-only. Point it anywhere by putting a path in
+`meld-data.txt` next to the executable, or by setting `MELD_DATA_DIR`. A packaged install
+never adopts caches it did not create.
+
+**Building it yourself:** `pip install -r requirements.txt -r requirements-build.txt` then
+`python packaging/build.py --archive`. About 150 MB, arnis binary included so it works offline.
+
+**Unsigned.** Signing costs money and nothing else fixes these: Windows shows SmartScreen on
+first run (*More info* → *Run anyway*); macOS blocks it until notarised (*System Settings →
+Privacy & Security* → *Open Anyway*). Linux does not care. GNOME has no system tray without the
+AppIndicator extension — `--no-tray` works everywhere regardless.
+
+---
+
 ## What it does
 
 **Scale**

@@ -67,7 +67,8 @@ def _icon_data_uri() -> str:
         return _ICON_CACHE["uri"]
     uri = ""
     try:
-        p = Path(__file__).resolve().parent.parent / "web" / "meld_icon.png"
+        from .paths import resource
+        p = resource("web", "meld_icon.png")
         uri = "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode("ascii")
     except Exception:
         uri = ""

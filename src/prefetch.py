@@ -303,19 +303,16 @@ def _ttl_seconds(settings: dict) -> float:
 
 
 def meld_cache_root() -> Path:
-    """The ONE shared Meld cache root (OSM + terrain + land-cover), kept inside the Meld
-    project so it's visible and reused by EVERY project/world. Override with the MELD_CACHE_DIR
-    env var (e.g. point it at a drive with space). Default: light-meld/cache. The Arnis fork is
-    told this path via ARNIS_CACHE_ROOT so terrain/ESA land here too, not in hidden AppData."""
-    env = os.environ.get("MELD_CACHE_DIR")
-    if env and env.strip():
-        # Normalize: strip surrounding quotes (common when pasting a spaced path), expand ~,
-        # and resolve to absolute so Python and the child arnis (ARNIS_CACHE_ROOT) never diverge
-        # if their CWDs differ.
-        env = env.strip().strip('"').strip("'")
-        if env:
-            return Path(env).expanduser().resolve()
-    return Path(__file__).resolve().parent.parent / "cache"   # = light-meld/cache
+    """The ONE shared cache root (OSM + terrain + land-cover), kept next to the user's projects
+    so it's visible and reused by EVERY project/world. Override with the MELD_CACHE_DIR env var
+    (e.g. point it at a drive with space). Default: <data dir>/cache, which from a source
+    checkout is light-meld/cache exactly as before. The Arnis fork is told this path via
+    ARNIS_CACHE_ROOT so terrain/ESA land here too, not in hidden AppData.
+
+    Both the env-var override and the default now live in src/paths.cache_root(); this stays as
+    the name the rest of the codebase (and the Arnis fork's docs) already use."""
+    from .paths import cache_root
+    return cache_root()
 
 
 def meld_osm_cache_dir() -> Path:

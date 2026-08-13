@@ -123,6 +123,9 @@ class WorkerPool:
         return self._max_workers
 
     def terminate_all(self) -> int:
+        """Stop the arnis processes this pool published. Anything it misses - a child that was
+        starting when we looked, or one whose slot was already cleared - is caught by
+        src/childproc.kill_all(), which knows about every process the app started."""
         n = 0
         with self._lock:
             for s in self._states:

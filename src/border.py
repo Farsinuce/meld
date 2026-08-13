@@ -28,7 +28,9 @@ from shapely.ops import unary_union, linemerge
 from .constants import METERS_PER_DEG_LAT
 from .coords import mpd_lon
 
-_ASSETS = Path(__file__).resolve().parent.parent / "assets" / "countries.geojson"
+from .paths import resource, cache_root
+
+_ASSETS = resource("assets", "countries.geojson")   # bundled, read-only
 
 
 # ---------------------------------------------------------------- country data
@@ -52,7 +54,7 @@ def list_countries() -> list[str]:
 # OSM admin_level=2 boundaries: far more accurate than the bundled Natural Earth shapes
 # (NE is generalized small-scale data — land borders can be off by kilometres). Fetched
 # once per country from Overpass, simplified to ~50 m fidelity, cached on disk forever.
-_OSM_CACHE = Path(__file__).resolve().parent.parent / "cache" / "osm-borders"
+_OSM_CACHE = cache_root() / "osm-borders"          # written at runtime -> data dir
 _OVERPASS = ["https://overpass-api.de/api/interpreter",
              "https://overpass.kumi.systems/api/interpreter"]
 

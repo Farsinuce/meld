@@ -1,0 +1,143 @@
+name: Build Meld
+
+# Produces the four portable archives. Each one is a folder the user extracts and runs - it
+# carries its own Python and its own arnis binary, so the target machine needs nothing
+# installed. There is no installer to build and nothing to uninstall.
+#
+# Unsigned. On Windows that means a SmartScreen prompt on first run ("More info" -> "Run
+# anyway"); on macOS, Gatekeeper refuses outright until the app is notarised, which needs a
+# paid Apple Developer account. Both are cost decisions, not build problems - see the Meld
+# section of the README.
+
+on:
+  push:
+    tags: ["meld-v*"]
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create the GitHub release as a draft"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest tests/ -q
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            tag: win-x64
+            archive: zip
+          - os: ubuntu-latest
+            tag: linux-x64
+            archive: tar.gz
+          # macos-13 is the last Intel runner; macos-14+ are Apple Silicon. Both are built
+          # because a universal2 binary would need universal Python and universal wheels for
+          # every dependency, which Pillow and shapely do not reliably ship.
+          - os: macos-13
+            tag: mac-x64
+            archive: tar.gz
+          - os: macos-14
+            tag: mac-arm64
+            archive: tar.gz
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Linux tray dependencies
+        if: runner.os == 'Linux'
+        # pystray's Linux backends are thin wrappers over GTK/AppIndicator. They are needed at
+        # BUILD time so PyInstaller can find the modules; at run time the user's desktop has to
+        # provide the tray itself, which GNOME no longer does without an extension.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gir1.2-ayatanaappindicator3-0.1 libgirepository1.0-dev \
+                                  libcairo2-dev python3-gi
+          pip install pygobject || echo "pygobject unavailable - Meld falls back to headless"
+
+      - name: Build
+        run: python packaging/build.py --archive
+        env:
+          MELD_ARNIS_REPO: Teddy563/arnis
+
+      - name: Smoke test the frozen build
+        shell: bash
+        # Proves the packaged app starts on a machine that is not the developer's, and - the
+        # part that source tests cannot cover - that nothing tries to write into the read-only
+        # PyInstaller payload. A build that only fails on a user's machine is the whole reason
+        # this step exists.
+        run: |
+          export MELD_DATA_DIR="${RUNNER_TEMP}/axl-data"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ./dist/Meld/Meld-console.exe --check
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            ./dist/Meld.app/Contents/MacOS/Meld-console --check
+          else
+            ./dist/Meld/Meld-console --check
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Meld-${{ matrix.tag }}
+          path: dist/Meld-*.${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          draft: ${{ inputs.draft || false }}
+          generate_release_notes: true
+          body: |
+            ## Meld
+
+            Portable - extract the folder anywhere and run it. No installer, no Python needed.
+
+            | Download | For |
+            |---|---|
+            | `Meld-*-win-x64.zip` | Windows 10/11 |
+            | `Meld-*-mac-arm64.tar.gz` | Mac (M1 and later) |
+            | `Meld-*-mac-x64.tar.gz` | Mac (Intel) |
+            | `Meld-*-linux-x64.tar.gz` | Linux |
+
+            **Windows** — `Meld.exe` starts in the tray with no window. Run
+            `packaging\Create-Shortcut.ps1` for a desktop icon. First launch shows a SmartScreen
+            warning because the build is unsigned: *More info* → *Run anyway*.
+
+            **macOS** — the build is not notarised, so Gatekeeper blocks it: open
+            *System Settings → Privacy & Security* and choose *Open Anyway*.
+
+            **Linux** — run `packaging/install-shortcut.sh` for a launcher entry. GNOME has no
+            tray without the AppIndicator extension; `./Meld --no-tray` works regardless.
