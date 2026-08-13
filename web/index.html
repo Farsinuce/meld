@@ -5100,6 +5100,12 @@ function showUpdateDialog() {
         <div style="color:var(--mut)">You are running <b style="color:var(--fg)">${u.current || '?'}</b>${size}</div>
         ${notes ? `<pre style="white-space:pre-wrap;margin:10px 0;padding:9px;background:var(--bg,#0d0d0f);border:1px solid var(--hair);max-height:220px;overflow:auto;font-size:11px">${notes.replace(/[<&]/g, c => ({'<':'&lt;','&':'&amp;'}[c]))}</pre>` : ''}
         <div id="updPaths" style="color:var(--mut);margin:10px 0"></div>
+        <!-- Builds already downloaded and proved to start. Listed from disk rather than from a
+             remembered list, so this cannot disagree with what is actually there. -->
+        <div id="updStaged" style="display:none;margin:10px 0;padding:9px;border:1px solid var(--hair)"></div>
+        <!-- The generator moves on its own schedule: it is one binary in a folder Meld owns, so
+             a fix to it does not need a whole new Meld. -->
+        <div id="updGen" style="display:none;margin:10px 0;padding:9px;border:1px solid var(--hair)"></div>
         <div style="color:var(--mut);margin:10px 0">
           Meld is unsigned, so Windows shows a SmartScreen warning the first time each new
           version runs: <i>More info</i> → <i>Run anyway</i>. macOS needs
@@ -5170,6 +5176,76 @@ function showUpdateDialog() {
     const el = win.querySelector('#updPaths');
     if (el && p && p.data) el.innerHTML =
       `Your projects and cached OSM/elevation stay at <b style="color:var(--fg)">${p.data}</b> — a new version does not touch them.`;
+  }).catch(() => {});
+
+  // ── prepared builds: launch one, or remove one you are finished with ──
+  async function refreshStaged() {
+    const box = win.querySelector('#updStaged');
+    if (!box) return;
+    let r; try { r = await api('/api/update/staged'); } catch (e) { return; }
+    const builds = (r && r.builds) || [];
+    if (!builds.length) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    box.innerHTML = `<div style="color:var(--acc2);margin-bottom:6px">Ready to run</div>`
+      + builds.map(b => `<div style="display:flex;gap:6px;align-items:center;margin-top:4px">
+           <span style="flex:1;min-width:0">Meld ${b.version}</span>
+           <button class="sec updLaunch" data-p="${b.path}" style="width:auto;padding:4px 10px;font-size:11px"
+             title="Quit this version and start ${b.version}. The folder you are in now is kept, so you can go back to it.">Launch</button>
+           <button class="sec updRm" data-p="${b.path}" style="width:auto;padding:4px 10px;font-size:11px"
+             title="Delete this build folder. Refused if your projects live inside it.">Remove</button>
+         </div>`).join('');
+    box.querySelectorAll('.updLaunch').forEach(b => b.onclick = async () => {
+      b.disabled = true; b.textContent = 'Starting…';
+      const r2 = await api('/api/update/launch', { path: b.dataset.p });
+      // On success this process is exiting, so nothing further will answer. Say so rather than
+      // leaving a dead dialog: the browser cannot follow a server that just quit.
+      if (r2 && r2.ok) {
+        note.style.color = ''; prog.style.display = '';
+        note.textContent = 'Starting the new version — this window will stop responding. '
+          + 'Reopen Meld from the tray once it comes up.';
+      } else { b.disabled = false; b.textContent = 'Launch';
+               note.style.color = 'var(--bad,#e0685f)';
+               prog.style.display = ''; note.textContent = (r2 && r2.error) || 'could not start it'; }
+    });
+    box.querySelectorAll('.updRm').forEach(b => b.onclick = async () => {
+      const r2 = await api('/api/update/remove', { path: b.dataset.p });
+      if (r2 && r2.ok) refreshStaged();
+      else { prog.style.display = ''; note.style.color = 'var(--bad,#e0685f)';
+             note.textContent = (r2 && r2.error) || 'could not remove it'; }
+    });
+  }
+  refreshStaged();
+
+  // ── the generator, updatable without a new Meld ──
+  api('/api/update/arnis').then(g => {
+    const box = win.querySelector('#updGen');
+    if (!box || !g) return;
+    box.style.display = '';
+    if (g.state !== 'available') {
+      box.innerHTML = `<span style="color:var(--mut)">Generator (arnis) <b style="color:var(--fg)">${g.current}</b>`
+        + (g.state === 'offline' ? ' — could not check' : ' — up to date') + '</span>';
+      return;
+    }
+    box.innerHTML = `<div style="display:flex;gap:6px;align-items:center">
+        <span style="flex:1;min-width:0;color:var(--mut)">Generator (arnis) <b style="color:var(--fg)">${g.current}</b>
+          → <b style="color:var(--acc)">${g.latest}</b></span>
+        <button class="sec" id="updGenGo" style="width:auto;padding:4px 10px;font-size:11px"
+          title="Download just the generator, check it, and use it for the next render. Meld itself is not replaced.">Update generator</button>
+      </div>`;
+    box.querySelector('#updGenGo').onclick = async () => {
+      const btn = box.querySelector('#updGenGo');
+      btn.disabled = true; btn.textContent = 'Working…';
+      await api('/api/update/arnis/start', {});
+      stopPolling();
+      timer = setInterval(async () => {
+        let p; try { p = await api('/api/update/progress'); } catch (e) { return stopPolling(); }
+        paint(p);
+        if (p.phase === 'done' || p.phase === 'failed') {
+          btn.textContent = p.phase === 'done' ? 'Updated' : 'Try again';
+          btn.disabled = p.phase === 'done';
+        }
+      }, 1000);
+    };
   }).catch(() => {});
 }
 
