@@ -51,6 +51,7 @@ BASE_DIR = resource_dir()
 APP_DIR = exe_dir()
 
 from src import update
+from src import updater
 from src.project import Project, default_settings
 from src.grid import cells_for_bbox, cells_for_polygons, _point_in_poly, TooManyCells
 from src.coords import expand_bbox_for_seam, cell_bbox, snap_to_region_grid
@@ -4536,6 +4537,33 @@ def api_update():
     force = request.args.get("force") in ("1", "true", "yes")
     return jsonify({"ok": True, **(update.refresh(force=True) if force
                                    else update.cached_state())})
+
+
+@app.route("/api/update/start", methods=["POST"])
+def api_update_start():
+    """Download the new version, verify it, unpack it beside this one and prove it starts.
+
+    Staging only. Nothing about the running install changes: no file is replaced, nothing is
+    deleted, no shortcut is rewritten. The result is a sibling folder the user can launch when
+    they choose. The swap is a separate step that does not exist yet, and it is the one that
+    needs care - `data_dir()` can resolve INSIDE the app folder for a portable install, so
+    deleting the old folder could take the projects with it.
+    """
+    info = update.cached_state()
+    if info.get("state") != "available":
+        return jsonify({"ok": False, "error": "no update available"}), 400
+    if updater.busy():
+        return jsonify({"ok": True, **updater.progress()})
+    active = bool(POOL.is_running() or POOL.queue_size())
+    threading.Thread(target=updater.stage, args=(info,),
+                     kwargs={"render_active": active},
+                     name="meld-update-stage", daemon=True).start()
+    return jsonify({"ok": True, **updater.progress()})
+
+
+@app.route("/api/update/progress")
+def api_update_progress():
+    return jsonify({"ok": True, **updater.progress()})
 
 
 @app.route("/api/report")

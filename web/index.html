@@ -5079,21 +5079,66 @@ function showUpdateDialog() {
           <i>System Settings → Privacy &amp; Security → Open Anyway</i>.
         </div>
       </div>
+      <div id="updProg" style="display:none;padding:0 14px 12px">
+        <div class="bar"><i id="updBar" style="width:0%"></i></div>
+        <div id="updNote" class="sub" style="font-size:11px;margin-top:5px"></div>
+      </div>
       <div style="display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--hair)">
         <button class="sec" id="updLater" style="width:auto;padding:6px 12px;font-size:12px">Later</button>
         <div style="flex:1"></div>
-        <button id="updOpen" style="width:auto;padding:6px 14px;font-size:12px">Download ${u.latest}</button>
+        <button class="sec" id="updOpen" style="width:auto;padding:6px 12px;font-size:12px" title="Open the release page in a browser and download it yourself.">Release page</button>
+        <button id="updGet" style="width:auto;padding:6px 14px;font-size:12px" title="Download it, check it against the release checksum, unpack it next to this one and start it once to prove it works. Nothing is replaced.">Download &amp; prepare</button>
       </div>
     </div>`;
   document.body.appendChild(win);
-  const close = () => win.remove();
+  // Closing must also stop the progress poll. There is no DOM event for "element removed", so
+  // the teardown has to hang off the close path itself - otherwise the interval outlives the
+  // dialog and keeps hitting the server once a second forever.
+  const close = () => { stopPolling(); win.remove(); };
   win.querySelector('#updClose').onclick = close;
   win.querySelector('#updLater').onclick = close;
   win.addEventListener('click', e => { if (e.target === win) close(); });
-  // Downloading is all this does today. Installing over a running application needs a verified
-  // archive, a smoke test and a rollback path, and until those exist the honest button is one
-  // that hands the user the release page.
   win.querySelector('#updOpen').onclick = () => { window.open(u.url, '_blank', 'noopener'); close(); };
+
+  // Prepare, not install. It downloads, checks the bytes against the release checksum, unpacks
+  // beside the current folder and starts the new build once to prove it runs - then stops and
+  // says where it is. Replacing a running application is a separate step that does not exist
+  // yet, and it is the one that can lose a projects folder if it gets the data path wrong.
+  const bar = win.querySelector('#updBar'), note = win.querySelector('#updNote');
+  const prog = win.querySelector('#updProg'), get = win.querySelector('#updGet');
+  const PHASE = { checking: 'Checking…', downloading: 'Downloading', verifying: 'Verifying checksum…',
+                  extracting: 'Unpacking…', testing: 'Starting it once to check it works…' };
+  let timer = null;
+  const stopPolling = () => { if (timer) { clearInterval(timer); timer = null; } };
+
+  function paint(p) {
+    prog.style.display = '';
+    bar.style.width = (p.phase === 'downloading' ? (p.pct || 0) : 100) + '%';
+    if (p.phase === 'done') {
+      note.style.color = 'var(--ok)';
+      note.textContent = `Ready. ${u.latest} is unpacked at ${p.path} and started correctly — `
+        + `close Meld and launch it from there. Your projects stay where they are.`;
+      get.disabled = true; get.textContent = 'Prepared';
+      stopPolling();
+    } else if (p.phase === 'failed') {
+      note.style.color = 'var(--bad,#e0685f)';
+      note.textContent = p.error || 'failed';
+      get.disabled = false; get.textContent = 'Try again';
+      stopPolling();
+    } else {
+      note.style.color = '';
+      note.textContent = (PHASE[p.phase] || p.phase) + (p.note ? ` — ${p.note}` : '');
+    }
+  }
+
+  get.onclick = async () => {
+    get.disabled = true; get.textContent = 'Working…';
+    paint(await api('/api/update/start', {}) || { phase: 'checking' });
+    stopPolling();
+    timer = setInterval(async () => {
+      try { paint(await api('/api/update/progress')); } catch (e) { stopPolling(); }
+    }, 1000);
+  };
   api('/api/build').then(p => {
     const el = win.querySelector('#updPaths');
     if (el && p && p.data) el.innerHTML =
