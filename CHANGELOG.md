@@ -4,6 +4,51 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.8.6] - unreleased
+
+Three generator settings that existed but had no control, and updates that
+actually complete.
+
+### Added
+
+- **Cached elevation only.** Bake a region, then guarantee the render uses the bake
+  and nothing else: no cell waits on the tile server, none is rate-limited, and none
+  receives a truncated tile — the documented cause of flat terrain seams.
+
+  It does not conjure missing terrain. A tile that was never baked still produces flat
+  ground for that cell, exactly as before; what changes is that Meld now flags those
+  cells as suspect instead of leaving the failure silent. That visibility is the real
+  fix, and the tooltip says so rather than implying the setting is a guarantee.
+- **Overpass endpoints.** Comma-separated, tried in order — for pointing Meld at a
+  private or self-hosted mirror. The public servers rate-limit hard during a
+  country-sized batch, which is what turns a long render into a stalled one.
+- **Cell timeout.** Blank keeps the generator's 600 s. For dense cells that keep
+  failing at the flood-fill step.
+- **Prop scale control**, with a warning. Props are fixed-size builds, so the
+  generator skips them below 0.35 while Meld's usual scale is 0.1 — ticking the family
+  checkboxes placed nothing at all, and said nothing. The warning now appears the
+  moment the project scale falls below the gate.
+- **Updates that finish.** A prepared version can be launched from inside Meld: the new
+  build starts, this one quits, and the old folder is kept so you can go back to it.
+  Removing an old build is a separate, explicit action, and it refuses any folder that
+  contains your projects.
+- **The generator updates on its own.** arnis is one binary in a folder Meld owns, so a
+  generator fix no longer needs a whole new Meld — check and update it from the same
+  dialog. Downloads are verified against the release checksum, and a release without
+  one is refused rather than trusted.
+
+### Fixed
+
+- **A downloaded generator was always ignored.** The search order put the download
+  location last, so a freshly fetched arnis lost to the bundled copy every time and the
+  update silently did nothing. It now wins when it is strictly newer — and only then, so
+  a binary you dropped in yourself still takes precedence.
+- **An updated generator kept being described by the old one.** Both probe caches key on
+  the file path, and an update replaces the file at the same path. Beyond a wrong version
+  in a message, this gated new flags off the *previous* binary's capabilities: a freshly
+  installed generator would keep being told it has no `--overture`, so the Additional
+  Buildings checkbox would go on doing nothing until Meld restarted.
+
 ## [1.8.5] - unreleased
 
 Fixes what 1.8.4 shipped broken on macOS and Linux, and gives Overture buildings the
