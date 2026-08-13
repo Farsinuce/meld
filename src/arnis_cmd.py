@@ -141,6 +141,36 @@ def effective_elev_zoom(settings: dict, origin_lat: float = 45.0) -> int:
         return recommended_elev_zoom(scale, origin_lat)
 
 
+_HELP_CACHE: dict[str, str] = {}
+
+
+def arnis_supports(arnis_exe: str, flag: str) -> bool:
+    """Does this generator advertise `flag` in --help? Cached per exe path.
+
+    Meld and the fork ship and update separately: a user can run a new Meld against the 3.0.7
+    binary already sitting next to it, and clap rejects an unknown argument outright, so an
+    ungated new flag turns every cell into "error: unexpected argument '--overture'". Asking the
+    binary what it accepts is version-independent - it tests the capability rather than inferring
+    it from a version string that a locally built or side-loaded binary may not report honestly.
+
+    server.py had this same probe for --stream-to-disk and it fell out of use; it lives here now,
+    beside the code that emits the flags, so the next new flag has one obvious place to gate on.
+    """
+    if not arnis_exe:
+        return False
+    key = str(arnis_exe)
+    if key not in _HELP_CACHE:
+        try:
+            r = subprocess.run([key, "--help"], capture_output=True, text=True, timeout=20,
+                               encoding="utf-8", errors="replace")
+            _HELP_CACHE[key] = (r.stdout or "") + (r.stderr or "")
+        except Exception:
+            # Unreadable help means "assume old": passing a flag it may not have is the failure
+            # mode that kills a whole run, while omitting one only loses the new behaviour.
+            _HELP_CACHE[key] = ""
+    return flag in _HELP_CACHE[key]
+
+
 def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
                     settings: dict, origin: dict, elevation: dict | None,
                     seed: int, osm_file: str | None = None,
@@ -208,6 +238,20 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     # Skip OSM buildings (keeps roads, bridges, railways, land cover, water, terrain).
     if not settings.get("buildings", True):
         cmd.append("--no-buildings")
+    # Additional Buildings: Overture Maps footprints for buildings missing from OSM. Detected
+    # from satellite imagery, so a few can land where nothing exists - which is the whole reason
+    # this is separable from `buildings`. Only emitted when switched OFF and only when the
+    # generator has the flag: it landed in the fork after 3.0.7, and older binaries reject it.
+    if not settings.get("overture", True) and arnis_supports(arnis_exe, "--overture"):
+        cmd.append("--overture=false")
+    # Schematic props (boats, cranes, tractors, wind turbines) are fixed-size builds, so the fork
+    # skips them below --props-min-scale (default 0.35) - at 1:10 a parked crane is the size of a
+    # district. Meld's own default scale is 0.1, so the default silently dropped every family
+    # while the UI showed the checkboxes ticked. Passing it explicitly makes the gate the user's
+    # decision instead of an invisible one.
+    props_min = settings.get("props_min_scale")
+    if props_min not in (None, "") and arnis_supports(arnis_exe, "--props-min-scale"):
+        cmd += ["--props-min-scale", str(float(props_min))]
     if settings.get("fill_ground"):
         cmd.append("--fillground")
     if settings.get("caves"):

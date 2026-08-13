@@ -4,6 +4,51 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.8.5] - unreleased
+
+Fixes what 1.8.4 shipped broken on macOS and Linux, and gives Overture buildings the
+off switch they never had.
+
+### Added
+
+- **Additional buildings toggle.** Overture Maps supplies footprints for buildings
+  missing from OpenStreetMap, which is what makes a sparsely mapped area look mapped
+  at all. They are detected from satellite imagery, so a few land where nothing
+  exists. Until now the only way to avoid one was Buildings off, which also deletes
+  every real building, wall, mast and pylon. The new checkbox drops only the satellite
+  fill. On by default, and greyed out when Buildings is off, since the generator never
+  fetches Overture in that case.
+
+  Needs arnis 3.0.8. Meld asks the generator which flags it accepts before passing
+  this one, so an older binary keeps working instead of failing every cell on an
+  unknown argument.
+- **Prop scale control.** Schematic props are fixed-size builds, so the fork skips
+  them below `--props-min-scale` (0.35). Meld's default scale is 0.1, so every prop
+  family was dropped at the default while the UI showed ten ticked checkboxes and no
+  boat, crane or tractor ever appeared. The gate is now Meld's to set.
+
+### Fixed
+
+- **The macOS archives were not applications.** The tarball used a hardcoded member
+  name, stripping the `.app` extension, so both 1.8.4 mac downloads extracted to a
+  plain folder that Finder drew as a folder and macOS would not launch.
+- **The macOS bundle signature was invalid.** The generator was copied in after
+  PyInstaller had sealed the bundle, so the signature no longer matched its contents.
+  The build now re-seals and verifies, and fails rather than shipping unsealed. The
+  missing `.app` extension had been hiding this: fixing that alone would have produced
+  *"Meld.app is damaged and can't be opened"*, which has no user-facing bypass.
+- **The Windows archive was misnamed** — `Meld-1.8.zip` rather than
+  `Meld-1.8.4-win-x64.zip`. `Path.with_suffix()` replaces everything after the last
+  dot and the name is mostly dots, so the patch version, OS and architecture went at
+  once. The release notes pointed at a filename the release did not contain.
+- **B_Linear export failed on Linux.** The bundled `region_converter` binaries were
+  committed without the execute bit, so the export died with a permission error on a
+  binary that was plainly present.
+- **The Linux generator could not start without WebKitGTK.** The published
+  `arnis-linux` was built with the GUI feature, so the loader resolved webkit2gtk
+  before `main()` and aborted on any headless or minimal system. Meld already passed
+  `--no-default-features` when building from source; the released binary now matches.
+
 ## [1.8.4] - unreleased
 
 **Meld is a desktop app.** Download a folder, run it, and it lives in the tray: no

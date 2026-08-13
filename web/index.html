@@ -534,8 +534,11 @@
         <div id="climateStats" class="stat" style="margin-top:3px;white-space:pre-wrap"></div>
       </details>
       <label>Buildings
-        <span class="i" title="Generate OSM buildings. Off = a roads + land-cover only world (roads, bridges, railways, water and terrain are still built).">i</span>
+        <span class="i" title="Generate OSM buildings. Off = a roads + land-cover only world (roads, bridges, railways, water and terrain are still built). Off also disables Additional Buildings below.">i</span>
         <input id="buildings" type="checkbox"></label>
+      <label>Additional buildings
+        <span class="i" title="Adds buildings that are missing from OpenStreetMap, using footprints from Overture Maps. Most useful in rural areas with little mapping. Since these are detected from satellite imagery, a few buildings may be placed where none exist. Turn this off to keep only what OSM actually maps. Needs arnis 3.0.8 or newer.">i</span>
+        <input id="overture" type="checkbox"></label>
       <label>Roofs
         <span class="i" title="Generate building roofs.">i</span>
         <input id="roof" type="checkbox"></label>
@@ -2080,11 +2083,14 @@ async function refreshState() {
   const ckmap = { terrain:'terrain', buildings:'buildings', roof:'roof', interior:'interior',
                   landcover:'land_cover', fillground:'fill_ground', caves:'caves', heightlimit:'disable_height_limit',
                   bakelight:'bake_lighting', streamdisk:'stream_to_disk', awsonly:'aws_only_elevation', regionalonly:'regional_elevation_only',
-                  trees:'trees' };
+                  trees:'trees', overture:'overture' };
   for (const [id, key] of Object.entries(ckmap))
     if ($(id) && document.activeElement !== $(id)) $(id).checked = key === 'interior' || key === 'fill_ground'
       || key === 'disable_height_limit' || key === 'stream_to_disk' || key === 'aws_only_elevation' || key === 'regional_elevation_only'
       ? !!st[key] : st[key] !== false;
+  // Re-apply the child gate after a restore, so a project saved with Buildings off reopens with
+  // Additional buildings greyed rather than looking live.
+  if (typeof overtureGateUpdate === 'function') overtureGateUpdate();
   // Height controls: restore, then re-run the version gate so a reloaded project shows
   // the same enabled/disabled state it was saved with.
   if ($('mcver') && document.activeElement !== $('mcver')) $('mcver').value = st.mc_version || '';
@@ -2767,7 +2773,7 @@ async function saveAllSettings() {
     elevation_mode: $('emode').value,
     max_workers: num($('workers').value, 4),
     seed: num($('seed').value, 1),
-    terrain: $('terrain').checked, buildings: $('buildings').checked, aws_only_elevation: $('awsonly').checked, regional_elevation_only: $('regionalonly').checked,
+    terrain: $('terrain').checked, buildings: $('buildings').checked, overture: $('overture').checked, aws_only_elevation: $('awsonly').checked, regional_elevation_only: $('regionalonly').checked,
     roof: $('roof').checked, interior: $('interior').checked,
     land_cover: $('landcover').checked, fill_ground: $('fillground').checked, caves: $('caves').checked,
     disable_height_limit: $('heightlimit').checked, generate_3d_models: $('m3d').checked,
@@ -2804,10 +2810,20 @@ $('btnSave').onclick = saveAllSettings;
 })();
 $('m3d').addEventListener('change', () => api('/api/settings', { generate_3d_models: $('m3d').checked }));
 // Arnis toggles auto-save on change (so they apply even without clicking Save).
-[['terrain','terrain'],['buildings','buildings'],['awsonly','aws_only_elevation'],['regionalonly','regional_elevation_only'],['roof','roof'],['interior','interior'],['landcover','land_cover'],
+[['terrain','terrain'],['buildings','buildings'],['overture','overture'],['awsonly','aws_only_elevation'],['regionalonly','regional_elevation_only'],['roof','roof'],['interior','interior'],['landcover','land_cover'],
  ['fillground','fill_ground'],['caves','caves'],['heightlimit','disable_height_limit'],
  ['bakelight','bake_lighting'],['streamdisk','stream_to_disk']].forEach(([id, key]) =>
   $(id) && $(id).addEventListener('change', () => api('/api/settings', { [key]: $(id).checked })));
+// Additional buildings are a subset of buildings: with Buildings off the fork never fetches
+// Overture at all, so leaving the child control live would offer a choice that does nothing.
+function overtureGateUpdate() {
+  const b = $('buildings'), o = $('overture');
+  if (!b || !o) return;
+  o.disabled = !b.checked;
+  o.closest('label').style.opacity = b.checked ? '' : '.5';
+}
+if ($('buildings')) $('buildings').addEventListener('change', overtureGateUpdate);
+overtureGateUpdate();
 // ── Height: version gate + reserved room ─────────────────────────────────────────
 // Extended build height arrived in 1.17. Below that the control is DISABLED with the
 // reason shown inline, never hidden, a hidden control just looks broken.
