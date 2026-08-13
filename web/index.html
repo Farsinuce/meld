@@ -492,7 +492,12 @@
       <details class="drawer">
         <summary>Props &middot; 3D families
           <span class="i" title="Bundled 3D props placed at real OSM features: parked cars in car parks, boats on open water, cranes and excavators on construction sites, tractors on farmland, wind turbines at wind generators, fountains, playgrounds, cemetery tombstones, and lighthouses. Untick a family to skip it (no extra time or RAM).">i</span></summary>
-        <div class="dbody"><div id="propsMenu" style="display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px"></div></div>
+        <div class="dbody"><div id="propsMenu" style="display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px"></div>
+          <label style="margin-top:8px">Place props at scales down to
+            <span class="i" title="Props are fixed-size builds - a boat is a boat whatever the world scale - so below this they are skipped. The generator's own default is 0.35, which means at Meld's usual 1:10 no prop is placed at all, however many families are ticked above. Lower it to place them anyway: at 1:10 a parked crane covers a district, which is the effect this guard exists to prevent.">i</span>
+            <input id="propsMinScale" type="number" step="0.05" min="0" max="1" style="width:80px"></label>
+          <div id="propsScaleWarn" class="sub" style="display:none;font-size:11px;color:var(--acc);margin-top:4px"></div>
+        </div>
       </details>
       <label>Game mode
         <span class="i" title="Player game mode written into the generated world's level.dat (Java). Use Survival for a playable survival server.">i</span>
@@ -1987,6 +1992,11 @@ async function refreshState() {
   projHeightBlocks = parseInt(s.world_height_blocks) || 384;
   projCaves = !!st.caves;
   $('scale').value = st.scale; updateScaleHint();
+  // Blank means "leave the generator's own default alone", which is not the same as 0 - 0 would
+  // place props at every scale. An empty box has to stay empty.
+  if ($('propsMinScale') && document.activeElement !== $('propsMinScale'))
+    $('propsMinScale').value = (st.props_min_scale ?? '');
+  propsScaleWarn();
   if (document.activeElement !== $('size')) $('size').value = snapSize(st.job_size_regions);
   $('ground').value = st.ground_level; $('road').value = st.road_detail_level;
   if ($('treeRealm')) $('treeRealm').value = st.tree_realm || 'auto';
@@ -4140,12 +4150,37 @@ function updateScaleHint() {
   rEl.textContent = `1:${fmt(n)}`;
   hEl.textContent = `1:${fmt(n)} · 1 block = ${fmt(n)} m · a 1 km city = ${Math.round(s * 1000)} blocks wide`;
 }
-if ($('scale')) $('scale').addEventListener('input', updateScaleHint);
+if ($('scale')) $('scale').addEventListener('input', () => { updateScaleHint(); propsScaleWarn(); });
 $('scale').addEventListener('change', async () => {
   await api('/api/settings', { scale: numOr($('scale').value, 0.1) });
   await refreshState();
   if (selection) onSelectionChanged();   // re-tile at the new scale
 });
+
+// The prop families above are checkboxes, but whether ANY of them is placed is decided by a
+// number the generator defaults to 0.35 - above Meld's usual 1:10. So the honest failure was ten
+// ticked boxes and no props in the world, with the only trace a line in arnis stdout. Say it in
+// the UI instead of leaving it to be discovered after a six-hour render.
+function propsScaleWarn() {
+  const el = $('propsScaleWarn'), box = $('propsMinScale');
+  if (!el || !box) return;
+  const s = parseFloat($('scale').value);
+  const raw = (box.value || '').trim();
+  const gate = raw === '' ? 0.35 : parseFloat(raw);   // blank = the generator's own default
+  const off = s > 0 && gate > 0 && s < gate;
+  el.style.display = off ? '' : 'none';
+  if (off) el.textContent =
+    `No props at 1:${Math.round(1 / s)} — this world's scale is below ${gate}. `
+    + `Lower the number to place them anyway.`;
+}
+if ($('propsMinScale')) {
+  $('propsMinScale').addEventListener('input', propsScaleWarn);
+  $('propsMinScale').addEventListener('change', () => {
+    const raw = ($('propsMinScale').value || '').trim();
+    api('/api/settings', { props_min_scale: raw === '' ? null : parseFloat(raw) });
+    propsScaleWarn();
+  });
+}
 $('ground').addEventListener('change', () => api('/api/settings', { ground_level: numOr($('ground').value, -56) }));
 $('road').addEventListener('change', () => api('/api/settings', { road_detail_level: $('road').value }));
 if ($('osmBakeWorkers')) $('osmBakeWorkers').addEventListener('change', () => {
