@@ -246,8 +246,18 @@ def main() -> int:
         return 1
 
     if not args.no_arnis and not fetch_arnis(out):
-        log("WARNING: no arnis binary bundled — the app will start but cannot generate. "
-            "Drop one next to the executable, or re-run with network access.")
+        # Hard failure, not a warning. A Meld archive without a generator looks fine, installs
+        # fine and cannot build a single cell; shipping one is worse than not shipping. It also
+        # used to surface two steps later as `--check` exiting 1 in CI, which reads like a
+        # packaging bug rather than "the fork's release has no assets".
+        log("ERROR: no arnis binary to bundle. The app would install and then be unable to "
+            "generate anything.")
+        log("       Checked, in order: a local arnis next to the repo, then the latest release "
+            f"of {FORK}.")
+        log("       If that release has no assets, the fork's release workflow failed - see "
+            "docs/arnis-port-handoff.md.")
+        log("       Pass --no-arnis to build without one deliberately.")
+        return 1
 
     log(f"built: {out}")
     if args.archive:
