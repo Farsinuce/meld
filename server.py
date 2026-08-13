@@ -50,6 +50,7 @@ BASE_DIR = resource_dir()
 # the unpacked payload is a temp directory on some platforms, so it is the wrong answer for both.
 APP_DIR = exe_dir()
 
+from src import update
 from src.project import Project, default_settings
 from src.grid import cells_for_bbox, cells_for_polygons, _point_in_poly, TooManyCells
 from src.coords import expand_bbox_for_seam, cell_bbox, snap_to_region_grid
@@ -4503,8 +4504,26 @@ def api_status():
         "export": export,
         "mcserver": mcstat,
         "report_ready": _report_exists(),
+        # Folded in here rather than given its own route and its own poll: the web UI, the status
+        # bar and the tray all already read /api/status, so this reaches every surface at once and
+        # none of them can disagree about the version. cached_state() only reads memory or a small
+        # JSON file - the network check runs once on a daemon thread at boot.
+        "update": update.cached_state(),
         "log": _LOG[-150:],
     })
+
+
+@app.route("/api/update")
+def api_update():
+    """The update state, and `?force=1` to re-check now rather than wait out the 24 h cache.
+
+    force is what the UI's "Check again" offers. It is deliberately not what /api/status does:
+    unauthenticated GitHub allows 60 requests an hour per IP, shared with everything else on the
+    machine, and a status poll runs every couple of seconds.
+    """
+    force = request.args.get("force") in ("1", "true", "yes")
+    return jsonify({"ok": True, **(update.refresh(force=True) if force
+                                   else update.cached_state())})
 
 
 @app.route("/api/report")
@@ -5862,6 +5881,10 @@ def run_server(port: int | None = None, host: str = "127.0.0.1", *,
     # Before anything can spawn: no console windows per cell, and every child in a group that
     # dies with us instead of surviving as an orphan pinning eight cores.
     childproc.install()
+    # Ask GitHub once, on a daemon thread, ten seconds from now. Not on this path: a DNS lookup
+    # behind a captive portal blocks for the full socket timeout, and no update notice is worth
+    # delaying the first paint. A source checkout skips the network entirely.
+    update.start_background_check()
     global _UI_TOKEN
     _UI_TOKEN = token or ""
     from src import appguard
