@@ -10,10 +10,13 @@ a published checksum, a smoke gate and a rollback path before it is worth shippi
 this feeds opens the release page.
 
 Rate limits shape the design. Unauthenticated GitHub allows 60 requests per hour per IP, shared
-with every other tool on that machine, and Meld already spends that budget elsewhere. So: one
-check ~10 s after boot on a daemon thread, the answer cached on disk for 24 h, and an ETag on the
-revalidation so a check that finds nothing new costs no quota at all. A failed check is cached
-too, briefly - an offline laptop must not retry every time a surface repaints.
+with every other tool on that machine, and Meld already spends that budget elsewhere. The 24 h
+disk cache is the whole protection: measured against the live API, a conditional request that
+comes back 304 STILL decrements X-RateLimit-Remaining, contrary to GitHub's own documentation
+(three consecutive 304s took the counter 50 -> 49 -> 48). So the ETag below saves bandwidth and
+nothing else, and "just revalidate often, it's free" would have quietly burned the budget. A
+failed check is cached too, briefly - an offline laptop must not retry every time a surface
+repaints.
 
 Stdlib only. This runs inside a frozen bundle where adding a dependency means rebuilding.
 """
@@ -125,6 +128,9 @@ def _write_cache(d: dict) -> None:
 
 def _fetch(etag: str = "") -> tuple[dict | None, str, bool]:
     """(release json, etag, not_modified). Raises nothing - network failure returns (None, '', False)."""
+    # The Accept header is not optional. The response carries `Vary: Accept` and the ETag is
+    # Accept-dependent: replaying a stored ETag while omitting this header returns 200 with a
+    # DIFFERENT ETag rather than 304, so an inconsistent Accept silently defeats revalidation.
     req = urllib.request.Request(API, headers={
         "User-Agent": "meld-update-check",
         "Accept": "application/vnd.github+json",
@@ -136,7 +142,6 @@ def _fetch(etag: str = "") -> tuple[dict | None, str, bool]:
             return json.loads(r.read()), r.headers.get("ETag", ""), False
     except urllib.error.HTTPError as e:
         if e.code == 304:
-            # Revalidated: unchanged, and on GitHub a 304 does not spend rate-limit quota.
             return None, etag, True
         return None, "", False
     except Exception:
@@ -189,6 +194,12 @@ def check(force: bool = False) -> dict:
         "url": rel.get("html_url") or RELEASES_PAGE,
         "asset": asset.get("name", ""),
         "size_mb": round((asset.get("size") or 0) / 1e6, 1),
+        # Carried now so the install half never has to ask twice. GitHub returns a per-asset
+        # `digest` ("sha256:...") on every asset of every release in both repos - checked against
+        # a real download, where sha256sum matched byte for byte. So an installer can verify what
+        # it fetched today, with no SHA256SUMS asset to publish and no release.yml change first.
+        "sha256": (asset.get("digest") or "").removeprefix("sha256:"),
+        "download_url": asset.get("browser_download_url", ""),
         # Trimmed hard: this lands in a tkinter HUD and a small modal, not a browser.
         "notes": (rel.get("body") or "").strip()[:1200],
     }

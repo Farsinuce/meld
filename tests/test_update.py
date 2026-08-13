@@ -109,6 +109,26 @@ def test_available(monkeypatch):
     assert r["state"] == "available" and r["latest"] == "1.8.5" and r["current"] == "1.8.4"
 
 
+def test_the_asset_digest_is_carried_through(monkeypatch):
+    """GitHub returns a per-asset `digest` on every release in both repos, so the installer half
+    can verify what it downloaded without any SHA256SUMS asset being published first."""
+    monkeypatch.setattr(update, "platform_tag", lambda: ("linux", "x64", ".tar.gz"))
+    rel = _release(assets=[{"name": "Meld-1.8.5-linux-x64.tar.gz", "size": 99_000_000,
+                            "digest": "sha256:d8da0446",
+                            "browser_download_url": "https://example/a.tar.gz"}])
+    _serve(monkeypatch, rel)
+    r = update.check()
+    assert r["sha256"] == "d8da0446" and r["download_url"].endswith("a.tar.gz")
+
+
+def test_a_missing_digest_is_empty_not_a_crash(monkeypatch):
+    """Older releases predate the field. An installer must see "no digest" and refuse, rather
+    than the checker dying and the whole update surface going dark."""
+    monkeypatch.setattr(update, "platform_tag", lambda: ("linux", "x64", ".tar.gz"))
+    _serve(monkeypatch, _release(assets=[{"name": "Meld-1.8.5-linux-x64.tar.gz", "size": 1}]))
+    assert update.check()["sha256"] == ""
+
+
 def test_up_to_date(monkeypatch):
     _serve(monkeypatch, _release(tag="meld-v1.8.4"))
     assert update.check()["state"] == "up-to-date"

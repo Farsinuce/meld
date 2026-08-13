@@ -2497,6 +2497,7 @@ def api_mini():
     else:
         task = {"title": "Idle", "detail": "nothing running", "pct": None}
 
+    _u = update.cached_state()
     return jsonify({
         "ok": True,
         "app": "Meld",
@@ -2517,6 +2518,12 @@ def api_mini():
         "workers": workers,
         "stats": {"cpu_pct": st.get("cpu_pct"), "ram_pct": ram_pct,
                   "disk_free_gb": st.get("disk_free_gb")},
+        # Two short strings, not the whole update blob. The status bar and the tray tooltip read
+        # THIS route, not /api/status - and this one is deliberately kept tiny (it is polled once
+        # a second by the bar, and the whole point of its existence is being orders of magnitude
+        # cheaper than /api/status). The release notes and download size stay on the fat route,
+        # where the panel that displays them already lives.
+        "update": {"state": _u.get("state", ""), "latest": _u.get("latest", "")},
         "log": _LOG[-6:],
     })
 
