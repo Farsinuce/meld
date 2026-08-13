@@ -292,3 +292,28 @@ def test_install_root_unwraps_a_mac_bundle(monkeypatch, tmp_path):
     monkeypatch.setattr(updater, "exe_dir",
                         lambda: tmp_path / "Applications" / "Meld.app" / "Contents" / "MacOS")
     assert updater.install_root().name == "Meld.app"
+
+
+# ── probe caches must not outlive the binary they describe ────────────────────────────────────
+
+def test_installing_a_generator_forgets_what_was_probed_about_the_old_one(tmp_path, monkeypatch):
+    """Both probe caches key on the PATH, and an update replaces the file at an unchanged path.
+
+    The visible symptom was a success message naming the version it had just replaced. The real
+    damage is arnis_supports(): it gates every new flag, so a freshly installed 3.0.8 would keep
+    being told it has no --overture, and the checkbox the update just enabled would go on doing
+    nothing until Meld was restarted.
+    """
+    from src import arnis_cmd
+
+    exe = tmp_path / "arnis.exe"
+    exe.write_text("old", encoding="utf-8")
+    arnis_cmd._VER_CACHE[str(exe)] = (3, 0, 7)
+    arnis_cmd._HELP_CACHE[str(exe)] = "no such flag here"
+
+    assert arnis_cmd.arnis_version(str(exe)) == (3, 0, 7)
+    assert arnis_cmd.arnis_supports(str(exe), "--overture") is False
+
+    arnis_cmd.forget_probe(str(exe))
+    assert str(exe) not in arnis_cmd._VER_CACHE
+    assert str(exe) not in arnis_cmd._HELP_CACHE

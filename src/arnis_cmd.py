@@ -174,6 +174,20 @@ def arnis_supports(arnis_exe: str, flag: str) -> bool:
 _VER_CACHE: dict[str, tuple] = {}
 
 
+def forget_probe(arnis_exe: str) -> None:
+    """Drop the cached --help and --version answers for one binary path.
+
+    Both caches key on the PATH, and updating the generator replaces the file at a path that
+    stays the same - so without this the process keeps answering from the binary it probed
+    before. That is not just a stale version string in a message: arnis_supports() gates every
+    new flag, so a freshly installed 3.0.8 would still be told it has no --overture, and the
+    checkbox that update just enabled would go on doing nothing until Meld restarted.
+    """
+    key = str(arnis_exe)
+    _VER_CACHE.pop(key, None)
+    _HELP_CACHE.pop(key, None)
+
+
 def arnis_version(arnis_exe: str) -> tuple[int, ...]:
     """(3, 0, 8) for this generator, or () if it will not say.
 

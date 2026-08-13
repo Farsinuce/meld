@@ -410,7 +410,7 @@ def stage_arnis(info: dict, *, render_active: bool = False) -> dict:
     This is what lets a generator fix reach users without shipping a whole new Meld.
     """
     from .paths import bin_dir
-    from .arnis_cmd import arnis_version
+    from .arnis_cmd import arnis_version, forget_probe
 
     if render_active:
         return _fail("a render is running - update the generator when it finishes")
@@ -457,6 +457,12 @@ def stage_arnis(info: dict, *, render_active: bool = False) -> dict:
         if sys.platform == "darwin":
             subprocess.run(["xattr", "-d", "com.apple.quarantine", str(dest)],
                            capture_output=True, check=False)
+
+        # The file at this path just changed, so anything remembered about the old one is now
+        # wrong. Must happen BEFORE the version probe below, or the check reports the version of
+        # the binary that was replaced - and, worse, arnis_supports() keeps gating new flags off
+        # the old binary's --help for the rest of the session.
+        forget_probe(str(dest))
 
         # Prove it runs before letting it be chosen. A generator that cannot report its version
         # is one resolve_arnis_exe() will refuse to prefer anyway, so a silent failure here would
