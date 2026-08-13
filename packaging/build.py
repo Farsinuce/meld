@@ -188,6 +188,47 @@ def write_build_info() -> dict:
     return info
 
 
+def reseal_bundle() -> bool:
+    """Re-sign Meld.app after the generator has been copied inside it. macOS only.
+
+    PyInstaller ad-hoc code-signs the finished bundle as the last step of BUNDLE.assemble, which
+    writes Contents/_CodeSignature/CodeResources - a manifest of every file the bundle is allowed
+    to contain. build.py then copies a 45 MB arnis into Contents/MacOS, which that manifest knows
+    nothing about, so the seal no longer matches its contents and
+
+        codesign --verify --deep --strict dist/Meld.app
+
+    fails with a sealed-resource-added error. Nothing in the build checked, so v1.8.4 shipped
+    that way. It went unnoticed because a second bug hid it: the archive stripped the .app
+    extension, and Gatekeeper only assesses a directory that has one - fixing the extension is
+    what makes the broken seal reachable, so the two fixes belong together.
+
+    Ad-hoc ("-") signing, not a Developer ID: it costs nothing, and it is what PyInstaller
+    already applied. The build stays unnotarised either way, so a user still has to clear
+    Gatekeeper by hand - but from a valid signature that path exists, and from an invalid one it
+    does not.
+    """
+    app = ROOT / "dist" / "Meld.app"
+    generator = app / "Contents" / "MacOS" / "arnis"
+    try:
+        # The nested binary first: --deep will not sign what it does not yet consider sealed.
+        if generator.is_file():
+            subprocess.run(["/usr/bin/codesign", "--force", "--all-architectures",
+                            "--timestamp=none", "--sign", "-", str(generator)], check=True)
+        subprocess.run(["/usr/bin/codesign", "--force", "--all-architectures", "--deep",
+                        "--timestamp=none", "--sign", "-", str(app)], check=True)
+        subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)],
+                       check=True)
+    except FileNotFoundError:
+        log("codesign not found - not a macOS toolchain? Refusing to ship an unsealed bundle.")
+        return False
+    except subprocess.CalledProcessError as ex:
+        log(f"ERROR: could not re-seal Meld.app ({ex}). The bundle would be rejected on launch.")
+        return False
+    log("re-sealed Meld.app (ad-hoc) and verified the signature")
+    return True
+
+
 def archive_path() -> Path:
     """Where the release archive for this machine goes, and what it is called.
 
@@ -213,8 +254,14 @@ def archive(folder: Path) -> Path:
     else:
         # tar, not zip, on Unix: it is the only common format that preserves the executable bit,
         # and a Meld that unzips without +x is a support ticket, not an app.
+        #
+        # arcname is the REAL directory name, never the hardcoded "Meld". On macOS this folder is
+        # Meld.app, and macOS decides something is an application purely by that .app extension:
+        # v1.8.4 shipped both mac tarballs with the suffix stripped, so they extracted to a plain
+        # folder that Finder drew as a folder and LaunchServices refused to launch. Linux is
+        # unaffected either way - its folder really is called Meld.
         with tarfile.open(out, "w:gz") as t:
-            t.add(folder, arcname="Meld")
+            t.add(folder, arcname=folder.name)
     log(f"archive: {out} ({out.stat().st_size / 1e6:.0f} MB)")
     return out
 
@@ -284,6 +331,9 @@ def main() -> int:
         log("       If that release has no assets, the fork's release workflow failed - see "
             "docs/arnis-port-handoff.md.")
         log("       Pass --no-arnis to build without one deliberately.")
+        return 1
+
+    if IS_MAC and (ROOT / "dist" / "Meld.app").exists() and not reseal_bundle():
         return 1
 
     log(f"built: {out}")

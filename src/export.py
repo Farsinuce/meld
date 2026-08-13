@@ -972,9 +972,29 @@ def resolve_region_converter() -> Path | None:
         search.append(root / built)                      # legacy: binary at the repo root
     for p in search:
         if p.is_file():
+            _ensure_executable(p)
             return p
     found = _sh.which("region_converter") or _sh.which("region_converter.exe")
     return Path(found) if found else None
+
+
+def _ensure_executable(p: Path) -> None:
+    """Add the execute bit on Unix if it is missing.
+
+    The bundled Linux converters were committed 100644. Git stores the execute bit, so every
+    checkout and every PyInstaller build inherited a file that cannot be exec'd, and a B_Linear
+    export died with `PermissionError: [Errno 13]` pointing at a binary that is plainly present -
+    which reads like a corrupt download rather than a file mode. The repo modes are fixed; this
+    stays as the belt-and-braces half, because it also covers a converter the user dropped in by
+    hand and an archive that lost the bit in transit.
+    """
+    if sys.platform == "win32":
+        return
+    try:
+        if not os.access(p, os.X_OK):
+            p.chmod(p.stat().st_mode | 0o111)
+    except Exception:
+        pass                          # a read-only install still runs if the bit is already set
 
 
 def _find_world_with_regions(root: Path, ext: str) -> Path | None:

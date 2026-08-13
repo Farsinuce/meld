@@ -105,6 +105,48 @@ def test_a_three_part_version_survives_on_every_platform(build, monkeypatch):
                          version="10.20.30") == "Meld-10.20.30-linux-arm64.tar.gz"
 
 
+def test_the_tarball_keeps_the_app_extension(build, monkeypatch, tmp_path):
+    """macOS decides a directory is an application purely by its .app extension.
+
+    v1.8.4 tarred dist/Meld.app with a hardcoded arcname="Meld", so both mac archives extracted
+    to a plain folder: Finder drew a folder, LaunchServices would not launch it, and the release
+    note's "extract the folder anywhere and run it" dead-ended. Linux was never affected, which
+    is why a single hardcoded name looked fine for as long as only Linux and Windows shipped.
+    """
+    import tarfile
+
+    app = tmp_path / "Meld.app" / "Contents" / "MacOS"
+    app.mkdir(parents=True)
+    (app / "Meld").write_text("payload", encoding="utf-8")
+
+    out = tmp_path / "out.tar.gz"
+    monkeypatch.setattr(build, "IS_WIN", False)
+    monkeypatch.setattr(build, "archive_path", lambda: out)
+    build.archive(tmp_path / "Meld.app")
+
+    with tarfile.open(out) as t:
+        names = t.getnames()
+    assert all(n.split("/")[0] == "Meld.app" for n in names), \
+        f"the .app extension was stripped: {names[:3]}"
+
+
+def test_a_linux_folder_is_still_archived_as_plain_Meld(build, monkeypatch, tmp_path):
+    """The fix must not rename the Linux payload, whose folder really is called Meld."""
+    import tarfile
+
+    folder = tmp_path / "Meld"
+    folder.mkdir()
+    (folder / "Meld").write_text("payload", encoding="utf-8")
+
+    out = tmp_path / "out.tar.gz"
+    monkeypatch.setattr(build, "IS_WIN", False)
+    monkeypatch.setattr(build, "archive_path", lambda: out)
+    build.archive(folder)
+
+    with tarfile.open(out) as t:
+        assert all(n.split("/")[0] == "Meld" for n in t.getnames())
+
+
 def test_the_name_matches_what_the_release_notes_promise(build, monkeypatch):
     """release.yml's download table names these files literally; a mismatch points users at a
     file that does not exist."""
