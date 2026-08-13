@@ -27,9 +27,9 @@ and states where Meld has to move once the fork's CLI does.
   on a 16 px target never throws a 1360x880 window over your work. Quitting is the
   tray's Quit and nothing else.
 - **Status bar.** A frameless strip that floats above other windows with one coloured
-  block per worker — idle, queued, fetch, prepare, **build** (gold), save, merge,
-  failed — plus the current task, ETA, CPU/RAM/disk and an optional two-minute
-  CPU/RAM history graph. No title bar and no close box: it is dismissed from its own
+  block per worker (idle, queued, fetch, prepare, **build** in gold, save, merge,
+  failed), plus the current task, ETA, CPU/RAM/disk and an optional two-minute
+  CPU/RAM history graph. No title bar and no close box, so it is dismissed from its own
   right-click menu, so it cannot be shut by reflex six hours into a render. Position,
   opacity and hidden state are remembered.
 - **Its own window.** The UI opens as an application window with no tabs and no address
@@ -49,7 +49,7 @@ and states where Meld has to move once the fork's CLI does.
   from source and fails for every packaged user. `src/paths.py` now separates read-only
   bundled files from the writable data directory. A source checkout resolves both to the
   repo root, so existing `projects/` and `cache/` do not move.
-- **Orphaned generators.** Quitting — or crashing, or being killed — left `arnis`
+- **Orphaned generators.** Quitting, crashing or being killed left `arnis`
   children running: eight processes, every core pinned, no window to close them from.
   They now sit in a Windows Job Object that dies with the app however it dies, and in
   their own process group on POSIX.
@@ -64,7 +64,7 @@ and states where Meld has to move once the fork's CLI does.
   launches processes. Host and Origin checks are always on, plus a per-session token for
   the packaged app.
 - **A second launch fought the first** for the port and the project folder. An OS file
-  lock — not a PID file, which a crash leaves behind — now makes the second launch open
+  lock, not a PID file that a crash leaves behind, now makes the second launch open
   the running copy instead.
 - Werkzeug's development server is replaced by waitress, with the channel timeout raised
   well past its 120 s default so a multi-minute export is not cut off mid-write.
@@ -80,7 +80,7 @@ and states where Meld has to move once the fork's CLI does.
 
 ### Fixed
 - **The launcher could build and deploy a half-finished generator without saying so.**
-  `build_arnis()` — the fallback that runs when no `arnis.exe` is present — ran a bare
+  `build_arnis()`, the fallback that runs when no `arnis.exe` is present, ran a bare
   `cargo build --release` inside the fork checkout and copied `target/release/arnis.exe`
   over Meld's own tracked `arnis.exe`. In a checkout that is mid-development that silently
   ships an unreleased build, and it clobbers the `target/` directory of whoever is working
@@ -95,7 +95,7 @@ and states where Meld has to move once the fork's CLI does.
   tracks the real version, so the tray/banner can report it instead of a literal.
 
 ### Notes
-- The fork is at **3.0.7 (unreleased)** — see `arnis-283-src/CHANGELOG.md`. Everything landed
+- The fork is at **3.0.7 (unreleased)**, see `arnis-283-src/CHANGELOG.md`. Everything landed
   there so far is gated on producing a byte-identical render, so no Meld change is required
   to run it.
 - One Meld change *is* coming and is deliberately not in this release: upstream replaces
