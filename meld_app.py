@@ -154,7 +154,11 @@ def main(argv: list[str] | None = None) -> int:
     paths.unpack_embedded_arnis()
 
     inst = SingleInstance()
-    if not inst.acquire():
+    # Started by an update hand-off: the old build is quitting right now, so wait for it to let
+    # go of the lock instead of concluding it is already running and exiting. Set by the updater
+    # on the process it spawns; absent for every normal launch, which takes the plain path below.
+    _wait = float(os.environ.get("MELD_WAIT_FOR_LOCK") or 0)
+    if not (inst.acquire_waiting(_wait) if _wait > 0 else inst.acquire()):
         # Already running. Open that copy instead of dying on a busy port - a second
         # double-click should feel like "bring it up", not like an error.
         other = running_url()

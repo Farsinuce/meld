@@ -4595,6 +4595,42 @@ def api_update_progress():
     return jsonify({"ok": True, **updater.progress()})
 
 
+@app.route("/api/update/staged")
+def api_update_staged():
+    """Prepared builds sitting next to this install, newest first."""
+    return jsonify({"ok": True, "builds": updater.staged_builds(),
+                    "current": str(updater.install_root())})
+
+
+@app.route("/api/update/launch", methods=["POST"])
+def api_update_launch():
+    """Hand over to a prepared build: start it waiting on the lock, then quit this one.
+
+    Refused mid-render. Everything else about this is reversible - the old folder stays, so if
+    the new build misbehaves the user launches the old one again.
+    """
+    if POOL.is_running() or POOL.queue_size():
+        return jsonify({"ok": False, "error": "a render is running - finish it first"}), 400
+    path = (request.get_json(silent=True) or {}).get("path") or ""
+    r = updater.launch_staged(path)
+    if not r.get("ok"):
+        return jsonify(r), 400
+    # The new process is now blocking on the single-instance lock. Quitting is what releases it,
+    # so the shutdown below is not cleanup - it is the second half of the hand-off. Deferred just
+    # far enough for this response to reach the browser.
+    threading.Timer(1.0, lambda: os._exit(0)).start()
+    return jsonify(r)
+
+
+@app.route("/api/update/remove", methods=["POST"])
+def api_update_remove():
+    """Delete a build folder the user is finished with. The one irreversible step, kept separate
+    and never automatic."""
+    path = (request.get_json(silent=True) or {}).get("path") or ""
+    r = updater.remove_build(path)
+    return jsonify(r) if r.get("ok") else (jsonify(r), 400)
+
+
 @app.route("/api/update/arnis")
 def api_update_arnis():
     """Is there a newer generator? Checked on demand, not on a timer.

@@ -308,6 +308,94 @@ def _fail(msg: str) -> dict:
     return progress()
 
 
+# ── moving across ─────────────────────────────────────────────────────────────────────────────
+
+def staged_builds() -> list[dict]:
+    """Prepared versions sitting next to this install, newest first.
+
+    They are found by looking rather than remembered in a file: staging writes a real folder to
+    a real place, and a list that can disagree with the disk is a list that will.
+    """
+    from .update import parse_version
+    here, out = install_root(), []
+    try:
+        for p in here.parent.iterdir():
+            if p == here or not p.is_dir() or not p.name.startswith("Meld-"):
+                continue
+            v = parse_version(p.name)
+            if v and _console_exe(p).is_file():
+                out.append({"version": ".".join(map(str, v)), "path": str(p), "_v": v})
+    except Exception:
+        return []
+    out.sort(key=lambda d: d["_v"], reverse=True)
+    for d in out:
+        d.pop("_v", None)
+    return out
+
+
+def launch_staged(path: str) -> dict:
+    """Start a prepared build and hand over to it.
+
+    Order is the whole design. A new build started while this one still holds the single-instance
+    lock sees it held, opens a browser at THIS instance and exits 0 - an update that looks like it
+    worked and did nothing. It cannot be done the other way either: a process cannot quit and then
+    spawn something. So the new build is started first with MELD_WAIT_FOR_LOCK, it blocks on the
+    lock, and this process quits - at which point the lock releases and the new one continues.
+
+    The old folder is left alone. If the new build turns out to be worse, the user launches the
+    old one again; removing it is a separate, explicit action.
+    """
+    root = Path(path)
+    exe_name = "Meld.exe" if sys.platform == "win32" else "Meld"
+    target = (root / "Contents" / "MacOS" / exe_name) if root.suffix == ".app" else root / exe_name
+    if not target.is_file():
+        return {"ok": False, "error": f"no {exe_name} in {root}"}
+
+    env = dict(os.environ)
+    env["MELD_WAIT_FOR_LOCK"] = "45"
+    # Not inherited: this process is about to exit, and MELD_DATA_DIR set for a smoke test would
+    # otherwise send the new build at a scratch directory instead of the real projects.
+    env.pop("MELD_DATA_DIR", None)
+    try:
+        kw: dict = {"cwd": str(root), "env": env, "close_fds": True}
+        if sys.platform == "win32":
+            kw["creationflags"] = 0x00000008 | 0x00000200        # DETACHED_PROCESS | NEW_GROUP
+        else:
+            kw["start_new_session"] = True
+        subprocess.Popen([str(target)], **kw)
+    except Exception as ex:                                       # noqa: BLE001
+        return {"ok": False, "error": f"could not start {target}: {ex}"}
+    return {"ok": True, "started": str(target)}
+
+
+def remove_build(path: str) -> dict:
+    """Delete a prepared build, or an old one the user has finished with.
+
+    Explicit and separate because it is the only irreversible step in the whole feature, and
+    because of one specific trap: for a portable install paths.data_dir() resolves INSIDE the
+    application folder (<app>/data), so deleting that folder would take the user's projects and
+    their entire tile cache with it. Refused outright rather than handled cleverly.
+    """
+    root = Path(path).resolve()
+    if root == install_root().resolve():
+        return {"ok": False, "error": "that is the version you are running"}
+    if not root.is_dir() or not root.name.startswith("Meld-"):
+        return {"ok": False, "error": "not a Meld build folder"}
+    try:
+        d = data_dir().resolve()
+        if d == root or root in d.parents:
+            return {"ok": False,
+                    "error": f"your projects and caches live inside that folder ({d}) - "
+                             "move them first, or keep it"}
+    except Exception:
+        return {"ok": False, "error": "could not confirm where your data lives - not deleting"}
+    try:
+        shutil.rmtree(root)
+    except Exception as ex:                                       # noqa: BLE001
+        return {"ok": False, "error": str(ex)}
+    return {"ok": True, "removed": str(root)}
+
+
 # ── the generator, on its own schedule ────────────────────────────────────────────────────────
 
 def stage_arnis(info: dict, *, render_active: bool = False) -> dict:

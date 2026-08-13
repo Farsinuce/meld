@@ -197,6 +197,94 @@ def test_tar_extraction_refuses_a_path_escape(tmp_path):
     assert not (tmp_path / "escaped.txt").exists(), "extraction escaped its directory"
 
 
+# ── removing a build: the only irreversible step ──────────────────────────────────────────────
+
+def test_never_removes_the_running_version(tmp_path):
+    r = updater.remove_build(str(tmp_path / "app" / "Meld"))
+    assert r["ok"] is False and "running" in r["error"]
+
+
+def test_never_removes_a_folder_that_holds_the_data(tmp_path, monkeypatch):
+    """The portable case, and the one that would be unrecoverable.
+
+    paths.data_dir() resolves to <app>/data for a portable install, so "delete the old version"
+    would take the projects and the entire tile cache with it. Refused outright rather than
+    handled cleverly - there is no clever version of deleting someone's 100 GB cache.
+    """
+    old = tmp_path / "app" / "Meld-1.8.5"
+    (old / "data" / "projects").mkdir(parents=True)
+    monkeypatch.setattr(updater, "data_dir", lambda: old / "data")
+    r = updater.remove_build(str(old))
+    assert r["ok"] is False and "projects" in r["error"]
+    assert (old / "data" / "projects").is_dir(), "it must still be there"
+
+
+def test_refuses_anything_that_is_not_a_meld_build(tmp_path):
+    other = tmp_path / "Documents"
+    other.mkdir()
+    assert updater.remove_build(str(other))["ok"] is False
+
+
+def test_removes_a_spent_build(tmp_path):
+    old = tmp_path / "app" / "Meld-1.8.4"
+    (old / "_internal").mkdir(parents=True)
+    r = updater.remove_build(str(old))
+    assert r["ok"] is True and not old.exists()
+
+
+# ── handing over ──────────────────────────────────────────────────────────────────────────────
+
+def test_the_new_build_is_told_to_wait_for_the_lock(tmp_path, monkeypatch):
+    """The hand-off only works in one order.
+
+    A new build started while the old one holds the lock sees it held, opens a browser at the OLD
+    instance and exits 0 - an update that looks successful and changes nothing. So the new one is
+    started first and must WAIT; the old one quitting is what releases the lock.
+    """
+    staged = tmp_path / "app" / "Meld-9.9.9"
+    staged.mkdir(parents=True)
+    (staged / "Meld.exe").write_text("new", encoding="utf-8")
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+
+    seen = {}
+
+    def fake_popen(cmd, **kw):
+        seen["cmd"], seen["env"] = cmd, kw.get("env") or {}
+        return object()
+
+    monkeypatch.setattr(updater.subprocess, "Popen", fake_popen)
+    r = updater.launch_staged(str(staged))
+    assert r["ok"] is True
+    assert float(seen["env"]["MELD_WAIT_FOR_LOCK"]) > 0
+
+
+def test_the_smoke_test_data_dir_is_not_inherited(tmp_path, monkeypatch):
+    """staging points MELD_DATA_DIR at a scratch directory. Inheriting that would send the new
+    build at an empty data folder - it would come up with no projects, which to a user is
+    indistinguishable from having lost them."""
+    staged = tmp_path / "app" / "Meld-9.9.9"
+    staged.mkdir(parents=True)
+    (staged / "Meld.exe").write_text("new", encoding="utf-8")
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+    monkeypatch.setenv("MELD_DATA_DIR", str(tmp_path / "scratch"))
+
+    seen = {}
+    monkeypatch.setattr(updater.subprocess, "Popen",
+                        lambda cmd, **kw: seen.update(env=kw.get("env") or {}) or object())
+    updater.launch_staged(str(staged))
+    assert "MELD_DATA_DIR" not in seen["env"]
+
+
+def test_staged_builds_are_listed_newest_first(tmp_path, monkeypatch):
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+    for v in ("1.8.4", "1.8.10", "1.8.9"):
+        d = tmp_path / "app" / f"Meld-{v}"
+        d.mkdir(parents=True)
+        (d / "Meld-console.exe").write_text("x", encoding="utf-8")
+    got = [b["version"] for b in updater.staged_builds()]
+    assert got == ["1.8.10", "1.8.9", "1.8.4"], "numeric order, not string order"
+
+
 def test_install_root_unwraps_a_mac_bundle(monkeypatch, tmp_path):
     """On macOS the executable lives in Meld.app/Contents/MacOS, and the thing to stage beside is
     the .app - not its MacOS folder, which would nest the new version inside the old bundle."""

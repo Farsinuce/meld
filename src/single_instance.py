@@ -49,6 +49,27 @@ class SingleInstance:
         self._fh = None
         self._name = name
 
+    def acquire_waiting(self, seconds: float) -> bool:
+        """acquire(), but keep trying while the previous instance shuts down.
+
+        This exists for the update hand-off, and the hand-off only works in one order. A new
+        build started while the old one is still alive does NOT take the lock: it sees the lock
+        held, opens a browser at the OLD instance and exits 0 - looking like a successful update
+        that changed nothing. The old process therefore has to quit first, which it cannot do
+        *and then* spawn anything. So the new build is started first and waits here for the lock
+        the old one is about to release.
+
+        Bounded, and falls through to a normal "already running" if the wait runs out - a hung
+        old instance must not leave the new one spinning forever.
+        """
+        deadline = time.monotonic() + max(0.0, seconds)
+        while True:
+            if self.acquire():
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.25)
+
     def acquire(self) -> bool:
         try:
             path = data_dir() / self._name
