@@ -99,11 +99,15 @@ else:
 # unavailable at runtime, which is far better than the build failing on a machine that never
 # wanted the feature.
 try:
-    from PyInstaller.utils.hooks import collect_submodules, collect_dynamic_libs
+    from PyInstaller.utils.hooks import collect_submodules
     _osm = collect_submodules("osmium")
     if _osm:
         hiddenimports += _osm
-        binaries += collect_dynamic_libs("osmium")
+        # Submodules only. collect_dynamic_libs() was here and is deliberately NOT: PyInstaller's
+        # own analysis already collects osmium and osmium.libs (verified by building without it
+        # and confirming the frozen app still reads every .pbf header), so it added a second,
+        # platform-specific way to gather native libraries for no gain - and macOS is where that
+        # kind of duplication turns into a failed bundle or a failed re-sign.
         print(f"[spec] osmium bundled ({len(_osm)} submodules) - offline .pbf baking available")
     else:
         print("[spec] osmium not importable - .pbf baking will report itself unavailable")
