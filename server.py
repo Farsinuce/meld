@@ -1426,12 +1426,28 @@ def api_osmpack_bake():
     scan = op.scan_pbf_folder(folder)
     if not scan.get("ok") or not scan.get("files"):
         return _release(scan.get("error") or "no .pbf files in folder", 400)
-    pbf_paths = [f["path"] for f in scan["files"]]
     force = bool((request.json or {}).get("force"))
     gbb = _osm_gen_bbox(bbox)                     # seam-expanded → bake the ring generation will need
     cov = op.coverage_osm(gbb)
     tiles = (osm_grid.grid_tiles_for_bbox(gbb) if force
              else [(t["x"], t["y"]) for t in cov["missing"]])
+    # Plan before reading a byte. Two things this prevents, both reported from the wild: reading
+    # every .pbf in the folder regardless of where the region is (eight continent extracts, 75 GB,
+    # to render one US state), and starting a bake that cannot fit in memory - which does not fail,
+    # it swaps the machine until Windows grows a 190 GB pagefile.
+    _st = PROJECT.settings()
+    plan = op.plan_bake(scan["files"], tiles,
+                        workers_requested=int(_st.get("osm_bake_workers", 0) or 0),
+                        region_bbox=gbb, cache_dir=_cache_root_for_plan())
+    if not plan["fits"] and not force:
+        return _release(plan["reason"], 400)
+    pbf_paths = [f["path"] for f in op.select_pbfs(scan["files"], gbb)[0]]
+    if plan["pbf_skipped"]:
+        log(f"[OSM pack] skipping {plan['pbf_skipped']} .pbf outside this region: "
+            + ", ".join(plan["skipped_names"]))
+    log(f"[OSM pack] plan: {plan['workers']} worker(s), ~{plan['ram_peak_gb']} GB RAM, "
+        f"~{plan['disk_final_gb']} GB of tiles (~{plan['disk_peak_gb']} GB peak), "
+        f"~{plan['eta_min']} min")
     rid = dp.region_id(bbox, name)
     with _OSMPACK_LOCK:
         _OSMPACK.update(total=len(tiles), region=name or rid,
@@ -1452,7 +1468,10 @@ def api_osmpack_bake():
             log(f"[OSM pack] baking {len(tiles)} z{osm_grid.OSM_GRID_Z} tile(s) from "
                 f"{len(pbf_paths)} .pbf file(s)…")
             _s = PROJECT.settings()
-            _bw = int(_s.get("osm_bake_workers", 4) or 4)
+            # The PLANNED count, not the stored setting: the plan already fitted it to the
+            # memory actually free against the largest .pbf, which is what stops four
+            # workers each demanding 42 GB on a machine that has 20.
+            _bw = int(plan["workers"])
             # Parallel front end (one process per .pbf, then merge seams) — bake_tiles_parallel falls
             # back to the sequential bake_tiles for <2 overlapping .pbf or any pool error. Set bake
             # workers to 1 to force the sequential path. Output is identical either way (verified).
@@ -2864,6 +2883,21 @@ def api_world_delete():
     return jsonify({"ok": True, "cell_key": cell_key, "removed_regions": removed})
 
 
+# Shared with meld_app.py's --pick-folder mode. A folder path is only ever read from a line
+# carrying this prefix, so no other output of any child process can be mistaken for one.
+PICK_SENTINEL = "MELD_PICKED_PATH:"
+
+
+def _cache_root_for_plan():
+    """Where the bake writes, for the free-space check. Its own helper because meld_cache_root is
+    imported lazily elsewhere and the planner needs it before any bake starts."""
+    try:
+        from src.prefetch import meld_cache_root
+        return meld_cache_root()
+    except Exception:
+        return data_dir()
+
+
 @app.route("/api/pick-folder", methods=["POST"])
 def api_pick_folder():
     """Open a native folder-select dialog on the local machine (the server runs on
@@ -2871,23 +2905,40 @@ def api_pick_folder():
     so it can't block or crash the server. An optional `title` labels the dialog (used
     for the Save location, the .pbf folder, and the import folder browse buttons)."""
     raw_title = ((request.json or {}).get("title") or "Select a folder")
-    # The title is interpolated into the subprocess source, so keep it to a safe, quote-free set.
     title = re.sub(r"[^A-Za-z0-9 ._/()-]", "", str(raw_title))[:80] or "Select a folder"
-    code = (
-        "import tkinter as tk, tkinter.filedialog as fd\n"
-        "r=tk.Tk(); r.withdraw(); r.attributes('-topmost', True)\n"
-        f"p=fd.askdirectory(title='{title}')\n"
-        "print(p or '')\n"
-    )
+
+    # Frozen, sys.executable is Meld.exe, NOT a Python interpreter. Passing it -c launched a
+    # second Meld, which hit the single-instance lock, printed
+    #   "Meld is already running: http://127.0.0.1:5630/?t=<token>"
+    # and exited 0 - so every Browse button in the shipped exe returned that sentence as the
+    # chosen folder and put the session token on screen. Frozen builds get a real mode of the
+    # same executable instead; from source, sys.executable IS python and -c is correct.
+    if is_frozen():
+        cmd = [sys.executable, "--pick-folder", "--title", title]
+    else:
+        # The title arrives as argv, never interpolated into the source. Sanitising a string
+        # before pasting it into code you are about to execute is a defence that has to keep
+        # being right; passing it as data cannot be got wrong.
+        code = (
+            "import sys, tkinter as tk, tkinter.filedialog as fd\n"
+            "r=tk.Tk(); r.withdraw(); r.attributes('-topmost', True)\n"
+            "p=fd.askdirectory(title=(sys.argv[1] if len(sys.argv)>1 else 'Select a folder'))\n"
+            "sys.stdout.write('\\nMELD_PICKED_PATH:' + (p or '') + '\\n')\n"
+        )
+        cmd = [sys.executable, "-c", code, title]
     try:
         # PYTHONIOENCODING pins the child's side of the pipe so a picked folder with
         # non-ASCII characters survives on any locale (both ends UTF-8, not the code page).
-        out = subprocess.run([sys.executable, "-c", code],
-                             capture_output=True, text=True, encoding="utf-8",
+        out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                              errors="replace", timeout=180,
                              env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        lines = [ln for ln in (out.stdout or "").splitlines() if ln.strip()]
-        return jsonify({"ok": True, "path": lines[-1].strip() if lines else ""})
+        # Only a sentinel-prefixed line counts. Taking the last line of stdout is what turned a
+        # stray message into a "path" in the first place; anything unprefixed is now discarded,
+        # whatever it says.
+        for ln in reversed((out.stdout or "").splitlines()):
+            if ln.startswith(PICK_SENTINEL):
+                return jsonify({"ok": True, "path": ln[len(PICK_SENTINEL):].strip()})
+        return jsonify({"ok": True, "path": ""})
     except Exception as e:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(e)}), 500
 

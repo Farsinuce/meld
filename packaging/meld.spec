@@ -76,6 +76,8 @@ if EMBED_ARNIS:
     # true single-file build possible - without it the .exe still needs arnis sitting beside it.
     datas += one("arnis.exe" if IS_WIN else "arnis", "arnis-bundled")
 
+binaries: list = []
+
 hiddenimports = [
     "server",                # imported inside main(), after the banner
     "waitress",
@@ -91,12 +93,31 @@ elif IS_MAC:
 else:
     hiddenimports += ["pystray._xorg", "pystray._appindicator", "pystray._gtk"]
 
+# osmium: the offline .pbf bake. A pybind11 extension whose compiled submodules PyInstaller's
+# analysis does not discover on its own, so they are named. Best-effort by design: if osmium is
+# not installed on the build machine the app still builds and simply reports the bake as
+# unavailable at runtime, which is far better than the build failing on a machine that never
+# wanted the feature.
+try:
+    from PyInstaller.utils.hooks import collect_submodules, collect_dynamic_libs
+    _osm = collect_submodules("osmium")
+    if _osm:
+        hiddenimports += _osm
+        binaries += collect_dynamic_libs("osmium")
+        print(f"[spec] osmium bundled ({len(_osm)} submodules) - offline .pbf baking available")
+    else:
+        print("[spec] osmium not importable - .pbf baking will report itself unavailable")
+except Exception as _e:                                    # noqa: BLE001
+    print(f"[spec] osmium not bundled ({_e}) - .pbf baking will report itself unavailable")
+
 excludes = [
-    # osmium is optional (baking a local .pbf into the offline OSM pack) and is a large
-    # C++/pybind extension whose PyInstaller story is unreliable across platforms. Leaving it
-    # out keeps the packaged build buildable everywhere; that one feature stays available on a
-    # source install, where osmium is already an optional dependency.
-    "osmium",
+    # osmium is NOT excluded any more. Leaving it out meant the offline .pbf bake simply did not
+    # exist in the shipped app, with nothing saying so: a user dropped their .pbf folder in, got
+    # "(no header bbox)" on every file, and the only fix was a source install. `pip install` is
+    # not a thing an exe user can do - the bundled runtime is not the one pip writes to.
+    #
+    # It is a large pybind11 extension, so it is collected explicitly below rather than left to
+    # PyInstaller's analysis, which does not find its compiled submodules on its own.
     # tkinter is NOT excluded: src/statusbar.py draws the frameless status bar with it, and it
     # is the reason that HUD costs no third-party dependency. Worth its ~10 MB.
     "pytest",
@@ -107,7 +128,7 @@ excludes = [
 a = Analysis(
     [str(ROOT / "meld_app.py")],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

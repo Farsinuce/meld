@@ -97,13 +97,46 @@ def coverage_osm(bbox: dict, z: int = osm_grid.OSM_GRID_Z) -> dict:
     return {"grid_z": z, "total": total, "cached": cached, "missing": missing, "pct": pct}
 
 
+# ── is baking possible at all? ────────────────────────────────────────────────
+def osmium_status() -> dict:
+    """{ok, reason} - can this install bake a .pbf, and if not, what does the user do about it?
+
+    Worth a function rather than a bare try/except at each call site because the honest answer
+    differs by install. A packaged build that shipped without osmium cannot be fixed with
+    `pip install`: the bundled runtime is not the one pip writes to, so telling a user to run pip
+    sends them somewhere that cannot help. That is exactly what happened - the flag was excluded
+    from the build, the UI said "(no header bbox)" on every file, and the only real fix was a
+    source install nobody mentioned.
+    """
+    try:
+        import osmium  # noqa: F401
+        return {"ok": True, "reason": ""}
+    except Exception as ex:                                   # noqa: BLE001
+        from .paths import is_frozen
+        if is_frozen():
+            return {"ok": False, "reason":
+                    "This build of Meld was packaged without the .pbf reader, so offline OSM "
+                    "baking is unavailable. Everything else works; online OSM is unaffected. "
+                    f"({ex})"}
+        return {"ok": False, "reason":
+                f"pyosmium is not installed in this Python, so .pbf files cannot be read. "
+                f"Install it with:  pip install osmium   ({ex})"}
+
+
 # ── .pbf discovery (pyosmium for the header bbox; gracefully degrades) ─────────
 def scan_pbf_folder(folder: str) -> dict:
     """List .osm.pbf files in `folder` with their header bbox (if present) and size. Used by the
-    UI to confirm a drop folder before baking. Returns {ok, files:[{path,name,size_bytes,bbox|None}]}."""
+    UI to confirm a drop folder before baking.
+
+    Returns {ok, osmium:{ok,reason}, files:[{path,name,size_bytes,bbox|None}]}. The osmium status
+    rides along so the UI can say why every bbox is missing instead of implying the FILES are at
+    fault - "(no header bbox)" on all eight continent extracts means the reader is absent, not
+    that Geofabrik shipped eight broken files.
+    """
     d = Path(folder).expanduser()
     if not d.is_dir():
         return {"ok": False, "error": f"not a folder: {folder}", "files": []}
+    st = osmium_status()
     try:
         import osmium  # lazy; scan still lists files if pyosmium is absent (bbox=None)
     except Exception:
@@ -130,7 +163,136 @@ def scan_pbf_folder(folder: str) -> dict:
         if f["path"] in seen:
             continue
         seen.add(f["path"]); uniq.append(f)
-    return {"ok": True, "files": uniq}
+    return {"ok": True, "osmium": st, "files": uniq}
+
+
+# ── planning a bake before it eats the machine ────────────────────────────────
+#
+# Every constant here was measured on a real bake rather than reasoned about, because the first
+# guess at each of them was wrong by an order of magnitude.
+
+# Peak RSS per worker, per GB of .pbf. Measured with pyosmium 4.3.1 over ukraine-latest
+# (871 MB, 125.7M elements): 1910 MB peak, i.e. 2192 MB per GB. It is the node-location index;
+# the same pass WITHOUT locations is flat at 124 MB whatever the file size.
+#
+# This is what turned a 33 GB europe-latest into a 72 GB demand on a 68 GB machine, four workers
+# at a time, and pushed Windows into a 190 GB pagefile. A disk-backed index (sparse_file_array)
+# was measured too and saved nothing: 1919 MB peak plus a 1.8 GB index file.
+RAM_GB_PER_PBF_GB = 2.2
+
+# Baked JSON per byte of .pbf, for a region-matched extract. Measured: 2.03 GB of .pbf across six
+# Balkan countries produced 59.6 GB of tiles. The output is uncompressed Overpass-style JSON, so
+# it expands hard, and this is the number nobody had before running out of disk.
+BAKED_PER_PBF = 29.0
+
+# Elements per second, single worker. Measured: 125.7M elements in ~147 s.
+PBF_MB_PER_SEC = 6.0
+
+
+def _bbox_overlaps(a: dict, b: dict) -> bool:
+    """Do two lat/lon boxes intersect at all? Touching edges count - a way can sit exactly on one."""
+    if not a or not b:
+        return True                      # unknown bbox: never exclude on a guess
+    return not (a["north"] < b["south"] or a["south"] > b["north"]
+                or a["east"] < b["west"] or a["west"] > b["east"])
+
+
+def select_pbfs(files: list[dict], region_bbox: dict | None) -> tuple[list[dict], list[dict]]:
+    """Split scanned .pbf files into (needed, skipped) for this region.
+
+    The scan already reads every header bbox and the bake then ignored it, so dropping eight
+    continent extracts in a folder to render New Hampshire read all 75 GB of them. north-america
+    alone is 19 GB; the state extract is 0.07 GB. Same output, 275x less memory.
+
+    A file whose bbox cannot be read is kept, never skipped: excluding data because we failed to
+    parse a header would silently produce a world with holes in it.
+    """
+    if not region_bbox:
+        return list(files), []
+    need = [f for f in files if _bbox_overlaps(f.get("bbox"), region_bbox)]
+    skip = [f for f in files if f not in need]
+    return need, skip
+
+
+def plan_bake(files: list[dict], tiles: list, workers_requested: int = 0,
+              region_bbox: dict | None = None, cache_dir: Path | None = None) -> dict:
+    """What this bake will cost, before a byte is read.
+
+    Returns RAM, disk and time estimates plus a worker count that fits in the memory actually
+    available. `fits` is False when even one worker cannot run, and `reason` then says what to do
+    instead - which for a continent extract is almost always "use the country or state file".
+    """
+    import shutil as _sh
+    try:
+        import psutil
+        avail = psutil.virtual_memory().available
+        cores = os.cpu_count() or 4
+    except Exception:                                          # noqa: BLE001
+        avail, cores = 8 * 1e9, 4
+
+    need, skipped = select_pbfs(files, region_bbox)
+    total_gb = sum(f.get("size_bytes", 0) for f in need) / 1e9
+    largest_gb = max((f.get("size_bytes", 0) for f in need), default=0) / 1e9
+
+    # Peak is driven by the LARGEST file a worker might take, not the average: workers are handed
+    # one .pbf each, so the worst case is several big ones running at once.
+    per_worker_gb = max(0.2, largest_gb * RAM_GB_PER_PBF_GB)
+    budget = (avail / 1e9) * 0.6            # leave the OS, the browser and any render some room
+    fit = int(budget // per_worker_gb)
+    workers = max(1, min(fit if fit > 0 else 1, cores, len(need) or 1,
+                         workers_requested or cores))
+
+    final_gb = total_gb * BAKED_PER_PBF
+    # Peak disk holds the per-.pbf temp trees AND the merged output at the same time.
+    peak_gb = final_gb * 2.0
+    free_gb = 0.0
+    try:
+        free_gb = _sh.disk_usage(str(cache_dir or Path("."))).free / 1e9
+    except Exception:                                          # noqa: BLE001
+        pass
+
+    fits, reason = True, ""
+    if fit < 1:
+        fits = False
+        reason = (f"This bake needs about {per_worker_gb:.0f} GB of memory for a single worker "
+                  f"and only {avail / 1e9:.0f} GB is free. The file is far larger than the area "
+                  f"being rendered - download the country or state extract for this region "
+                  f"instead of the continent one; it is typically hundreds of times smaller.")
+    elif free_gb and peak_gb > free_gb * 0.9:
+        fits = False
+        reason = (f"This bake would need about {peak_gb:.0f} GB of disk at its peak "
+                  f"({final_gb:.0f} GB of tiles, briefly doubled while merging) and only "
+                  f"{free_gb:.0f} GB is free.")
+
+    return {
+        "fits": fits, "reason": reason,
+        "workers": workers, "cores": cores,
+        "pbf_used": len(need), "pbf_skipped": len(skipped),
+        "skipped_names": [f["name"] for f in skipped][:12],
+        "pbf_gb": round(total_gb, 2), "largest_gb": round(largest_gb, 2),
+        "ram_peak_gb": round(per_worker_gb * workers, 1),
+        "ram_free_gb": round(avail / 1e9, 1),
+        "disk_final_gb": round(final_gb, 1), "disk_peak_gb": round(peak_gb, 1),
+        "disk_free_gb": round(free_gb, 1),
+        "tiles": len(tiles),
+        "eta_min": round(total_gb * 1000 / PBF_MB_PER_SEC / max(1, workers) / 60, 1),
+    }
+
+
+def project_from_progress(done_tiles: int, bytes_written: int, total_tiles: int) -> dict:
+    """Refine the disk estimate from what this region has actually produced.
+
+    The up-front number comes from one sampled region, and tile sizes span 88x between sparse and
+    dense (measured: median 5.5 MB, p99 116 MB, max 1089 MB). So once real tiles exist, they are
+    a far better predictor of the rest than any constant - and this is what lets the UI stop
+    quoting a range and start quoting a number.
+    """
+    if done_tiles < 5 or total_tiles <= 0:
+        return {}
+    per = bytes_written / done_tiles
+    return {"projected_final_gb": round(per * total_tiles / 1e9, 1),
+            "per_tile_mb": round(per / 1e6, 1),
+            "from_tiles": done_tiles}
 
 
 # ── the bake ──────────────────────────────────────────────────────────────────

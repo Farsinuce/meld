@@ -124,6 +124,34 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--check" in argv:
         return check()
+    if "--pick-folder" in argv:
+        # A folder picker, as a mode of THIS executable.
+        #
+        # The server used to spawn [sys.executable, "-c", <tkinter source>], which is correct from
+        # source and completely wrong once frozen: sys.executable is Meld.exe, the bootloader
+        # ignores -c, and what actually launched was a SECOND Meld. That copy hit the
+        # single-instance lock, printed "Meld is already running: <url>?t=<token>" and exited 0 -
+        # so every Browse button in the shipped exe returned that sentence as the chosen path, and
+        # printed the session token into a text field. Users screenshotted it.
+        #
+        # Handled here, above the lock, so this mode never takes it or trips the guard.
+        import tkinter as tk
+        import tkinter.filedialog as fd
+        applog.setup()
+        title = _arg_value(argv, "--title") or "Select a folder"
+        try:
+            r = tk.Tk()
+            r.withdraw()
+            r.attributes("-topmost", True)
+            picked = fd.askdirectory(title=title) or ""
+            r.destroy()
+        except Exception:
+            picked = ""
+        # Sentinel-prefixed so the caller can never mistake an unrelated line - a warning, a
+        # bootloader notice, anything - for a path. Nothing without this prefix is accepted.
+        sys.stdout.write(f"\nMELD_PICKED_PATH:{picked}\n")
+        sys.stdout.flush()
+        return 0
     if "--statusbar" in argv:
         # A second process on purpose: tkinter and the tray icon both want the main thread, and
         # macOS *requires* AppKit to have it. Separate processes is the only arrangement where
