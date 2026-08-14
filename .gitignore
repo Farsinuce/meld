@@ -85,3 +85,8 @@ dist/
 ui-profiles/
 preview-profile/
 assets/build-info.json
+
+# Runtime download location for the generator. paths.bin_dir() is data_dir()/bin, and from a
+# source checkout data_dir() IS the repo root - so a self-updated arnis lands here. 45 MB of
+# binary that must never reach a commit; the updater writes it, git ignores it.
+/bin/
