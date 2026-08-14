@@ -1397,6 +1397,31 @@ def api_osmpack_scan():
     return jsonify(op.scan_pbf_folder(folder))
 
 
+@app.route("/api/osmpack/plan", methods=["POST"])
+def api_osmpack_plan():
+    """What a bake of this folder would cost, without starting one.
+
+    Deliberately the SAME planner the bake runs, so the estimate shown to the user and the
+    refusal that stops the bake can never disagree - a preview that says "fine" followed by a
+    refusal would be worse than no preview.
+    """
+    s = PROJECT.settings()
+    bbox, _rings, _name = _datapack_selection()
+    folder = ((request.json or {}).get("folder") or "").strip()
+    if not bbox:
+        return jsonify({"ok": False, "error": "select an area first"}), 400
+    scan = op.scan_pbf_folder(folder)
+    if not scan.get("ok") or not scan.get("files"):
+        return jsonify({"ok": False, "error": scan.get("error") or "no .pbf files"}), 400
+    gbb = _osm_gen_bbox(bbox)
+    cov = op.coverage_osm(gbb)
+    tiles = [(t["x"], t["y"]) for t in cov["missing"]]
+    plan = op.plan_bake(scan["files"], tiles,
+                        workers_requested=int(s.get("osm_bake_workers", 0) or 0),
+                        region_bbox=gbb, cache_dir=_cache_root_for_plan())
+    return jsonify({"ok": True, **plan, "osmium": scan.get("osmium", {"ok": True})})
+
+
 @app.route("/api/osmpack/bake", methods=["POST"])
 def api_osmpack_bake():
     """Slice the .pbf file(s) in `folder` into the selection's missing OSM grid tiles. Offline:

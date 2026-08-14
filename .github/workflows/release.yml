@@ -11,7 +11,10 @@ name: Build Meld
 
 on:
   push:
-    tags: ["meld-v*"]
+    # Both spellings. `meld-v*` is what the earlier releases used; a bare `v*` matches the arnis
+    # fork's convention and is what gets tagged now. A tag that matches neither builds nothing at
+    # all and does so silently, which is a bad way to find out.
+    tags: ["v*", "meld-v*"]
   workflow_dispatch:
     inputs:
       draft:

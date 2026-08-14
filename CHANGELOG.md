@@ -4,6 +4,50 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.8.7] - unreleased
+
+Everything here came from the first day of people actually running the packaged
+build. Four reports, four bugs, all of them invisible from a source install.
+
+### Fixed
+
+- **Browse was broken in every packaged build, and put the session token on
+  screen.** Clicking Browse filled the folder box with
+  `Meld is already running: http://127.0.0.1:5630/?t=…` instead of a path.
+  Packaged, `sys.executable` is `Meld.exe` rather than a Python interpreter, so
+  the picker was accidentally launching a *second Meld*, which reported the first
+  one and exited — and its message was read back as the chosen folder. Affected
+  the save location, the `.pbf` folder and the import folder. A path is now only
+  ever read from a line explicitly marked as one, so no other output can be
+  mistaken for it.
+- **Offline `.pbf` baking did not exist in the packaged app.** The reader was
+  left out of the build, so every file showed *"(no header bbox)"* and the only
+  cure was a source install — `pip install` cannot help, because the bundled
+  runtime is not the one pip writes to. It ships now. Where it genuinely is not
+  available, Meld says so once, plainly, instead of blaming your files.
+- **A bake read every `.pbf` in the folder, wherever the region was.** Eight
+  continent extracts — 75 GB — to render one US state, when Meld had already
+  read each file's bounds and thrown them away. Files that cannot contain your
+  region are skipped. A file whose bounds will not parse is still read, because
+  guessing wrong there would put silent holes in a world.
+- **A bake could not tell it would not fit, and took the machine down finding
+  out.** Measured: the OSM index costs about 2.2 GB of memory per GB of `.pbf`,
+  per worker. Four workers on continent files asked for far more than the 68 GB
+  available, and Windows grew a 190 GB page file trying to serve it. Worker count
+  is now fitted to the memory actually free, and a bake that cannot fit is
+  refused *with the fix in the message*: use the country or state extract. For
+  New Hampshire that is 70 MB against 19 GB — the same world, 275× less memory,
+  minutes instead of hours.
+
+### Added
+
+- **A bake tells you what it will cost before it starts.** Memory, disk, time and
+  worker count, against what your machine actually has. Baked tiles run about
+  15.7 MB each and the disk briefly holds roughly double the final size while
+  merging — neither was knowable before. Because a city tile can be 88× a rural
+  one, the first figure is a starting point that gets replaced by a real
+  projection once enough tiles exist.
+
 ## [1.8.6] - unreleased
 
 Three generator settings that existed but had no control, and updates that

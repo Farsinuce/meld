@@ -7,7 +7,7 @@ a 190 GB pagefile. Nothing warned, because nothing had measured.
 
 Every constant these tests rely on was measured on a real bake, not assumed:
   RAM   2.19 GB per GB of .pbf, per worker (pyosmium 4.3.1 over ukraine-latest, 871 MB -> 1910 MB)
-  disk  29x expansion .pbf -> baked JSON (2.03 GB of .pbf -> 59.6 GB of tiles)
+  disk  ~15.7 MB per baked tile (3,789 tiles -> 59.6 GB), median 5.5 / p99 116 / max 1089
 """
 from __future__ import annotations
 
@@ -132,9 +132,18 @@ def test_at_least_one_worker_is_always_planned(monkeypatch):
 
 # ── the estimate the user asked for ───────────────────────────────────────────────────────────
 
-def test_disk_estimate_uses_the_measured_expansion():
-    p = op.plan_bake([_f("x.osm.pbf", 1.0, NH)], list(range(10)), region_bbox=NH)
-    assert 25 <= p["disk_final_gb"] <= 33, "1 GB of .pbf measured at ~29 GB of baked JSON"
+def test_disk_estimate_is_sized_by_tiles_not_by_the_pbf():
+    """A re-run with everything cached writes nothing, while the .pbf is exactly as big as it
+    always was. Estimating from the file made a finished region look like tens of GB of pending
+    work and got the bake refused for disk it did not need."""
+    big = op.plan_bake([_f("x.osm.pbf", 1.0, NH)], list(range(1000)), region_bbox=NH)
+    small = op.plan_bake([_f("x.osm.pbf", 1.0, NH)], list(range(10)), region_bbox=NH)
+    assert big["disk_final_gb"] > small["disk_final_gb"] * 50
+
+
+def test_nothing_to_bake_costs_nothing_and_is_allowed():
+    p = op.plan_bake([_f("x.osm.pbf", 1.0, NH)], [], region_bbox=NH)
+    assert p["disk_final_gb"] == 0 and p["fits"] is True
 
 
 def test_peak_disk_exceeds_the_final_size():
@@ -151,7 +160,8 @@ def test_a_bake_that_would_fill_the_disk_is_refused(monkeypatch):
     monkeypatch.setattr(psutil, "virtual_memory", lambda: VM)
     monkeypatch.setattr(op.shutil, "disk_usage",
                         lambda p: type("d", (), {"free": int(5e9)}), raising=False)
-    p = op.plan_bake([_f("x.osm.pbf", 1.0, NH)], list(range(10)), region_bbox=NH,
+    # 1000 tiles ~ 15.7 GB of output, ~31 GB at peak, against 5 GB free.
+    p = op.plan_bake([_f("x.osm.pbf", 1.0, NH)], list(range(1000)), region_bbox=NH,
                      cache_dir=Path("."))
     assert p["fits"] is False and "disk" in p["reason"]
 

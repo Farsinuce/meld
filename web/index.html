@@ -5787,9 +5787,37 @@ async function osmScan() {
   const r = await _dpApi('/api/osmpack/scan', { folder });
   if (!r || !r.ok) { $('osmScan').textContent = (r && r.error) || 'scan failed'; return; }
   const files = r.files || [];
-  $('osmScan').innerHTML = files.length
-    ? files.map(f => `<div>${f.name} · ${(f.size_bytes / 1048576).toFixed(0)} MB${f.bbox ? '' : ' <span style="color:var(--mut)">(no header bbox)</span>'}</div>`).join('')
-    : 'no .pbf files found in that folder';
+  if (!files.length) { $('osmScan').textContent = 'no .pbf files found in that folder'; return; }
+  // When osmium is missing EVERY file reports no bbox, which read as "your files are broken"
+  // rather than "the reader is absent". Say which it is, once, instead of per file.
+  const osm = r.osmium || { ok: true };
+  const head = osm.ok ? '' :
+    `<div style="color:var(--acc);margin-bottom:5px">${osm.reason}</div>`;
+  const list = files.map(f =>
+    `<div>${f.name} · ${(f.size_bytes / 1048576).toFixed(0)} MB${
+      (f.bbox || !osm.ok) ? '' : ' <span style="color:var(--mut)">(unreadable header)</span>'}</div>`
+  ).join('');
+  $('osmScan').innerHTML = head + list;
+  // What this will cost, before committing to it. The numbers come from the same planner the
+  // bake itself uses, so the estimate and the refusal can never disagree.
+  try {
+    // The plan needs the selection, same as the bake: the estimate is region-dependent and
+    // the whole point of it is skipping .pbf files that fall outside.
+    const p = await _dpApi('/api/osmpack/plan', Object.assign({ folder }, _dpSelection() || {}));
+    if (p && p.ok) {
+      const warn = !p.fits;
+      const skipped = p.pbf_skipped
+        ? `<div style="color:var(--mut)">skipping ${p.pbf_skipped} file(s) outside this region — ${p.skipped_names.join(', ')}</div>` : '';
+      $('osmScan').innerHTML += `
+        <div style="margin-top:7px;padding:7px;border:1px solid ${warn ? 'var(--acc)' : 'var(--hair)'}">
+          ${skipped}
+          <div>RAM needed <b>~${p.ram_peak_gb} GB</b> <span style="color:var(--mut)">of ${p.ram_free_gb} GB free</span> · ${p.workers} worker(s)</div>
+          <div>Disk <b>~${p.disk_final_gb} GB</b> of tiles, <b>~${p.disk_peak_gb} GB</b> at peak <span style="color:var(--mut)">of ${p.disk_free_gb} GB free</span></div>
+          <div>Time <b>~${p.eta_min} min</b> · ${p.tiles} tile(s)</div>
+          ${warn ? `<div style="color:var(--acc);margin-top:5px">${p.reason}</div>` : ''}
+        </div>`;
+    }
+  } catch (e) { /* the estimate is a courtesy; a scan that worked still shows its files */ }
 }
 if ($('btnOsmCoverage')) $('btnOsmCoverage').onclick = osmCoverage;
 if ($('btnOsmBake')) $('btnOsmBake').onclick = osmBake;

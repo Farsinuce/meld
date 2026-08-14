@@ -180,9 +180,17 @@ def scan_pbf_folder(folder: str) -> dict:
 # was measured too and saved nothing: 1919 MB peak plus a 1.8 GB index file.
 RAM_GB_PER_PBF_GB = 2.2
 
-# Baked JSON per byte of .pbf, for a region-matched extract. Measured: 2.03 GB of .pbf across six
-# Balkan countries produced 59.6 GB of tiles. The output is uncompressed Overpass-style JSON, so
-# it expands hard, and this is the number nobody had before running out of disk.
+# Baked JSON per tile. Measured over the same bake: 3,789 tiles totalling 59.6 GB, so ~15.7 MB
+# each. Per TILE rather than per byte of .pbf, because a bake writes tiles - on a re-run with
+# everything already cached the .pbf is unchanged but the work is zero.
+#
+# It is a mean over a very skewed distribution (median 5.5 MB, p90 37, p99 116, max 1089 - an 88x
+# spread between a rural tile and a city one), so it is a starting point that project_from_progress
+# replaces with real numbers as soon as enough tiles exist.
+BAKED_MB_PER_TILE = 15.7
+
+# The same measurement expressed against input size: 2.03 GB of .pbf produced 59.6 GB of tiles.
+# Kept for the docs and as a sanity check on the per-tile figure, not used for the estimate.
 BAKED_PER_PBF = 29.0
 
 # Elements per second, single worker. Measured: 125.7M elements in ~147 s.
@@ -242,7 +250,11 @@ def plan_bake(files: list[dict], tiles: list, workers_requested: int = 0,
     workers = max(1, min(fit if fit > 0 else 1, cores, len(need) or 1,
                          workers_requested or cores))
 
-    final_gb = total_gb * BAKED_PER_PBF
+    # Sized by the tiles this bake will actually write, NOT by the .pbf size. Those differ
+    # completely on a re-run: with every tile already cached there is nothing to write, while the
+    # .pbf is exactly as big as it ever was. Estimating from the file made a finished region look
+    # like tens of GB of pending work and got the bake refused for lack of disk it did not need.
+    final_gb = (len(tiles) * BAKED_MB_PER_TILE) / 1000.0 if tiles else 0.0
     # Peak disk holds the per-.pbf temp trees AND the merged output at the same time.
     peak_gb = final_gb * 2.0
     free_gb = 0.0
