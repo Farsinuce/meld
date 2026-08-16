@@ -29,6 +29,10 @@ def default_settings() -> dict:
         # big parallel runs (the regional providers rate-limit under Meld's burst), at ~30m res.
         "aws_only_elevation": False,
         "regional_elevation_only": False,
+        # Pass --offline to the generator: cached/baked elevation only, no tile-server
+        # fetches. Reads like a machine knob but is a WORLD choice (a cell with no cached
+        # tiles renders flat ground), so presets carry it; listed here so apply keeps it.
+        "offline_elevation": False,
         # Terrarium zoom used for elevation (pack download + Arnis generation). "auto" matches the
         # zoom's pixel to the block size for this scale (the right detail with no waste): 1:1->z15,
         # 1:10->z13, etc. Lower zoom = far fewer tiles + dodges the z14/z15 no-data holes. 11..15.
@@ -38,6 +42,10 @@ def default_settings() -> dict:
         "buildings": False,
         "roof": True,
         "interior": False,
+        # Overture's satellite-detected building fill on top of OSM's mapped ones. Read by
+        # arnis_cmd (defaulting True there too); listed here so presets can carry the toggle -
+        # apply drops any key absent from these defaults.
+        "overture": True,
         "land_cover": True,
         "fill_ground": True,   # solid floor under the surface, no holes
         "caves": False,        # vanilla-like cave worldgen in arnis (opt-in; auto-enables fill_ground)

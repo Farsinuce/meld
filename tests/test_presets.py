@@ -134,7 +134,12 @@ def test_bundled_presets_are_listed_and_apply(client):
 
     b = client.post("/api/presets/apply", json={"name": "Extended height"}, headers=HDR).get_json()
     assert b["applied"]["disable_height_limit"] is True
-    assert b["applied"]["vertical_exaggeration"] == 1.5
+    # 1.9.0: extended height means the toggle alone, at true terrain height. The old
+    # bundled 1.5x exaggeration is deliberately gone; a stretch must never come back
+    # as a side effect of this preset.
+    assert b["applied"]["vertical_exaggeration"] == 1
+    # The tuned starters also carry the Overture toggle since its default_settings fix.
+    assert b["applied"]["overture"] is True
 
 
 def test_bundled_presets_cannot_be_deleted(client):

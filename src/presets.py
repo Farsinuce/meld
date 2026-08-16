@@ -74,6 +74,8 @@ _MACHINE_KEYS = frozenset({
     # This machine's network/cache environment. overpass_url in particular can name someone's
     # PRIVATE endpoint — shipping it inside a shared file would hand that URL to strangers.
     "osm_cache_ttl_days", "overpass_url",
+    # Observed per-region output size on THIS machine's renders; feeds the disk estimate.
+    "mb_per_region_observed",
     # Filesystem paths (also caught by the suffix rule; named here so the list reads whole).
     "master_world_dir",
 })

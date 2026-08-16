@@ -4,7 +4,29 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
-## [1.8.9] - unreleased
+## [1.9.0] "Unbound" - 2026-08-16
+
+The milestone release. Meld is a standalone desktop app: download, run,
+generate. Unbound names the whole desktop arc, previewed and hardened across
+1.8.4 to 1.8.9, now shipped as one release with the tuned presets in the box.
+
+### Added
+
+- **The three bundled presets are now the tuned ones**, authored by Teddy563
+  in Meld 1.9.0: Default (the tuned look at real 1:1 scale), Scaled 1:10
+  (city-sized builds, compact roads, props off) and Extended height (the same
+  look with the extended build height on and no vertical stretch; the old
+  1.5x terrain exaggeration is gone from the preset).
+
+### Fixed
+
+- **Presets can now carry the Overture-buildings and offline-elevation
+  toggles.** Both settings were read by the generator launcher but missing
+  from the defaults table, so applying a preset silently dropped them.
+- **A machine-observed statistic (`mb_per_region_observed`) no longer rides
+  along in saved presets.** It describes the sender's renders, not the world.
+
+## [1.8.9] - 2026-08-16
 
 The first-day report on the 1.8.8 build, fixed at the root, plus the polish
 pass from using it.
