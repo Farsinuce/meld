@@ -294,6 +294,14 @@ class Tray:
         # Cached off the same poll the tooltip already makes, so the menu's visible= gate and the
         # icon pip both read it without a request of their own.
         self._update = d.get("update") or {}
+        # The web UI's show/hide-status-bar button parks a one-shot command in /api/mini (the
+        # page cannot reach this process any other way). Consumed here, on the poll that already
+        # exists, so the feature costs zero extra requests.
+        if d.get("sb_cmd") == "toggle":
+            try:
+                self.toggle_statusbar()
+            except Exception:
+                pass
         if d.get("active"):
             base = f"{APP_NAME} — {d.get('percent', 0)}% ({d.get('done')}/{d.get('total')})"
         else:

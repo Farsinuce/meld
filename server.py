@@ -2757,6 +2757,12 @@ def api_mini():
         # cheaper than /api/status). The release notes and download size stay on the fat route,
         # where the panel that displays them already lives.
         "update": {"state": _u.get("state", ""), "latest": _u.get("latest", "")},
+        # One-shot command channel to the tray, which owns the status bar and polls this route
+        # every few seconds. The web page cannot reach the tray process any other way - they are
+        # separate processes with no pipe between them - so the request parks a command here and
+        # the tray's next poll consumes it. Popped on read: a command must fire once, not once
+        # per poll forever.
+        "sb_cmd": _SB_CMD.pop("cmd", ""),
         "log": _LOG[-6:],
     })
 
@@ -3070,6 +3076,10 @@ def api_world_delete():
 # Shared with meld_app.py's --pick-folder mode. A folder path is only ever read from a line
 # carrying this prefix, so no other output of any child process can be mistaken for one.
 PICK_SENTINEL = "MELD_PICKED_PATH:"
+
+# Pending one-shot command for the tray (see /api/mini's sb_cmd). A dict rather than a bare
+# string so .pop() is atomic enough under the GIL for a single-writer single-reader channel.
+_SB_CMD: dict = {}
 
 
 def _cache_root_for_plan():
@@ -4828,6 +4838,21 @@ def api_update_start():
 @app.route("/api/update/progress")
 def api_update_progress():
     return jsonify({"ok": True, **updater.progress()})
+
+
+@app.route("/api/statusbar/toggle", methods=["POST"])
+def api_statusbar_toggle():
+    """Show or hide the floating status bar from inside the web UI.
+
+    The bar is owned by the tray process, which polls /api/mini every few seconds; this parks a
+    one-shot command there for the next poll to consume. Latency is therefore up to one poll
+    interval - a UI that promised instant would be lying, so the response says "within a few
+    seconds" and the button's tooltip does too. When Meld runs with --no-tray there is nobody to
+    consume the command; the response cannot know that, which is another reason the wording
+    stays soft.
+    """
+    _SB_CMD["cmd"] = "toggle"
+    return jsonify({"ok": True, "note": "the status bar will toggle within a few seconds"})
 
 
 @app.route("/api/update/staged")
