@@ -4,6 +4,44 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.8.9] - unreleased
+
+The first-day report on the 1.8.8 build, fixed at the root, plus the polish
+pass from using it.
+
+### Fixed
+
+- **Half the interface came up dead.** One hoisting bug in the slider styling
+  threw before most of the page's script ran: no CPU/RAM gauges, empty
+  settings, selections not splitting into cells, cards stuck open. One line;
+  everything after it never wired. Headless-browser console checking is now a
+  release gate, because every static check passed while this shipped.
+
+### Added
+
+- **Presets and the status bar are one click from the left rail.** Presets sits
+  under Projects; the status bar can be shown or hidden without hunting for the
+  tray icon.
+- **The shipped preset starters are editable files** in the presets folder -
+  tune them, share them, delete one to reset it to pristine.
+- **The `.pbf` and presets folders exist from first launch**, the bake folder
+  box shows its real default path, and PBF downloads appear in the cache card
+  with everything else.
+- **Smart data downloads price themselves.** The by-country set is recommended
+  first with its combined size; a continent-sized file is offered last with its
+  true download size, the memory baking it needs on this machine, and a warning
+  when that will not fit.
+
+### Changed
+
+- Generate is the one gold button on the page. Test build and Trim ocean live
+  with the other plan tools in Edit & retry. Drawer hover marks the whole row.
+  Card titles breathe.
+- **arnis 3.0.10**: the stadium model no longer lands on football fields, rail
+  tunnels and building parts from the upstream ports, and three upstream
+  scanline-fill correctness fixes (the other three upstream commits were
+  verified as fixes this fork shipped first, or rejected with reasons).
+
 ## [1.8.8] - unreleased
 
 The release-day reports, fixed at the root; a cleaner face; and settings that
