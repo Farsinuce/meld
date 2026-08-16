@@ -6213,29 +6213,47 @@ async function gfShowSuggestions() {
   const sugg = r.suggestions || [];
   if (!sugg.length) { host.style.color = 'var(--acc)'; host.textContent = 'No Geofabrik extract covers this selection.'; return; }
   host.textContent = '';
-  const mkRow = (label, hint, ids) => {
+  const fmtGB = b => b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB';
+  const mkRow = (label, hint, ids, opts) => {
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 0';
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 0'
+      + (opts && opts.warn ? ';border-left:3px solid var(--acc);padding-left:6px' : '');
     const span = document.createElement('span');
-    span.style.cssText = 'flex:1;min-width:0;overflow-wrap:anywhere';
+    span.style.cssText = 'flex:1;min-width:0;overflow-wrap:anywhere'
+      + (opts && opts.warn ? ';color:var(--acc)' : '');
     span.textContent = label; if (hint) span.title = hint;
     const btn = document.createElement('button');
-    btn.type = 'button'; btn.className = 'sec'; btn.textContent = '⤓ Download';
-    btn.style.cssText = 'width:auto;flex:0 0 auto;margin:0;padding:2px 8px;font-size:11px';
+    btn.type = 'button'; btn.className = 'sec';
+    btn.textContent = (opts && opts.warn) ? '⚠ Download anyway' : '⤓ Download';
+    btn.style.cssText = 'width:auto;flex:0 0 auto;margin:0;padding:2px 8px;font-size:11px'
+      + (opts && opts.warn ? ';border-color:var(--acc);color:var(--acc)' : '');
     btn.onclick = () => gfFetch(ids);
     row.append(span, btn);
     return row;
   };
+  // Country files FIRST - the split-by-country set is what a selection should be baked from.
+  // A continent-sized single extract is offered LAST, with its true download size and a RAM
+  // warning when baking it would not fit this machine: picking europe-latest for a two-country
+  // selection is exactly the mistake behind the 190 GB-pagefile report.
   const singles = sugg.filter(s => s.role === 'contains');
   const cover = sugg.filter(s => s.role === 'cover');
-  for (const s of singles)
-    host.appendChild(mkRow(`${s.name} — covers ${s.covered_pct}% of the selection`,
-      `${s.area_deg2}°² extract · Geofabrik id: ${s.id}`, [s.id]));
   if (cover.length)
     host.appendChild(mkRow(
-      `Cross-border set (${cover.length}): ${cover.map(s => s.name).join(' + ')} — jointly cover the selection`,
+      `Recommended — by country (${cover.length}): ${cover.map(s => s.name).join(' + ')}`
+        + (cover.some(s => s.size_bytes) ? ` · ${fmtGB(cover.reduce((a, s) => a + (s.size_bytes || 0), 0))}` : ''),
       cover.map(s => `${s.name} covers ${s.covered_pct}%`).join(' · ') + ' · the bake merges them seam-correctly',
       cover.map(s => s.id)));
+  for (const s of singles) {
+    const size = s.size_bytes ? ` · ${fmtGB(s.size_bytes)}` : '';
+    const bad = s.ram_ok === false;
+    const ram = s.ram_gb ? ` · needs ~${s.ram_gb} GB RAM to bake` : '';
+    host.appendChild(mkRow(
+      `${bad ? '⚠ ' : ''}${s.name} — single file, covers ${s.covered_pct}%${size}${ram}`
+        + (bad ? ' — MAY EXCEED THIS MACHINE’S FREE MEMORY' : ''),
+      bad ? 'Baking this needs more memory than is free right now. Use the by-country set above: same world, a fraction of the size.'
+          : `${s.area_deg2}°² extract · Geofabrik id: ${s.id}`,
+      [s.id], { warn: bad }));
+  }
   const note = document.createElement('div');
   note.style.cssText = 'color:var(--mut);margin-top:2px';
   note.textContent = 'Downloads land in the default .pbf drop folder' + (r.folder ? ': ' + r.folder : '') + '.';

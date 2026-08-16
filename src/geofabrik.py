@@ -57,10 +57,12 @@ def pbf_dir() -> Path:
     return d
 
 
-def _open_url(url: str, timeout: int = 120):
+def _open_url(url: str, timeout: int = 120, method: str = "GET"):
     """The single seam between this module and the network — tests monkeypatch this one name
-    instead of reaching into urllib."""
-    req = urllib.request.Request(url, headers={"User-Agent": "Meld (geofabrik fetcher)"})
+    instead of reaching into urllib. HEAD rides through the same seam: a second seam would be a
+    second thing tests forget to patch."""
+    req = urllib.request.Request(url, headers={"User-Agent": "Meld (geofabrik fetcher)"},
+                                 method=method)
     return urllib.request.urlopen(req, timeout=timeout)
 
 
@@ -313,3 +315,49 @@ def download(url: str, dest_folder, on_progress=None, should_stop=None,
             part.unlink(missing_ok=True)
         except Exception:  # noqa: BLE001
             pass
+
+
+# Peak bake RAM per GB of .pbf, per worker - measured (pyosmium 4.3.1, ukraine-latest:
+# 871 MB -> 1910 MB peak). Duplicated from osm_pack to avoid a circular import; the two are
+# asserted equal in tests.
+RAM_GB_PER_PBF_GB = 2.2
+
+_SIZE_CACHE: dict[str, int] = {}
+
+
+def enrich_sizes(suggestions: list[dict], limit: int = 5) -> None:
+    """Fill in size_bytes / ram_gb / ram_ok for the candidates a user will actually see.
+
+    The index carries no file sizes at all, and the download size is the one number that decides
+    whether a candidate is a 70 MB two-minute bake or a 19 GB machine-eater - so the first few
+    candidates get one HEAD request each (Content-Length, cached per URL for the session).
+    Best-effort by design: a failed HEAD leaves the fields absent rather than failing the
+    suggestion, because "no size known" must degrade to showing the candidate, not hiding it.
+
+    ram_ok compares the measured 2.2 GB-per-GB bake cost of THIS extract against the memory
+    actually free right now - the warning the 68 GB-machine / 190 GB-pagefile report asked for.
+    """
+    try:
+        import psutil
+        avail_gb = psutil.virtual_memory().available / 1e9
+    except Exception:                                          # noqa: BLE001
+        avail_gb = None
+    for cand in suggestions[:limit]:
+        url = cand.get("url")
+        if not url:
+            continue
+        if url not in _SIZE_CACHE:
+            try:
+                with _open_url(url, timeout=15, method="HEAD") as r:
+                    _SIZE_CACHE[url] = int(r.headers.get("Content-Length") or 0)
+            except Exception:                                  # noqa: BLE001
+                _SIZE_CACHE[url] = 0
+        size = _SIZE_CACHE[url]
+        if size:
+            ram = size / 1e9 * RAM_GB_PER_PBF_GB
+            cand["size_bytes"] = size
+            cand["ram_gb"] = round(ram, 1)
+            if avail_gb is not None:
+                # 0.6: same headroom factor the bake planner budgets with - the OS, the browser
+                # and any running render need the rest.
+                cand["ram_ok"] = ram <= avail_gb * 0.6

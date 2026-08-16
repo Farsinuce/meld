@@ -1632,6 +1632,13 @@ def api_geofabrik_suggest():
         sugg = gf.suggest(_osm_gen_bbox(bbox))
     except Exception as ex:  # noqa: BLE001
         return jsonify({"ok": False, "error": f"Geofabrik index unavailable: {ex}"}), 502
+    # Country-first ordering with real sizes. "cover" leaves (the split-by-country set) are
+    # what a user should take; a continent-sized "contains" candidate is offered LAST with its
+    # actual download size and a RAM verdict, because picking europe-latest for a two-country
+    # selection is precisely the mistake that produced the 190 GB-pagefile report.
+    gf.enrich_sizes(sugg)
+    order = {"cover": 0, "contains": 1}
+    sugg.sort(key=lambda c: (order.get(c.get("role"), 2), c.get("area_deg2") or 0))
     return jsonify({"ok": True, "bbox": bbox, "folder": str(gf.pbf_dir()),
                     "suggestions": sugg})
 

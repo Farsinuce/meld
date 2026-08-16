@@ -233,3 +233,43 @@ def test_a_dated_filename_outranks_a_fresh_mtime(tmp_path):
     scan = op.scan_pbf_folder(str(tmp_path))
     assert scan["files"][0]["age_days"] >= 364
     assert op.stale_files(scan["files"]) == [p.name]
+
+
+def test_the_ram_constant_matches_the_bake_planner():
+    """geofabrik duplicates RAM_GB_PER_PBF_GB to avoid a circular import; if the two ever
+    drift, the download warning and the bake refusal would disagree about the same file."""
+    from src import geofabrik as gf, osm_pack as op
+    assert gf.RAM_GB_PER_PBF_GB == op.RAM_GB_PER_PBF_GB
+
+
+def test_size_enrichment_flags_an_oversized_candidate(monkeypatch):
+    from src import geofabrik as gf
+
+    class R:
+        headers = {"Content-Length": str(int(20e9))}      # a 20 GB continent file
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    monkeypatch.setattr(gf, "_open_url", lambda url, timeout=15, method="GET": R())
+
+    import psutil
+    class VM:
+        available = int(20e9)                              # 20 GB free -> cannot bake 44 GB
+    monkeypatch.setattr(psutil, "virtual_memory", lambda: VM)
+
+    gf._SIZE_CACHE.clear()
+    cand = [{"id": "europe", "url": "https://x/europe.osm.pbf", "role": "contains"}]
+    gf.enrich_sizes(cand)
+    assert cand[0]["size_bytes"] == int(20e9)
+    assert cand[0]["ram_ok"] is False
+
+
+def test_a_failed_head_hides_nothing(monkeypatch):
+    """No size must degrade to "show the candidate without numbers", never to hiding it."""
+    from src import geofabrik as gf
+    def boom(url, timeout=15, method="GET"):
+        raise OSError("blocked")
+    monkeypatch.setattr(gf, "_open_url", boom)
+    gf._SIZE_CACHE.clear()
+    cand = [{"id": "x", "url": "https://x/x.osm.pbf", "role": "contains"}]
+    gf.enrich_sizes(cand)
+    assert "size_bytes" not in cand[0] and "ram_ok" not in cand[0]
