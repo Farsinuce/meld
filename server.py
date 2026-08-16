@@ -64,6 +64,7 @@ from src import datapack as dp
 from src import finalcheck
 from src import osm_pack as op
 from src import osm_grid
+from src import geofabrik as gf
 from src import border
 from src import mcserver as mcs
 from src import runreport
@@ -682,7 +683,10 @@ _DATAPACK_STOP = {"flag": False}
 # so an OSM bake and an elevation build are independent jobs and never report each other's progress.
 _OSMPACK_LOCK = threading.Lock()
 _OSMPACK = {"active": False, "done": False, "note": "", "total": 0, "done_n": 0,
-            "ok": 0, "absent": 0, "fail": 0, "region": None}
+            "ok": 0, "absent": 0, "fail": 0, "region": None,
+            # Filled by project_from_progress once >=5 real tiles exist: this region's own
+            # per-tile size replacing the sampled 15.7 MB mean (an 88x spread hides behind it).
+            "projection": {}}
 _OSMPACK_STOP = {"flag": False}
 
 
@@ -1425,13 +1429,22 @@ def api_osmpack_coverage():
     return jsonify({"ok": True, "osm": cov, "bbox": bbox})
 
 
+def _osmpack_folder() -> str:
+    """The request's .pbf folder, defaulting to the drop folder the Geofabrik fetcher fills
+    (data/pbf, created lazily). Blank used to be a 400, which made the zero-config path
+    impossible: the UI would have had to know a path just to ask what is in the default one."""
+    return ((request.json or {}).get("folder") or "").strip() or str(gf.pbf_dir())
+
+
 @app.route("/api/osmpack/scan", methods=["POST"])
 def api_osmpack_scan():
-    """List the .pbf files in a drop folder + their header bbox, so the UI can confirm before baking."""
-    folder = ((request.json or {}).get("folder") or "").strip()
-    if not folder:
-        return jsonify({"ok": False, "error": "folder required"}), 400
-    return jsonify(op.scan_pbf_folder(folder))
+    """List the .pbf files in a drop folder + their header bbox, so the UI can confirm before
+    baking. The resolved folder rides along so the UI can show WHERE it looked when the request
+    left the field blank."""
+    folder = _osmpack_folder()
+    res = op.scan_pbf_folder(folder)
+    res["folder"] = folder
+    return jsonify(res)
 
 
 @app.route("/api/osmpack/plan", methods=["POST"])
@@ -1444,7 +1457,7 @@ def api_osmpack_plan():
     """
     s = PROJECT.settings()
     bbox, _rings, _name = _datapack_selection()
-    folder = ((request.json or {}).get("folder") or "").strip()
+    folder = _osmpack_folder()
     if not bbox:
         return jsonify({"ok": False, "error": "select an area first"}), 400
     scan = op.scan_pbf_folder(folder)
@@ -1456,7 +1469,12 @@ def api_osmpack_plan():
     plan = op.plan_bake(scan["files"], tiles,
                         workers_requested=int(s.get("osm_bake_workers", 0) or 0),
                         region_bbox=gbb, cache_dir=_cache_root_for_plan())
-    return jsonify({"ok": True, **plan, "osmium": scan.get("osmium", {"ok": True})})
+    # Inform, never refuse: names of files whose DATA is older than op.STALE_DAYS. A user baking
+    # a deliberate historical snapshot is a use case; one baking last year's roads unknowingly
+    # just needed to be told.
+    return jsonify({"ok": True, **plan, "folder": folder,
+                    "stale": op.stale_files(scan["files"]),
+                    "osmium": scan.get("osmium", {"ok": True})})
 
 
 @app.route("/api/osmpack/bake", methods=["POST"])
@@ -1471,7 +1489,7 @@ def api_osmpack_bake():
         if _OSMPACK["active"]:
             return jsonify({"ok": False, "error": "an OSM bake is already running"}), 409
         _OSMPACK.update(active=True, done=False, note="preparing OSM bake…",
-                        total=0, done_n=0, ok=0, absent=0, fail=0, region=None)
+                        total=0, done_n=0, ok=0, absent=0, fail=0, region=None, projection={})
         _OSMPACK_STOP["flag"] = False
 
     def _release(err, code):
@@ -1482,9 +1500,7 @@ def api_osmpack_bake():
     bbox, rings, name = _datapack_selection()
     if not bbox:
         return _release("bbox or polygon required", 400)
-    folder = ((request.json or {}).get("folder") or "").strip()
-    if not folder:
-        return _release("a folder of .pbf files is required", 400)
+    folder = _osmpack_folder()
     scan = op.scan_pbf_folder(folder)
     if not scan.get("ok") or not scan.get("files"):
         return _release(scan.get("error") or "no .pbf files in folder", 400)
@@ -1517,9 +1533,16 @@ def api_osmpack_bake():
 
     _logged = [0]
 
-    def _prog(done_n, total, ok, skip, absent, fail):
+    def _prog(done_n, total, ok, skip, absent, fail, bytes_done=0):
+        # Once the bake has produced >=5 real tiles, their measured sizes replace the sampled
+        # 15.7 MB/tile constant (project_from_progress gates the threshold itself). The constant
+        # is a mean over an 88x sparse-to-city spread, so the up-front figure can be wildly off
+        # for THIS region - the projection is what lets the UI stop quoting a range.
+        proj = op.project_from_progress(ok, bytes_done, total) if bytes_done else {}
         with _OSMPACK_LOCK:
             _OSMPACK.update(done_n=done_n, total=total, ok=ok, absent=absent, fail=fail)
+            if proj:
+                _OSMPACK["projection"] = proj
         if total and (done_n - _logged[0] >= max(50, total // 20) or done_n >= total):
             _logged[0] = done_n
             log(f"[OSM pack] {done_n}/{total} tiles · {ok} baked, {skip} cached, {fail} failed")
@@ -1571,6 +1594,105 @@ def api_osmpack_status():
 @app.route("/api/osmpack/stop", methods=["POST"])
 def api_osmpack_stop():
     _OSMPACK_STOP["flag"] = True
+    return jsonify({"ok": True})
+
+
+# ── Geofabrik: find + fetch the right .pbf for the selection (src/geofabrik.py) ───────────
+# One download at a time, enforced server-side: these are country-sized files, and two parallel
+# streams into the same drop folder would halve each other's bandwidth to finish no sooner.
+_GEOFABRIK_LOCK = threading.Lock()
+_GEOFABRIK = {"active": False, "done": False, "note": "", "file": "", "url": "",
+              "bytes_done": 0, "bytes_total": 0, "pct": 0.0}
+_GEOFABRIK_STOP = {"flag": False}
+
+
+@app.route("/api/geofabrik/suggest", methods=["GET", "POST"])
+def api_geofabrik_suggest():
+    """Which Geofabrik extract(s) cover the current selection. POST takes the same body as the
+    datapack routes; GET falls back to the project's saved selection, so the UI can ask without
+    re-sending the polygon. Suggested against the seam-EXPANDED bbox (the one the bake covers) -
+    an extract that misses only the buffer ring would bake a border seam back in."""
+    d = request.get_json(silent=True) or {}
+    bbox = d.get("bbox")
+    rings = d.get("polygons") or ([d.get("polygon")] if d.get("polygon") else None)
+    if not bbox and rings:
+        bbox = dp.rings_bbox(rings)
+    if not bbox:
+        bbox = (PROJECT.load_selection() or {}).get("bbox")
+    if not bbox:
+        return jsonify({"ok": False, "error": "select an area first"}), 400
+    try:
+        sugg = gf.suggest(_osm_gen_bbox(bbox))
+    except Exception as ex:  # noqa: BLE001
+        return jsonify({"ok": False, "error": f"Geofabrik index unavailable: {ex}"}), 502
+    return jsonify({"ok": True, "bbox": bbox, "folder": str(gf.pbf_dir()),
+                    "suggestions": sugg})
+
+
+@app.route("/api/geofabrik/fetch", methods=["POST"])
+def api_geofabrik_fetch():
+    """Download ONE extract - by index id ("romania") or direct url - into the default drop
+    folder on a daemon thread; progress via /api/geofabrik/status. Cross-border selections call
+    this once per suggested leaf; the bake merges the files seam-correctly."""
+    d = request.json or {}
+    url = (d.get("url") or "").strip()
+    ident = (d.get("id") or "").strip()
+    if not url and not ident:
+        return jsonify({"ok": False, "error": "id or url required"}), 400
+    if not url:
+        try:
+            url = gf.resolve_pbf_url(ident)
+        except Exception as ex:  # noqa: BLE001
+            return jsonify({"ok": False, "error": f"Geofabrik index unavailable: {ex}"}), 502
+        if not url:
+            return jsonify({"ok": False, "error": f"unknown Geofabrik id: {ident}"}), 400
+    name = gf.pbf_name(url)
+    if not name.endswith(".pbf"):
+        return jsonify({"ok": False, "error": f"not a .pbf url: {url}"}), 400
+    with _GEOFABRIK_LOCK:
+        if _GEOFABRIK["active"]:
+            return jsonify({"ok": False, "error": "a Geofabrik download is already running"}), 409
+        _GEOFABRIK.update(active=True, done=False, note=f"downloading {name}…", file=name,
+                          url=url, bytes_done=0, bytes_total=0, pct=0.0)
+        _GEOFABRIK_STOP["flag"] = False
+
+    def _gprog(done, total):
+        with _GEOFABRIK_LOCK:
+            _GEOFABRIK.update(bytes_done=done, bytes_total=total,
+                              pct=round(100.0 * done / total, 1) if total else 0.0)
+
+    def _gworker():
+        try:
+            res = gf.download(url, gf.pbf_dir(), on_progress=_gprog,
+                              should_stop=lambda: _GEOFABRIK_STOP["flag"])
+            if res.get("ok"):
+                note = f"downloaded {name} ({res['bytes'] / 1e9:.2f} GB)"
+            elif res.get("stopped"):
+                note = f"stopped — partial {name} discarded"
+            else:
+                note = f"error: {res.get('error') or 'download failed'}"
+            with _GEOFABRIK_LOCK:
+                _GEOFABRIK.update(active=False, done=True, note=note)
+            log(f"[Geofabrik] {note}")
+        except Exception as ex:  # noqa: BLE001
+            with _GEOFABRIK_LOCK:
+                _GEOFABRIK.update(active=False, done=True, note=f"error: {ex}")
+            log(f"[Geofabrik] error: {ex}")
+
+    log(f"[Geofabrik] downloading {name} → {gf.pbf_dir()}")
+    threading.Thread(target=_gworker, daemon=True).start()
+    return jsonify({"ok": True, "file": name, "url": url, "folder": str(gf.pbf_dir())})
+
+
+@app.route("/api/geofabrik/status")
+def api_geofabrik_status():
+    with _GEOFABRIK_LOCK:
+        return jsonify({"ok": True, **_GEOFABRIK})
+
+
+@app.route("/api/geofabrik/stop", methods=["POST"])
+def api_geofabrik_stop():
+    _GEOFABRIK_STOP["flag"] = True
     return jsonify({"ok": True})
 
 
@@ -6077,6 +6199,164 @@ def api_mcs_opts():
     heap, cpu_n = _mcs_resources()
     return jsonify({"ok": True, **out, "effective": {"heap": heap, "cpu_count": cpu_n,
                     "machine": m}})
+
+
+# ── shareable settings presets: "my look, your place" (see src/presets.py) ─────
+# One json file a user sends to another user. Machine-specific keys (worker counts, paths,
+# the whole server_ profile) are stripped on BOTH save and apply/import — the reasons, the
+# exact list, and the schema live in src/presets.py, not here.
+from src import presets as presetsmod  # noqa: E402  (grouped with its routes on purpose)
+
+
+@app.route("/api/presets")
+def api_presets_list():
+    """User presets first (deletable), then the bundled set shipped inside the app."""
+    return jsonify({"ok": True, "presets": presetsmod.list_presets()})
+
+
+@app.route("/api/presets/save", methods=["POST"])
+def api_presets_save():
+    """Snapshot THIS project's settings as a user preset. include_selection is opt-in:
+    a preset is a look first; embedding the place is a deliberate extra."""
+    d = request.get_json(silent=True) or {}
+    name = str(d.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "a preset needs a name"}), 400
+    if name.lower() in presetsmod.bundled_names():
+        # Refused rather than shadowed: a user "Default" and the shipped "Default" in one
+        # list is a support thread waiting to happen.
+        return jsonify({"ok": False,
+                        "error": f'"{name}" is a bundled preset — pick another name'}), 409
+    kept, stripped, _ = presetsmod.clean_settings(PROJECT.settings(), known_only=False)
+    sel = PROJECT.load_selection() if d.get("include_selection") else None
+    preset = presetsmod.build(name, d.get("description") or "", d.get("author") or "",
+                              kept, sel)
+    path = presetsmod.save_user(preset)
+    return jsonify({"ok": True, "name": preset["name"], "file": path.name,
+                    "stripped": stripped,
+                    "has_selection": "selection" in preset})
+
+
+@app.route("/api/presets/apply", methods=["POST"])
+def api_presets_apply():
+    """Apply a preset by NAME (user dir first, then bundled) or by an explicit file PATH
+    (the just-downloaded-from-a-friend flow, no import step needed). Returns the full
+    applied settings dict so the UI can refresh in one round trip."""
+    d = request.get_json(silent=True) or {}
+    if d.get("path"):
+        p = Path(str(d["path"])).expanduser()
+        if not p.is_file():
+            return jsonify({"ok": False, "error": "preset file not found"}), 404
+        if p.stat().st_size > presetsmod.MAX_PRESET_BYTES:
+            return jsonify({"ok": False, "error": "preset too large (limit 1 MB)"}), 413
+        try:
+            obj = json.loads(p.read_text(encoding="utf-8-sig"))
+        except Exception as ex:
+            return jsonify({"ok": False, "error": f"not valid JSON: {ex}"}), 400
+        err = presetsmod.validate(obj)
+        if err:
+            return jsonify({"ok": False, "error": err}), 400
+    else:
+        found = presetsmod.find(d.get("name") or "")
+        if not found:
+            return jsonify({"ok": False, "error": "preset not found"}), 404
+        obj = found[0]
+    # ALWAYS the import-grade filter, even for our own files: a hand-edited (or hostile)
+    # preset in the user dir must not be able to set this machine's worker counts or paths.
+    kept, stripped, dropped = presetsmod.clean_settings(obj["settings"], known_only=True)
+    applied = PROJECT.update_settings(kept)
+    sel = presetsmod.normalize_selection(obj.get("selection"))
+    sel_applied = False
+    if d.get("apply_selection") and sel:
+        PROJECT.save_selection(sel)
+        sel_applied = True
+    note = ""
+    if dropped:
+        note = ("ignored settings this Meld does not know (from a newer or different "
+                "build): " + ", ".join(dropped))
+    return jsonify({"ok": True, "name": obj["name"], "applied": applied,
+                    "stripped": stripped, "dropped": dropped,
+                    "selection_applied": sel_applied, "note": note})
+
+
+@app.route("/api/presets/delete", methods=["POST"])
+def api_presets_delete():
+    d = request.get_json(silent=True) or {}
+    found = presetsmod.find(d.get("name") or "")
+    if not found:
+        return jsonify({"ok": False, "error": "preset not found"}), 404
+    obj, path, bundled = found
+    if bundled:
+        return jsonify({"ok": False,
+                        "error": "bundled presets ship inside the app and cannot be "
+                                 "deleted — Save makes your own editable copy"}), 403
+    try:
+        path.unlink()
+    except OSError as ex:
+        return jsonify({"ok": False, "error": f"could not delete: {ex}"}), 500
+    return jsonify({"ok": True, "removed": obj["name"]})
+
+
+@app.route("/api/presets/export")
+def api_presets_export():
+    """Download the preset file itself — the exact bytes on disk, so what a user shares is
+    what a friend imports, with nothing re-serialised in between."""
+    found = presetsmod.find(request.args.get("name") or "")
+    if not found:
+        return jsonify({"ok": False, "error": "preset not found"}), 404
+    _obj, path, _bundled = found
+    return send_file(str(path), as_attachment=True, download_name=path.name,
+                     mimetype="application/json")
+
+
+@app.route("/api/presets/import", methods=["POST"])
+def api_presets_import():
+    """Accept a preset as a raw JSON body OR an uploaded file. Validates the shape, strips
+    machine keys, drops unknown keys with a note, and never overwrites: a name that is
+    already a user preset gets auto-suffixed, a bundled name is refused outright."""
+    if (request.content_length or 0) > presetsmod.MAX_PRESET_BYTES:
+        return jsonify({"ok": False, "error": "preset too large (limit 1 MB)"}), 413
+    f = request.files.get("file") or next(iter(request.files.values()), None)
+    raw = f.read(presetsmod.MAX_PRESET_BYTES + 1) if f else request.get_data()
+    if len(raw) > presetsmod.MAX_PRESET_BYTES:
+        return jsonify({"ok": False, "error": "preset too large (limit 1 MB)"}), 413
+    if not raw.strip():
+        return jsonify({"ok": False, "error": "empty upload"}), 400
+    try:
+        # utf-8-sig: presets get mailed around and opened in Notepad, which loves a BOM.
+        obj = json.loads(raw.decode("utf-8-sig"))
+    except Exception as ex:
+        return jsonify({"ok": False, "error": f"not valid JSON: {ex}"}), 400
+    err = presetsmod.validate(obj)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
+    name = obj["name"].strip()
+    if name.lower() in presetsmod.bundled_names():
+        return jsonify({"ok": False,
+                        "error": f'"{name}" is a bundled preset name — rename it in the '
+                                 f'file and import again'}), 409
+    kept, stripped, dropped = presetsmod.clean_settings(obj["settings"], known_only=True)
+    final_name = presetsmod.unique_name(name)
+    preset = presetsmod.build(final_name, obj.get("description") or "",
+                              obj.get("author") or "", kept, obj.get("selection"))
+    # Provenance stays the SENDER's, not this machine's — "made with 1.8.2 last May" is the
+    # information a recipient actually wants when a preset misbehaves.
+    for k in ("meld_version", "created"):
+        if isinstance(obj.get(k), str) and obj[k].strip():
+            preset[k] = obj[k].strip()[:32]
+    path = presetsmod.save_user(preset)
+    notes = []
+    if final_name != name:
+        notes.append(f'a preset called "{name}" already exists — saved as "{final_name}"')
+    if stripped:
+        notes.append("stripped machine-specific settings: " + ", ".join(stripped))
+    if dropped:
+        notes.append("ignored settings this Meld does not know (from a newer or "
+                     "different build): " + ", ".join(dropped))
+    return jsonify({"ok": True, "name": final_name, "file": path.name,
+                    "stripped": stripped, "dropped": dropped,
+                    "has_selection": "selection" in preset,
+                    "note": "; ".join(notes)})
 
 
 def resume_after_restart() -> None:

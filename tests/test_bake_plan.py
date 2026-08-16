@@ -180,3 +180,17 @@ def test_no_projection_from_too_few_tiles():
     """Two tiles say nothing about a thousand; quoting a number from them would be worse than
     quoting the range."""
     assert op.project_from_progress(2, 10_000_000, 500) == {}
+
+
+def test_live_bytes_come_from_the_open_writers(tmp_path):
+    """Mid-bake byte counts are read off the writers themselves - the alternative, scanning the
+    cache directory per tick, pays O(published tiles) against a folder that grows into tens of
+    thousands of files."""
+    w = op._TileWriter(tmp_path / "osm_test.json")
+    try:
+        w.node(1, 10.0, 20.0, "")
+        w.node(2, 11.0, 21.0, "")
+        assert op._writers_bytes({(0, 0): w}) > 40
+    finally:
+        w.abort()
+    assert op._writers_bytes({}) == 0

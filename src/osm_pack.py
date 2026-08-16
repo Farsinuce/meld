@@ -37,6 +37,8 @@ import os
 import re
 import shutil
 import threading
+import time
+from datetime import datetime
 from pathlib import Path
 
 from . import osm_grid
@@ -128,10 +130,10 @@ def scan_pbf_folder(folder: str) -> dict:
     """List .osm.pbf files in `folder` with their header bbox (if present) and size. Used by the
     UI to confirm a drop folder before baking.
 
-    Returns {ok, osmium:{ok,reason}, files:[{path,name,size_bytes,bbox|None}]}. The osmium status
-    rides along so the UI can say why every bbox is missing instead of implying the FILES are at
-    fault - "(no header bbox)" on all eight continent extracts means the reader is absent, not
-    that Geofabrik shipped eight broken files.
+    Returns {ok, osmium:{ok,reason}, files:[{path,name,size_bytes,bbox|None,age_days|None}]}.
+    The osmium status rides along so the UI can say why every bbox is missing instead of implying
+    the FILES are at fault - "(no header bbox)" on all eight continent extracts means the reader
+    is absent, not that Geofabrik shipped eight broken files.
     """
     d = Path(folder).expanduser()
     if not d.is_dir():
@@ -153,10 +155,24 @@ def scan_pbf_folder(folder: str) -> dict:
             except Exception:
                 bbox = None
         try:
-            sz = p.stat().st_size
+            st_f = p.stat()
+            sz = st_f.st_size
+            age_days = max(0.0, (time.time() - st_f.st_mtime) / 86400.0)
         except OSError:
-            sz = 0
-        files.append({"path": str(p), "name": p.name, "size_bytes": sz, "bbox": bbox})
+            sz, age_days = 0, None
+        # Geofabrik stamps dated snapshots as <region>-YYMMDD.osm.pbf. Copying such a file (or
+        # re-downloading the same snapshot) resets its mtime, so a file can look a day old while
+        # its DATA is a year old. When the name says older, believe the name.
+        m = re.search(r"-(\d{6})(?:\.osm)?\.pbf$", p.name)
+        if m:
+            try:
+                nd = (datetime.now() - datetime.strptime(m.group(1), "%y%m%d")).days
+                if nd >= 0 and (age_days is None or nd > age_days):
+                    age_days = float(nd)
+            except ValueError:
+                pass
+        files.append({"path": str(p), "name": p.name, "size_bytes": sz, "bbox": bbox,
+                      "age_days": round(age_days, 1) if age_days is not None else None})
     # de-dup (the two globs overlap on *.osm.pbf)
     seen, uniq = set(), []
     for f in files:
@@ -164,6 +180,19 @@ def scan_pbf_folder(folder: str) -> dict:
             continue
         seen.add(f["path"]); uniq.append(f)
     return {"ok": True, "osmium": st, "files": uniq}
+
+
+# Half a year of OSM edits is visible on the ground - new estates, rerouted roads, whole retail
+# parks - so the plan names files past this age. Inform only, never refuse: baking an old snapshot
+# on purpose (matching a world generated last year) is a use case, not an error.
+STALE_DAYS = 180
+
+
+def stale_files(files: list[dict], days: int = STALE_DAYS) -> list[str]:
+    """Names of scanned .pbf whose data is older than `days`. Consumes scan_pbf_folder output;
+    a file with no readable age is NOT called stale - accusing a file on a failed stat would
+    train users to ignore the warning."""
+    return [f["name"] for f in files if (f.get("age_days") or 0) > days]
 
 
 # ── planning a bake before it eats the machine ────────────────────────────────
@@ -365,13 +394,31 @@ class _TileWriter:
                 pass
 
 
+def _writers_bytes(writers: dict) -> int:
+    """Bytes the still-open tile writers have produced so far, asked of the writers themselves.
+    This feeds project_from_progress mid-bake; the alternative - scanning the cache directory -
+    pays O(published tiles) per tick against a folder that grows into tens of thousands of files.
+    flush() first so the text layer's pending characters are counted too; it runs once per .pbf,
+    not per element, so the syscalls are noise."""
+    n = 0
+    for w in writers.values():
+        try:
+            w.f.flush()
+            n += w.f.buffer.tell()
+        except Exception:  # noqa: BLE001
+            pass
+    return n
+
+
 def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None,
                node_storage: str | None = None, force: bool = False) -> dict:
     """Slice the given .pbf file(s) into Overpass-shaped JSON for exactly the `tiles` (a list of
     (x,y) at OSM_GRID_Z) and publish them into the shared OSM cache.
 
-    on_progress(done, total, ok, skip, absent, fail): done/total are tiles resolved; ok=written
-    with data, absent=written empty (no OSM in that tile), skip=already cached, fail=errored.
+    on_progress(done, total, ok, skip, absent, fail, bytes_done): done/total are tiles resolved;
+    ok=written with data, absent=written empty (no OSM in that tile), skip=already cached,
+    fail=errored; bytes_done=bytes THIS run has written so far, so the route can project the real
+    per-tile size (project_from_progress) instead of quoting the 15.7 MB mean forever.
     should_stop(): cooperative cancel, polled per pbf and periodically mid-pass. Returns a counts
     dict. Raises RuntimeError if pyosmium is unavailable (the route turns that into a clean error)."""
     try:
@@ -403,7 +450,7 @@ def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None
     else:
         target_bbox = None
     if on_progress:
-        on_progress(skip, total, 0, skip, 0, 0)
+        on_progress(skip, total, 0, skip, 0, 0, 0)
     if not todo:
         _log(f"  [OSM bake] all {total} tile(s) already cached")
         return {"ok": True, "total": total, "baked": 0, "empty": 0, "skip": skip, "fail": 0, "elements": 0}
@@ -540,7 +587,8 @@ def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None
                 continue
 
             if on_progress:
-                on_progress(skip + len(writers), total, len(writers), skip, 0, 0)
+                on_progress(skip + len(writers), total, len(writers), skip, 0, 0,
+                            _writers_bytes(writers))
 
     except _Stopped:
         # Discard EVERY partially-written tile — close() would append ']}' and publish a tile that
@@ -548,7 +596,7 @@ def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None
         for w in writers.values():
             w.abort()
         if on_progress:
-            on_progress(skip, total, 0, skip, 0, 0)
+            on_progress(skip, total, 0, skip, 0, 0, 0)
         _log("  [OSM bake] stopped — partial tiles discarded (re-bake to finish)")
         return {"ok": False, "stopped": True, "total": total, "baked": 0, "empty": 0,
                 "skip": skip, "fail": 0, "elements": 0}
@@ -562,11 +610,16 @@ def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None
     # falls back to live Overpass, which also returns empty. One tile's publish failing never aborts
     # the rest, and never leaves a half-written tmp behind.
     baked = fail = 0
+    pub_bytes = 0
     for xy, w in list(writers.items()):
         try:
             w.close()
             baked += 1
             total_elems += w.count
+            try:
+                pub_bytes += w.final.stat().st_size
+            except OSError:
+                pass
         except Exception as ex:  # noqa: BLE001
             w.abort()
             fail += 1
@@ -591,7 +644,7 @@ def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None
             except Exception:
                 pass
     if on_progress:
-        on_progress(total, total, baked + empty, skip, empty, fail)
+        on_progress(total, total, baked + empty, skip, empty, fail, pub_bytes)
     _log(f"  [OSM bake] wrote {baked} tile(s) ({total_elems} elements) + {empty} empty sentinel(s) "
          f"for no-OSM/sea tiles ({skip} already cached"
          + (f", {fail} failed" if fail else "") + ") → coverage is now truthful")
@@ -649,7 +702,7 @@ def _scan_pbf_into(pbf: str, target_list, out_dir: str, z: int, stop_path):
             # The relation pre-pass alone runs for minutes on a country .pbf, so it has to
             # honour the stop too — otherwise Stop does nothing until the pass finishes.
             if (rel_seen & 0xFFFF) == 0 and stopped():
-                return {"written": [], "elements": 0, "ok": True, "stopped": True}
+                return {"written": [], "elements": 0, "bytes": 0, "ok": True, "stopped": True}
             for m in o.members:
                 if m.type == "w":
                     rel_ways.add(m.ref)
@@ -665,7 +718,7 @@ def _scan_pbf_into(pbf: str, target_list, out_dir: str, z: int, stop_path):
             if (seen & 0x3FFFF) == 0 and stopped():
                 for w in writers.values():
                     w.abort()
-                return {"written": [], "elements": 0, "ok": True, "stopped": True}
+                return {"written": [], "elements": 0, "bytes": 0, "ok": True, "stopped": True}
             if isinstance(o, osmium.osm.Node):
                 loc = o.location
                 if not loc.valid():
@@ -720,21 +773,28 @@ def _scan_pbf_into(pbf: str, target_list, out_dir: str, z: int, stop_path):
                 w.abort()
             except Exception:
                 pass
-        return {"written": [], "elements": 0, "ok": False, "stopped": False}
+        return {"written": [], "elements": 0, "bytes": 0, "ok": False, "stopped": False}
 
     written = []
     elems = 0
+    bts = 0
     for xy, w in writers.items():
         try:
             w.close()
             written.append([xy[0], xy[1]])
             elems += w.count
+            # Sizes come free here (the file just closed); the parent sums them for the live
+            # disk projection without ever walking the temp trees.
+            try:
+                bts += w.final.stat().st_size
+            except OSError:
+                pass
         except Exception:  # noqa: BLE001
             try:
                 w.abort()
             except Exception:
                 pass
-    return {"written": written, "elements": elems, "ok": True, "stopped": False}
+    return {"written": written, "elements": elems, "bytes": bts, "ok": True, "stopped": False}
 
 
 def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None,
@@ -761,7 +821,7 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
     todo = {t for t in target if t not in have}
     skip = total - len(todo)
     if on_progress:
-        on_progress(skip, total, 0, skip, 0, 0)
+        on_progress(skip, total, 0, skip, 0, 0, 0)
     if not todo:
         _log(f"  [OSM bake] all {total} tile(s) already cached")
         return {"ok": True, "total": total, "baked": 0, "empty": 0, "skip": skip, "fail": 0, "elements": 0}
@@ -805,6 +865,8 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
             futs = {ex.submit(_scan_pbf_into, pbf, target_list, str(tmp_root / f"p{i}"), z, stop_path):
                     (i, pbf) for i, pbf in enumerate(pbfs)}
             done_p = 0
+            done_tiles = 0
+            done_bytes = 0
             pending = set(futs)
             stopped_now = False
             while pending:
@@ -823,12 +885,18 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
                     res["dir"] = str(tmp_root / f"p{i}")
                     results.append(res)
                     done_p += 1
+                    done_tiles += len(res.get("written", []))
+                    done_bytes += res.get("bytes", 0)
                     _log(f"  [OSM bake] baked {Path(pbf).name} ({done_p}/{len(pbfs)}) — "
                          f"{len(res['written'])} tile(s)"
                          + ("" if res["ok"] else " (SKIPPED, unreadable)"))
+                    # The third arg used to carry the finished-.pbf count, which the status log
+                    # showed as "N baked" (three files reading as three TILES). It now carries
+                    # real tiles + real bytes, because project_from_progress divides one by the
+                    # other - a .pbf count there would project a country at a few MB.
                     if on_progress:
                         on_progress(skip + int(len(todo) * 0.85 * done_p / len(pbfs)),
-                                    total, done_p, skip, 0, 0)
+                                    total, done_tiles, skip, 0, 0, done_bytes)
     except Exception as ex:  # noqa: BLE001
         shutil.rmtree(tmp_root, ignore_errors=True)
         _log(f"  [OSM bake] parallel pool failed ({ex}) — falling back to sequential")
@@ -848,7 +916,7 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
     if should_stop and should_stop():
         shutil.rmtree(tmp_root, ignore_errors=True)
         if on_progress:
-            on_progress(skip, total, 0, skip, 0, 0)
+            on_progress(skip, total, 0, skip, 0, 0, 0)
         _log("  [OSM bake] stopped — partial tiles discarded (re-bake to finish)")
         return {"ok": False, "stopped": True, "total": total, "baked": 0, "empty": 0,
                 "skip": skip, "fail": 0, "elements": 0}
@@ -881,7 +949,7 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
 
     shutil.rmtree(tmp_root, ignore_errors=True)
     if on_progress:
-        on_progress(total, total, baked + empty, skip, empty, fail)
+        on_progress(total, total, baked + empty, skip, empty, fail, done_bytes)
     _log(f"  [OSM bake] wrote {baked} tile(s) ({elements} elements) + {empty} empty sentinel(s) "
          f"({skip} already cached" + (f", {fail} failed" if fail else "") + ") → coverage truthful")
     return {"ok": True, "total": total, "baked": baked, "empty": empty, "skip": skip,
