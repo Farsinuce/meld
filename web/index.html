@@ -145,12 +145,18 @@
   select option, select optgroup { background:#151209; color:var(--fg); }
   button.sec.active { border-color:var(--acc); color:var(--acc2); background:rgba(227,164,23,.14); }
   input:focus,select:focus { outline:none; border-color:var(--acc); box-shadow:0 0 0 1px rgba(227,164,23,.6); }
-  button { background:linear-gradient(180deg,#f0bf3a,#e3a417); color:#241a02;
-           border:2px solid #9a6a12; border-radius:var(--rsm);
+  /* Primary buttons match the status bar: a flat dark panel, hairline border, the gold accent
+     carried by the TEXT. No gradient, no bevel. Hover = gold hairline + a step lighter. */
+  button { background:#141416; color:var(--acc2);
+           border:1px solid var(--hair); border-radius:var(--rsm);
            padding:8px 10px; font-family:var(--pixel); font-weight:700; letter-spacing:.02em;
-           cursor:pointer; width:100%; margin-top:6px;
-           box-shadow: inset 0 1px 0 rgba(255,235,170,.35), var(--ring); }
-  button:hover { filter:brightness(1.06); }
+           cursor:pointer; width:100%; margin-top:6px; }
+  button:hover { border-color:var(--acc); background:#1a1a1d; }
+  /* The Generate button's arrow: the same clean CSS-border triangle the step headers use, drawn
+     as a pseudo-element so the handler's textContent swaps (progress labels) can't delete it. */
+  #btnPrepBuild::before { content:''; display:inline-block; width:0; height:0; vertical-align:-2px;
+    margin-right:8px; border-top:6px solid transparent; border-bottom:6px solid transparent;
+    border-left:9px solid currentColor; }
   button:active { transform:translateY(1px); }
   button.sec { background:var(--raise); color:var(--fg); border:1px solid var(--hair); border-radius:var(--rsm);
                box-shadow:none; font-weight:700; }
@@ -194,11 +200,16 @@
     user-select:none; font-size:12px; font-weight:700; color:var(--fg);
     padding:8px 10px; border:1px solid var(--hair); border-radius:var(--rsm); background:var(--raise); }
   details.drawer > summary::-webkit-details-marker { display:none; }
-  details.drawer > summary::before { content:'▸'; color:var(--acc); font-size:11px; transition:transform .12s; }
-  details.drawer > summary:hover { border-color:var(--acc); color:var(--acc2); background:rgba(227,164,23,.10); }
+  /* The same crisp CSS-border triangle as the numbered step headers, at the SAME size, and it
+     does not shrink when the drawer opens: closed points right, open rotates to point down. */
+  details.drawer > summary::before { content:''; flex:none; width:0; height:0;
+    border-left:6px solid transparent; border-right:6px solid transparent;
+    border-top:9px solid var(--acc); transform:rotate(-90deg); transition:transform .15s ease; }
+  details.drawer > summary:hover { border-color:var(--acc); color:var(--acc2); background:rgba(227,164,23,.10);
+    text-decoration:underline; text-underline-offset:2px; }
   /* OPEN: strip the button look so it reads as a heading over flush content */
   details.drawer[open] > summary { background:transparent; border:none; padding:4px 0 4px; color:var(--acc2); }
-  details.drawer[open] > summary::before { transform:rotate(90deg); }
+  details.drawer[open] > summary::before { transform:none; }
   /* smoother open: fade + slide the body in (native <details> just snaps otherwise) */
   details.drawer[open] > :not(summary) { animation:drawerOpen .2s ease; }
   @keyframes drawerOpen { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:none; } }
@@ -293,10 +304,10 @@
   /* primary = the Generate button; secondary = the Stop/sec button. Straight corners. */
   .modal-btn { width:auto; margin:0; padding:8px 16px; font-size:12px; cursor:pointer; border-radius:var(--rsm);
     font-family:var(--pixel); font-weight:700; letter-spacing:.02em; }
-  .mb-gold { background:linear-gradient(180deg,#f0bf3a,#e3a417); color:#241a02; border:2px solid #9a6a12;
-    box-shadow: inset 0 1px 0 rgba(255,235,170,.35); }
+  /* Flat like the status bar: primary keeps the gold accent as border + text, no gradient. */
+  .mb-gold { background:#141416; color:var(--acc2); border:1px solid var(--acc); box-shadow:none; }
   .mb-ghost { background:var(--raise); color:var(--fg); border:1px solid var(--hair); box-shadow:none; }
-  .mb-gold:hover { filter:brightness(1.06); } .mb-ghost:hover { color:var(--acc2); border-color:var(--acc); background:rgba(227,164,23,.10); }
+  .mb-gold:hover { background:#1a1a1d; } .mb-ghost:hover { color:var(--acc2); border-color:var(--acc); background:rgba(227,164,23,.10); }
   /* Docs quick-menu: anchored glass dropdown under the header 📖 Docs button */
   .docs-menu { position:absolute; top:calc(100% + 4px); right:0; z-index:4000; min-width:182px;
     background:var(--glass); border:1px solid var(--hair); border-radius:var(--rsm); padding:5px;
@@ -375,6 +386,7 @@
     <div id="projGalHeader" style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--hair);cursor:move;user-select:none">
       <div style="font-weight:700;font-size:14px;color:var(--acc2,#d6ba58)" title="Drag to move">🌍 Projects</div>
       <input id="projSearch" placeholder="filter…" style="flex:1;min-width:0;padding:4px 8px;font-size:12px">
+      <button class="sec" id="projGalPresets" style="width:auto;padding:5px 9px;font-size:12px" title="Settings presets: save this project's look, apply a shared one, import / export as .json.">🎨 Presets</button>
       <button class="sec" id="projGalNewFolder" style="width:auto;padding:5px 9px;font-size:12px" title="Create a folder. Drag projects onto it to group them.">📁＋</button>
       <button class="sec" id="projGalNew" style="width:auto;padding:5px 9px;font-size:12px" title="Create a new empty project.">＋ New</button>
       <button class="sec xbtn" id="projGalClose" style="width:auto;padding:5px 10px;font-size:12px">✕</button>
@@ -394,6 +406,30 @@
         <button class="sec xbtn" id="projQueueKill" style="width:auto;padding:6px 10px;font-size:12px;display:none" title="Kill now: abort the current render and halt the whole queue.">✖ Kill</button>
       </div>
     </div>
+  </div>
+  <!-- Presets panel: same overlay styling as the projects gallery, opened from its header.
+       A preset is a shareable look (settings only, machine keys stripped server-side). -->
+  <div id="presetsOverlay" style="display:none;position:fixed;top:24px;left:340px;width:430px;max-height:min(82vh,780px);max-width:calc(100vw - 352px);z-index:6100;background:var(--glass);border:1px solid var(--hair);border-radius:var(--r);box-shadow:var(--ring);flex-direction:column;overflow:hidden">
+    <div id="presetsHeader" style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--hair);cursor:move;user-select:none">
+      <div style="font-weight:700;font-size:14px;color:var(--acc2)" title="Drag to move">🎨 Presets</div>
+      <span style="flex:1"></span>
+      <button class="sec" id="presetSaveOpen" style="width:auto;margin:0;padding:5px 9px;font-size:12px" title="Snapshot this project's settings as a named preset (machine-specific keys are stripped).">💾 Save current…</button>
+      <button class="sec" id="presetImportBtn" style="width:auto;margin:0;padding:5px 9px;font-size:12px" title="Import a preset .json someone sent you.">⤒ Import…</button>
+      <button class="sec xbtn" id="presetsClose" style="width:auto;margin:0;padding:5px 10px;font-size:12px">✕</button>
+    </div>
+    <div style="font-size:11px;color:var(--mut);padding:5px 12px;border-bottom:1px solid var(--line)">A preset is a shareable look: world settings only, never your paths or worker counts. Apply repaints every control.</div>
+    <div id="presetSaveRow" style="display:none;padding:8px 12px;border-bottom:1px solid var(--line)">
+      <div class="row"><input id="presetName" placeholder="preset name" style="flex:1;min-width:0;width:auto">
+        <input id="presetDesc" placeholder="description (optional)" style="flex:1.4;min-width:0;width:auto"></div>
+      <label style="font-weight:normal;font-size:12px;margin:6px 0 0;justify-content:flex-start"><input id="presetInclSel" type="checkbox"> include the map selection (the place, not just the look)</label>
+      <div class="row" style="margin-top:6px">
+        <button class="sec" id="presetSaveGo" style="flex:1;margin-top:0">Save preset</button>
+        <button class="sec" id="presetSaveCancel" style="width:auto;flex:0 0 auto;padding:5px 10px;margin-top:0">Cancel</button>
+      </div>
+    </div>
+    <div id="presetMsg" class="stat" style="display:none;padding:4px 12px"></div>
+    <div id="presetList" style="flex:1;overflow:auto;padding:8px 10px;display:flex;flex-direction:column;gap:6px"></div>
+    <input id="presetImportFile" type="file" accept=".json,application/json" style="display:none">
   </div>
   <div id="exploreSearch">
     <form id="exploreSearchForm">
@@ -423,7 +459,8 @@
         <span><i class="dot" style="background:var(--ok)"></i>merged</span>
         <span><i class="dot" style="background:var(--bad)"></i>failed</span>
       </div>
-      <button id="btnPrepBuild" title="Runs the whole job for the current stage: bakes your local .pbf if set, pre-warms buildings if on, then generates only the cells that aren't merged yet, so it also resumes safely after a stop or crash. One button for prepare, build, and resume.">▶ Generate world</button>
+      <button id="btnPrepBuild" title="Runs the whole job for the current stage: bakes your local .pbf if set, pre-warms buildings if on, then generates only the cells that aren't merged yet, so it also resumes safely after a stop or crash. One button for prepare, build, and resume.">Generate world</button>
+      <button id="btnTestBuild" class="sec" title="Renders a small centre sample of your selection so you can check the look before the full run.">🧪 Test build — centre cells only</button>
       <button id="btnGen" class="sec" style="display:none" title="Generates only the cells that aren't merged yet, safe to re-run after a stop or crash. Set cell size + workers in Settings below.">Generate &amp; merge</button>
       <button id="btnResume" class="sec" style="display:none" title="Re-queue every cell that isn't merged (failed, drift, interrupted). Crash / overnight recovery.">Resume unfinished</button>
       <button id="btnPlan" class="sec" title="Split the selection into cells at the Settings cell size. Change cell size in Settings, then Plan.">Plan or re-split</button>
@@ -500,17 +537,25 @@
       <label>Seed
         <span class="i" title="Tile-invariant building seed. Same value for the whole project keeps buildings identical across seams.">i</span>
         <input id="seed" type="number" min="1" step="1"></label>
-      <label>3D models
-        <span class="i" title="Fetch + place real 3D structure models for landmarks (3DMR + Wikimedia). Off = faster & smaller, plain block buildings. Needs internet.">i</span>
-        <input id="m3d" type="checkbox"></label>
+      <!-- ONE drawer for everything 3D: the schematic prop families AND the downloaded 3D-model
+           toggle, which used to be two controls whose difference nobody understood. Every id
+           (m3d, propsMenu, propsMinScale, propsScaleWarn) is unchanged — layout, not plumbing. -->
       <details class="drawer">
-        <summary>Props &middot; 3D families
-          <span class="i" title="Bundled 3D props placed at real OSM features: parked cars in car parks, boats on open water, cranes and excavators on construction sites, tractors on farmland, wind turbines at wind generators, fountains, playgrounds, cemetery tombstones, and lighthouses. Untick a family to skip it (no extra time or RAM).">i</span></summary>
-        <div class="dbody"><div id="propsMenu" style="display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px"></div>
+        <summary>Props &amp; 3D models
+          <span class="i" title="Everything three-dimensional placed into the world: bundled schematic props stamped at real OSM features (cars, boats, cranes, tractors, wind turbines, fountains, playgrounds, tombstones, lighthouses) and real downloaded 3D models for landmarks.">i</span></summary>
+        <div class="dbody">
+          <div style="font-size:11px;color:#cdbfa3;margin:2px 0 4px">Schematic props
+            <span class="i" title="Bundled 3D props placed at real OSM features: parked cars in car parks, boats on open water, cranes and excavators on construction sites, tractors on farmland, wind turbines at wind generators, fountains, playgrounds, cemetery tombstones, and lighthouses. Untick a family to skip it (no extra time or RAM).">i</span></div>
+          <div id="propsMenu" style="display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px"></div>
           <label style="margin-top:8px">Place props at scales down to
             <span class="i" title="Props are fixed-size builds - a boat is a boat whatever the world scale - so below this they are skipped. The generator's own default is 0.35, which means at Meld's usual 1:10 no prop is placed at all, however many families are ticked above. Lower it to place them anyway: at 1:10 a parked crane covers a district, which is the effect this guard exists to prevent.">i</span>
             <input id="propsMinScale" type="number" step="0.05" min="0" max="1" style="width:80px"></label>
           <div id="propsScaleWarn" class="sub" style="display:none;font-size:11px;color:var(--acc);margin-top:4px"></div>
+          <div style="font-size:11px;color:#cdbfa3;margin:10px 0 2px;border-top:1px solid var(--hair2);padding-top:8px">3D models (downloaded)</div>
+          <label>Place downloaded 3D models
+            <span class="i" title="Fetch + place real 3D structure models for landmarks (3DMR + Wikimedia). Off = faster & smaller, plain block buildings. Needs internet.">i</span>
+            <input id="m3d" type="checkbox"></label>
+          <div class="sub" style="font-size:11px;margin:0 0 4px">Real 3D models from 3DMR / Wikimedia placed at landmarks. Off = skip the downloads entirely.</div>
         </div>
       </details>
       <label>Game mode
@@ -1001,8 +1046,8 @@
     </div>
 
     <div class="card adv">
-      <h2>Elevation lock <span id="elevState" class="chip un">none</span></h2>
-      <div class="stat" id="elevVal">, </div>
+      <h2>Elevation lock <span id="elevState" class="chip un" style="margin-left:8px">none</span></h2>
+      <div class="stat" id="elevVal" style="margin:4px 0 6px">, </div>
       <button class="sec" id="btnSurvey">Survey selection</button>
       <div class="row" style="margin-top:6px">
         <input id="emin" placeholder="min m" style="width:50%"/>
@@ -1015,7 +1060,9 @@
       <h2>Prepare data <span class="i" title="Everything that makes a region local + fast, in one place: the elevation pack, the OSM .pbf bake, the Overture buildings pre-warm, and the shared cache. Each row expands; click a header to collapse it.">i</span></h2>
 
     <div class="card">
-      <h2>Cache <button id="btnCacheRefresh" class="sec" style="width:auto;margin:0;padding:2px 8px;font-size:11px;float:right" title="Recompute cache sizes (terrain can be 500k files, takes a second)">↻ sizes</button></h2>
+      <!-- margin-left:auto (the h2 is a flex row, float does nothing there) keeps a real gap
+           between the word and the button instead of them touching. -->
+      <h2>Cache <button id="btnCacheRefresh" class="sec" style="width:auto;margin:0 0 0 auto;padding:2px 8px;font-size:11px" title="Recompute cache sizes (terrain can be 500k files, takes a second)">↻ sizes</button></h2>
       <div class="stat">Shared map data (OSM + terrain + land cover), reused by every world. Lives at:</div>
       <div class="stat" id="cacheRoot" style="word-break:break-all;color:var(--mut);margin-bottom:6px">…</div>
       <div class="stat">OSM <span id="cacheOsm" style="float:right;color:var(--fg)">–</span></div>
@@ -1093,7 +1140,13 @@
         <span class="i" title="Folder holding one or more *.osm.pbf extracts (Geofabrik per-country files). The bake reads every .pbf in it and produces the OSM tiles for your selection.">i</span></label>
       <input id="osmPbfPath" type="text" style="width:100%" placeholder="folder with romania-latest.osm.pbf …, or Browse…">
       <button class="sec" id="btnOsmBrowse" style="margin-top:4px">Browse…</button>
-      <div class="stat" style="margin-top:5px">Get the .pbf from <a href="https://download.geofabrik.de/" target="_blank" rel="noopener">Geofabrik</a></div>
+      <!-- One click instead of hunting download.geofabrik.de by hand: suggest the extract(s)
+           covering the selection, download into the default drop folder, then rescan. -->
+      <button class="sec" id="btnGeofabrik" style="margin-top:4px" title="Find the Geofabrik extract(s) that cover your selection (suggested against the seam-expanded area the bake needs), download into the default .pbf drop folder, then rescan the folder.">⤓ Get the data for this region</button>
+      <div id="gfSuggest" class="stat" style="display:none;margin-top:4px"></div>
+      <div id="gfProg" class="stat" style="display:none;margin-top:3px"></div>
+      <button class="sec xbtn" id="btnGfStop" style="display:none;width:auto;margin-top:3px;padding:2px 8px;font-size:11px" title="Stop the running download (the partial file is discarded).">✕ Stop download</button>
+      <div class="stat" style="margin-top:5px">Or get a .pbf yourself from <a href="https://download.geofabrik.de/" target="_blank" rel="noopener">Geofabrik</a></div>
       <button class="sec" id="btnOsmScan" style="margin-top:4px">⌕ Scan folder</button>
       <div id="osmScan" class="stat" style="color:var(--mut)">…</div>
       <label style="margin-top:8px">Bake workers
@@ -2628,6 +2681,151 @@ if ($('projGalNew')) $('projGalNew').onclick = async () => {
   if (!rr.ok) { modalInfo('Meld', rr.error || 'failed'); return; }
   location.reload();
 };
+
+// ── Presets panel: shareable settings presets ("my look, your place") ─────────
+// List / save / apply / import / export / delete against /api/presets*. Names come from user
+// files, so every name goes in via textContent, never innerHTML. Server refusals (bundled
+// delete, name collisions) render inline on the panel's message line.
+function _presetMsg(t, warn) {
+  const el = $('presetMsg'); if (!el) return;
+  el.style.display = t ? '' : 'none';
+  el.style.color = warn ? 'var(--acc)' : 'var(--ok)';
+  el.textContent = t || '';
+}
+function presetsOpen() { $('presetsOverlay').style.display = 'flex'; _presetMsg(''); presetsRefresh(); }
+function presetsClose() { $('presetsOverlay').style.display = 'none'; }
+async function presetsRefresh() {
+  const host = $('presetList'); if (!host) return;
+  host.innerHTML = '<div class="stat" style="color:var(--mut)">loading…</div>';
+  let r; try { r = await api('/api/presets'); } catch (e) { r = null; }
+  if (!r || !r.ok) {
+    host.innerHTML = '';
+    const d = document.createElement('div'); d.className = 'stat'; d.style.color = 'var(--acc)';
+    d.textContent = (r && r.error) || 'could not list presets';
+    host.appendChild(d); return;
+  }
+  const list = r.presets || [];   // user presets first, then bundled (the server orders them)
+  host.innerHTML = '';
+  if (!list.length) {
+    host.innerHTML = '<div class="stat" style="color:var(--mut)">No presets yet — Save current… snapshots this project\'s look.</div>';
+    return;
+  }
+  for (const p of list) host.appendChild(_presetRow(p));
+}
+function _presetRow(p) {
+  const row = document.createElement('div');
+  row.style.cssText = 'border:1px solid var(--line);padding:7px 9px';
+  const name = document.createElement('div');
+  name.style.cssText = 'display:flex;align-items:center;gap:6px;font-weight:600;font-size:13px';
+  const nm = document.createElement('span');
+  nm.style.cssText = 'min-width:0;overflow-wrap:anywhere'; nm.textContent = p.name;
+  name.appendChild(nm);
+  if (p.bundled) {
+    const tag = document.createElement('span'); tag.className = 'chip';
+    tag.style.color = 'var(--mut)'; tag.textContent = 'bundled';
+    tag.title = 'Ships inside the app. Apply it freely; it cannot be deleted.';
+    name.appendChild(tag);
+  }
+  if (p.has_selection) {
+    const tag = document.createElement('span'); tag.className = 'chip';
+    tag.style.color = '#00e5ff'; tag.textContent = 'has place';
+    tag.title = 'This preset also carries a map selection.';
+    name.appendChild(tag);
+  }
+  const desc = document.createElement('div');
+  desc.className = 'stat'; desc.style.cssText = 'color:var(--mut);font-size:11px;margin-top:2px';
+  desc.textContent = [p.description, p.author ? 'by ' + p.author : '',
+                      p.meld_version ? 'made with ' + p.meld_version : ''].filter(Boolean).join(' · ');
+  const btns = document.createElement('div');
+  btns.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-top:6px';
+  const mk = (label, title, fn, cls) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'sec' + (cls ? ' ' + cls : '');
+    b.textContent = label; b.title = title || '';
+    b.style.cssText = 'width:auto;margin:0;padding:3px 8px;font-size:11px';
+    b.onclick = fn; return b;
+  };
+  btns.append(mk('✓ Apply', 'Apply this preset to the current project. Machine-specific settings (paths, worker counts) are never touched.', () => presetApply(p)));
+  btns.append(mk('⤓ Export', 'Download the preset file itself, to share.', () => { location.href = '/api/presets/export?name=' + encodeURIComponent(p.name); }));
+  if (!p.bundled) btns.append(mk('🗑️', 'Delete this preset file.', () => presetDelete(p), 'xbtn'));
+  row.append(name);
+  if (desc.textContent) row.append(desc);
+  row.append(btns);
+  return row;
+}
+async function presetApply(p) {
+  if (!(await modalConfirm('Apply preset',
+    `Apply "${p.name}" to the current project? Its look settings overwrite yours; your paths, worker counts and save location are kept.`, 'Apply'))) return;
+  const r = await api('/api/presets/apply', { name: p.name });
+  if (!r || !r.ok) { _presetMsg((r && r.error) || 'apply failed', true); return; }
+  _presetMsg(`Applied "${r.name}".` + (r.note ? ' ' + r.note : ''));
+  // The same repaint path a project switch relies on: every control re-reads its saved value.
+  await refreshState();
+}
+async function presetDelete(p) {
+  if (!(await modalConfirm('Delete preset', `Delete the preset "${p.name}"? The file is removed from your presets folder.`, 'Delete'))) return;
+  const r = await api('/api/presets/delete', { name: p.name });
+  if (!r || !r.ok) { _presetMsg((r && r.error) || 'delete failed', true); return; }
+  _presetMsg(`Deleted "${r.removed || p.name}".`);
+  presetsRefresh();
+}
+if ($('projGalPresets')) $('projGalPresets').onclick = presetsOpen;
+if ($('presetsClose')) $('presetsClose').onclick = presetsClose;
+if ($('presetSaveOpen')) $('presetSaveOpen').onclick = () => {
+  const row = $('presetSaveRow');
+  const opening = row.style.display === 'none';
+  row.style.display = opening ? '' : 'none';
+  if (opening) $('presetName').focus();
+};
+if ($('presetSaveCancel')) $('presetSaveCancel').onclick = () => { $('presetSaveRow').style.display = 'none'; };
+if ($('presetSaveGo')) $('presetSaveGo').onclick = async () => {
+  const name = ($('presetName').value || '').trim();
+  if (!name) { _presetMsg('a preset needs a name', true); return; }
+  const r = await api('/api/presets/save', {
+    name, description: ($('presetDesc').value || '').trim(),
+    include_selection: $('presetInclSel').checked,     // opt-in: a preset is a look first
+  });
+  if (!r || !r.ok) { _presetMsg((r && r.error) || 'save failed', true); return; }
+  _presetMsg(`Saved "${r.name}"` + (r.has_selection ? ' (with the selection)' : '') + '.');
+  $('presetSaveRow').style.display = 'none';
+  $('presetName').value = ''; $('presetDesc').value = ''; $('presetInclSel').checked = false;
+  presetsRefresh();
+};
+if ($('presetImportBtn')) $('presetImportBtn').onclick = () => $('presetImportFile').click();
+if ($('presetImportFile')) $('presetImportFile').addEventListener('change', async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';                                 // allow re-picking the same file later
+  if (!f) return;
+  let r;
+  try {
+    // The route accepts the preset as a raw JSON body — read the file and POST it as-is.
+    const raw = await f.text();
+    r = await fetch('/api/presets/import', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: raw }).then(x => x.json());
+  } catch (err) { r = { ok: false, error: 'import failed: ' + err }; }
+  if (!r || !r.ok) { _presetMsg((r && r.error) || 'import failed', true); return; }
+  _presetMsg(`Imported "${r.name}".` + (r.note ? ' ' + r.note : ''));
+  presetsRefresh();
+});
+// Drag the presets panel by its header, same as the projects overlay.
+(function () {
+  const ov = $('presetsOverlay'), h = $('presetsHeader'); if (!ov || !h) return;
+  let sx, sy, ol, ot, drag = false;
+  h.addEventListener('pointerdown', e => {
+    if (e.target.closest('input,button')) return;
+    const r = ov.getBoundingClientRect();
+    ol = r.left; ot = r.top; sx = e.clientX; sy = e.clientY; drag = true;
+    ov.style.left = ol + 'px'; ov.style.top = ot + 'px'; ov.style.right = 'auto'; ov.style.bottom = 'auto';
+    try { h.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  h.addEventListener('pointermove', e => {
+    if (!drag) return;
+    ov.style.left = Math.max(4, Math.min(window.innerWidth - 90, ol + (e.clientX - sx))) + 'px';
+    ov.style.top = Math.max(4, Math.min(window.innerHeight - 40, ot + (e.clientY - sy))) + 'px';
+  });
+  const end = () => { drag = false; };
+  h.addEventListener('pointerup', end); h.addEventListener('pointercancel', end);
+})();
 if ($('projQueueStart')) $('projQueueStart').onclick = async () => {
   if (!_projQueue.length) { modalInfo('Meld', 'Check at least one project to queue.'); return; }
   if (!(await modalConfirm('Render queue', `Render ${_projQueue.length} project(s) one after another, in order? Meld switches to each, plans its cells from the saved selection, generates, then moves on. This runs unattended.`, 'Render all'))) return;
@@ -4371,12 +4569,17 @@ if ($('tileKm')) {
 }
 
 // Paint each range slider with a gold left-fill on the dark track. WebKit has no native progress
-// fill, so we set a linear-gradient on the input background (the track pseudo is transparent);
-// Firefox uses ::-moz-range-progress and ignores this. Generic over every slider, present + future.
+// fill, so we paint a solid-gold SVG strip sized to the value over the input background (the
+// track pseudo is transparent) - a flat fill, no gradient anywhere. Firefox uses
+// ::-moz-range-progress and ignores this. Generic over every slider, present + future.
+const _RANGE_FILL = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='%23f0bf3a'/%3E%3C/svg%3E\")";
 function paintRange(el){
   const min = +el.min || 0, max = +el.max || 0, v = +el.value || 0;
   const pct = max > min ? Math.max(0, Math.min(100, (v - min) / (max - min) * 100)) : 0;
-  el.style.background = `linear-gradient(90deg, var(--acc2) 0 ${pct}%, #2a2620 ${pct}% 100%)`;
+  el.style.backgroundColor = '#2a2620';
+  el.style.backgroundImage = _RANGE_FILL;
+  el.style.backgroundRepeat = 'no-repeat';
+  el.style.backgroundSize = pct + '% 100%';
 }
 function paintAllRanges(){ document.querySelectorAll('input[type=range]').forEach(paintRange); }
 document.querySelectorAll('input[type=range]').forEach(el => el.addEventListener('input', () => paintRange(el)));
@@ -4418,21 +4621,9 @@ function syncCardMapLayers(slug, collapsed) {
   const moveKids = (card, h2, target) => {
     [...card.childNodes].forEach(n => { if (n !== h2) target.appendChild(n); });
   };
-  // 1) Project & world: inline into the Generate body under a small divider title.
-  // 1) Project & world: NO sub-title - the controls flow straight into Generate. The Projects
-  //    gallery button lands right under the Stop / Clear row, then Name, Save location, drawers.
-  const pw = bySlug['project-world'];
-  if (pw) {
-    const sep = document.createElement('div');
-    sep.style.cssText = 'border-top:1px solid var(--hair);margin-top:10px';
-    gen.card.appendChild(sep);
-    moveKids(pw.card, pw.h2, gen.card);
-    pw.card.remove();
-  }
-  // 2) Selection / search + Edit & retry: drawers inside Generate.
   const ICON = { 'selection-search': '🔍', 'edit-retry': '✏️' };
-  for (const slug of ['selection-search', 'edit-retry']) {
-    const it = bySlug[slug]; if (!it) continue;
+  const mkDrawer = (slug) => {                       // a card becomes a Settings-style drawer
+    const it = bySlug[slug]; if (!it) return;
     const det = document.createElement('details'); det.className = 'drawer';
     const sum = document.createElement('summary');
     if (ICON[slug]) sum.appendChild(document.createTextNode(ICON[slug] + ' '));   // match the 📦 Export style
@@ -4441,8 +4632,29 @@ function syncCardMapLayers(slug, collapsed) {
     moveKids(it.card, it.h2, det);
     gen.card.appendChild(det);
     it.card.remove();
+  };
+  // Order inside Generate: Selection / search FIRST (the thing you actually do first), then the
+  // Export & compression drawer, then Edit & retry, then the rest of Project & world (name, save
+  // location, prune). Whole DOM blocks move; every id and listener rides along untouched.
+  // 1) Selection / search drawer.
+  mkDrawer('selection-search');
+  // 2) Export & compression: lift the whole drawer out of the Project & world card.
+  const expDrawer = document.getElementById('exportFmt')
+    && document.getElementById('exportFmt').closest('details.drawer');
+  if (expDrawer) gen.card.appendChild(expDrawer);
+  // 3) Edit & retry drawer.
+  mkDrawer('edit-retry');
+  // 4) Project & world: NO sub-title - the remaining controls flow straight into Generate under
+  //    a divider (Projects gallery button, Name, Save location, prune).
+  const pw = bySlug['project-world'];
+  if (pw) {
+    const sep = document.createElement('div');
+    sep.style.cssText = 'border-top:1px solid var(--hair);margin-top:10px';
+    gen.card.appendChild(sep);
+    moveKids(pw.card, pw.h2, gen.card);
+    pw.card.remove();
   }
-  // 3) Import world settings (.json) goes LAST in Generate, after the Edit & retry drawer.
+  // 5) Import world settings (.json) goes LAST in Generate.
   ['btnImport', 'importFile', 'importMsg'].forEach(id => {
     const el = document.getElementById(id);
     if (el) gen.card.appendChild(el);
@@ -4728,6 +4940,61 @@ if ($('btnPrepBuild')) $('btnPrepBuild').onclick = async () => {
     $('btnGen').click();
   } catch (e) { modalInfo('Meld', 'Prepare and build failed: ' + e); }
   finally { btn.disabled = false; btn.textContent = old; }
+};
+
+// 🧪 Test build: run ONLY the 2×2 cells nearest the selection centre, through the same
+// select-to-retry machinery the ◉/↻ buttons use (mark → regenerate-cells), so you can check the
+// look before committing to the full run. A plan smaller than 2×2 just uses what exists.
+if ($('btnTestBuild')) $('btnTestBuild').onclick = async () => {
+  const st = await api('/api/state');
+  const grid = st.grid || {};
+  const keys = Object.keys(grid);
+  if (!keys.length || !projOrigin || projOrigin.lat == null) {
+    modalInfo('Meld', 'Pick a place first (the Selection step) so there is a planned grid to sample.');
+    return;
+  }
+  // Centre of the drawn selection, or of the planned grid after a refresh with no box drawn.
+  let clat, clon;
+  if (selection) { clat = (selection.south + selection.north) / 2; clon = (selection.west + selection.east) / 2; }
+  else {
+    let s = 90, w = 180, n = -90, e = -180;
+    for (const k of keys) {
+      let bb; try { bb = cellBboxFromKey(k, projOrigin, projScale); } catch (x) { continue; }
+      s = Math.min(s, bb.south); w = Math.min(w, bb.west); n = Math.max(n, bb.north); e = Math.max(e, bb.east);
+    }
+    clat = (s + n) / 2; clon = (w + e) / 2;
+  }
+  // The 2×2 block nearest the centre: the cell under the centre plus its nearest neighbours on
+  // the side the centre leans to, kept to cells that actually exist in the plan.
+  let pick = [];
+  const k0 = latlonToCellKey(clat, clon);
+  if (k0) {
+    const p = k0.split(','); const rx = +p[0], rz = +p[1], size = +p[2];
+    let bb0 = null; try { bb0 = cellBboxFromKey(k0, projOrigin, projScale); } catch (x) {}
+    const dx = (bb0 && clon < (bb0.west + bb0.east) / 2) ? -1 : 1;
+    const dz = (bb0 && clat < (bb0.south + bb0.north) / 2) ? -1 : 1;
+    pick = [[rx, rz], [rx + dx, rz], [rx, rz + dz], [rx + dx, rz + dz]]
+      .map(([x, z]) => `${x},${z},${size}`).filter(k => grid[k]);
+  }
+  if (!pick.length) {                                // odd shapes: fall back to the 4 nearest cells
+    const scored = [];
+    for (const k of keys) {
+      let bb; try { bb = cellBboxFromKey(k, projOrigin, projScale); } catch (x) { continue; }
+      const dy = (bb.south + bb.north) / 2 - clat, dxx = (bb.west + bb.east) / 2 - clon;
+      scored.push([dy * dy + dxx * dxx, k]);
+    }
+    scored.sort((a, b) => a[0] - b[0]);
+    pick = scored.slice(0, 4).map(t => t[1]);
+  }
+  if (!pick.length) { modalInfo('Meld', 'No cells to test.'); return; }
+  if (!(await modalConfirm('Test build',
+    `Renders a small centre sample of your selection (${pick.length} cell${pick.length === 1 ? '' : 's'}) so you can check the look before the full run.`,
+    'Test build'))) return;
+  _retryQueue.clear(); pick.forEach(k => _retryQueue.add(k)); renderRetryQueue();   // the existing retry marks
+  const r = await api('/api/cell/regenerate-cells', { cell_keys: pick });           // the existing retry runner
+  if (!r || !r.ok) { _retryQueue.clear(); renderRetryQueue(); modalInfo('Meld', (r && r.error) || 'test build failed'); return; }
+  _retryQueue.clear(); renderRetryQueue();
+  kickPoll();
 };
 
 // ── suspect cells + selective redo ──────────────────────────────────────────
@@ -5785,7 +6052,12 @@ async function osmPollStatus() {
   }
   const pct = s.total ? Math.round(100 * s.done_n / s.total) : (s.done ? 100 : 0);
   $('osmBar').style.width = pct + '%';
-  $('osmProg').textContent = `${s.note || ''} · ${s.done_n}/${s.total} (${s.ok} baked, ${s.fail} failed)`;
+  let line = `${s.note || ''} · ${s.done_n}/${s.total} (${s.ok} baked, ${s.fail} failed)`;
+  // Once ≥5 real tiles exist their measured sizes replace the sampled constant server-side;
+  // quote that projection so the progress line stops being a guess.
+  const pj = s.projection || {};
+  if (pj.projected_final_gb) line += ` · projected total ~${pj.projected_final_gb} GB (from ${pj.from_tiles} tiles)`;
+  $('osmProg').textContent = line;
   if (!s.active) {
     if (_osmPoll) { clearInterval(_osmPoll); _osmPoll = null; }
     $('btnOsmStop').style.display = 'none';
@@ -5793,13 +6065,15 @@ async function osmPollStatus() {
   }
 }
 async function osmScan() {
+  // Blank is allowed: the server resolves it to the default drop folder (where "Get the data for
+  // this region" lands its downloads) and reports WHERE it looked, which we surface in the box.
   const folder = ($('osmPbfPath').value || '').trim();
-  if (!folder) { $('osmScan').textContent = 'Enter a folder path first.'; return; }
   $('osmScan').textContent = 'Scanning…';
   const r = await _dpApi('/api/osmpack/scan', { folder });
   if (!r || !r.ok) { $('osmScan').textContent = (r && r.error) || 'scan failed'; return; }
+  if (!folder && r.folder) $('osmPbfPath').placeholder = r.folder;   // show where the blank box looked
   const files = r.files || [];
-  if (!files.length) { $('osmScan').textContent = 'no .pbf files found in that folder'; return; }
+  if (!files.length) { $('osmScan').textContent = 'no .pbf files found in ' + (r.folder || 'that folder'); return; }
   // When osmium is missing EVERY file reports no bbox, which read as "your files are broken"
   // rather than "the reader is absent". Say which it is, once, instead of per file.
   const osm = r.osmium || { ok: true };
@@ -5835,6 +6109,101 @@ if ($('btnOsmCoverage')) $('btnOsmCoverage').onclick = osmCoverage;
 if ($('btnOsmBake')) $('btnOsmBake').onclick = osmBake;
 if ($('btnOsmScan')) $('btnOsmScan').onclick = osmScan;
 if ($('btnOsmStop')) $('btnOsmStop').onclick = () => api('/api/osmpack/stop', {});
+
+// ── "Get the data for this region": suggest → confirm inline → fetch → poll → rescan ──
+// The index has no sizes (verified server-side), so the rows honestly show name + coverage
+// (+ extent in square degrees) instead of inventing a download size.
+let _gfPoll = null;
+function gfWait(prefix) {
+  // Poll one running download to completion. Resolves true only on a finished download.
+  return new Promise(resolve => {
+    const prog = $('gfProg'), stop = $('btnGfStop');
+    const tick = async () => {
+      const s = await _dpApi('/api/geofabrik/status');
+      if (!s || s.error) {
+        if (_gfPoll) { clearInterval(_gfPoll); _gfPoll = null; }
+        if (prog) { prog.style.color = 'var(--acc)'; prog.textContent = (s && s.error) || 'status unreachable'; }
+        if (stop) stop.style.display = 'none';
+        resolve(false); return;
+      }
+      const gb = b => (b / 1e9).toFixed(2);
+      if (prog) {
+        prog.style.color = '';
+        prog.textContent = s.active
+          ? `⤓ ${prefix}${s.file} — ${s.pct}%` + (s.bytes_total ? ` (${gb(s.bytes_done)} / ${gb(s.bytes_total)} GB)` : '')
+          : `${prefix}${s.note || 'done'}`;
+      }
+      if (stop) stop.style.display = s.active ? '' : 'none';
+      if (!s.active && s.done) {
+        if (_gfPoll) { clearInterval(_gfPoll); _gfPoll = null; }
+        const ok = /^downloaded/.test(s.note || '');
+        if (prog && !ok) prog.style.color = 'var(--acc)';
+        resolve(ok);
+      }
+    };
+    if (_gfPoll) clearInterval(_gfPoll);
+    _gfPoll = setInterval(tick, 1000); tick();
+  });
+}
+async function gfFetch(ids) {
+  // One extract at a time (the server enforces it too): a cross-border cover set downloads
+  // its leaves sequentially, then ONE rescan refreshes the file list.
+  const prog = $('gfProg');
+  if (prog) { prog.style.display = ''; prog.style.color = ''; prog.textContent = 'starting download…'; }
+  for (let i = 0; i < ids.length; i++) {
+    const r = await _dpApi('/api/geofabrik/fetch', { id: ids[i] });
+    if (!r || !r.ok) {
+      if (prog) { prog.style.color = 'var(--acc)'; prog.textContent = (r && r.error) || 'download failed'; }
+      return;
+    }
+    // Zero-config: the drop folder the download lands in becomes the bake folder when blank.
+    if (r.folder && $('osmPbfPath') && !$('osmPbfPath').value.trim()) $('osmPbfPath').value = r.folder;
+    const done = await gfWait(ids.length > 1 ? `${i + 1}/${ids.length} · ` : '');
+    if (!done) return;   // stopped or errored — the message is already on the progress line
+  }
+  if (prog) prog.textContent += ' · rescanning the folder…';
+  await osmScan();       // the existing scan path refreshes the file list + plan estimate
+}
+async function gfShowSuggestions() {
+  const host = $('gfSuggest'); if (!host) return;
+  host.style.display = ''; host.style.color = ''; host.textContent = 'Looking up the Geofabrik index…';
+  // GET (no body): the server falls back to the project's saved selection, so this works even
+  // right after a page refresh when the live selection vars are empty.
+  const r = await _dpApi('/api/geofabrik/suggest');
+  if (!r || !r.ok) { host.style.color = 'var(--acc)'; host.textContent = (r && r.error) || 'suggest failed'; return; }
+  const sugg = r.suggestions || [];
+  if (!sugg.length) { host.style.color = 'var(--acc)'; host.textContent = 'No Geofabrik extract covers this selection.'; return; }
+  host.textContent = '';
+  const mkRow = (label, hint, ids) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 0';
+    const span = document.createElement('span');
+    span.style.cssText = 'flex:1;min-width:0;overflow-wrap:anywhere';
+    span.textContent = label; if (hint) span.title = hint;
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'sec'; btn.textContent = '⤓ Download';
+    btn.style.cssText = 'width:auto;flex:0 0 auto;margin:0;padding:2px 8px;font-size:11px';
+    btn.onclick = () => gfFetch(ids);
+    row.append(span, btn);
+    return row;
+  };
+  const singles = sugg.filter(s => s.role === 'contains');
+  const cover = sugg.filter(s => s.role === 'cover');
+  for (const s of singles)
+    host.appendChild(mkRow(`${s.name} — covers ${s.covered_pct}% of the selection`,
+      `${s.area_deg2}°² extract · Geofabrik id: ${s.id}`, [s.id]));
+  if (cover.length)
+    host.appendChild(mkRow(
+      `Cross-border set (${cover.length}): ${cover.map(s => s.name).join(' + ')} — jointly cover the selection`,
+      cover.map(s => `${s.name} covers ${s.covered_pct}%`).join(' · ') + ' · the bake merges them seam-correctly',
+      cover.map(s => s.id)));
+  const note = document.createElement('div');
+  note.style.cssText = 'color:var(--mut);margin-top:2px';
+  note.textContent = 'Downloads land in the default .pbf drop folder' + (r.folder ? ': ' + r.folder : '') + '.';
+  host.appendChild(note);
+}
+if ($('btnGeofabrik')) $('btnGeofabrik').onclick = gfShowSuggestions;
+if ($('btnGfStop')) $('btnGfStop').onclick = () => api('/api/geofabrik/stop', {});
 
 // ── Overture buildings pre-warm (download the region's building data once, in parallel) ──
 let _ovPoll = null;
