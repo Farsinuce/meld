@@ -914,8 +914,10 @@ def _dir_size_mb(p: Path) -> float:
 def _cache_targets() -> dict:
     from src.prefetch import meld_cache_root
     root = meld_cache_root()
+    from src.geofabrik import pbf_dir
     return {"_root": root, "osm": root / "osm",
-            "terrain": root / "arnis-tile-cache", "landcover": root / "arnis-landcover-cache"}
+            "terrain": root / "arnis-tile-cache", "landcover": root / "arnis-landcover-cache",
+            "pbf": pbf_dir()}
 
 
 def _cache_info() -> dict:
@@ -936,7 +938,12 @@ def _cache_info() -> dict:
             pass
         return {"mb": round(mb / (1024 * 1024), 1), "files": files}
     return {"root": str(t["_root"]),
-            "osm": info(t["osm"]), "terrain": info(t["terrain"]), "landcover": info(t["landcover"])}
+            "osm": info(t["osm"]), "terrain": info(t["terrain"]),
+            "landcover": info(t["landcover"]),
+            # The .pbf downloads are cache too - the biggest single files a user has, and the
+            # ones they most plausibly want to find and reclaim. path rides along so the UI can
+            # prefill the bake folder box with it.
+            "pbf": {**info(t["pbf"]), "path": str(t["pbf"])}}
 
 
 # The walk is NEVER run in the request thread. A comment above used to say it takes ~1-2 s;
@@ -984,7 +991,7 @@ def api_cache_clear():
     what = (request.json or {}).get("what", "")
     t = _cache_targets()
     sel = [t["osm"], t["terrain"], t["landcover"]] if what == "all" else \
-        ([t[what]] if what in ("osm", "terrain", "landcover") else None)
+        ([t[what]] if what in ("osm", "terrain", "landcover", "pbf") else None)
     if sel is None:
         return jsonify({"ok": False, "error": "what must be osm | terrain | landcover | all"}), 400
     freed = 0.0
@@ -6441,6 +6448,17 @@ def run_server(port: int | None = None, host: str = "127.0.0.1", *,
     # Before anything can spawn: no console windows per cell, and every child in a group that
     # dies with us instead of surviving as an orphan pinning eight cores.
     childproc.install()
+    # The folders a user is told about must exist BEFORE they go looking. The .pbf drop folder
+    # and the presets folder are both "put your files here" surfaces; lazily creating them on
+    # first use meant a user opening the data directory saw neither and concluded the features
+    # were broken. Seeding also copies the shipped preset starters in as editable files.
+    try:
+        from src.geofabrik import pbf_dir
+        pbf_dir()
+        from src import presets as _presets
+        _presets.seed_bundled()
+    except Exception:
+        pass
     # Ask GitHub once, on a daemon thread, ten seconds from now. Not on this path: a DNS lookup
     # behind a captive portal blocks for the full socket timeout, and no update notice is worth
     # delaying the first paint. A source checkout skips the network entirely.

@@ -191,11 +191,50 @@ def _read(path: Path) -> dict | None:
 
 
 def _entry(obj: dict, path: Path, bundled: bool) -> dict:
+    # A file can also DECLARE itself bundled: the shipped starters are seeded into the user
+    # folder as editable copies carrying "bundled": true, so the tag survives the copy.
     return {"name": obj["name"], "description": obj.get("description", ""),
             "author": obj.get("author", ""), "created": obj.get("created", ""),
-            "meld_version": obj.get("meld_version", ""), "bundled": bundled,
+            "meld_version": obj.get("meld_version", ""),
+            "bundled": bool(bundled or obj.get("bundled")),
             "file": path.name,
             "has_selection": normalize_selection(obj.get("selection")) is not None}
+
+
+def seed_bundled() -> list[str]:
+    """Copy each shipped starter into the user presets folder, once, as an EDITABLE file.
+
+    The starters used to live only inside the app bundle, listed read-only - which made them
+    impossible to tune. The owner's workflow is the whole reason this exists: open the JSON in
+    the presets folder, adjust it, test, and eventually feed the tuned values back into the
+    repo. So the resource copy is a SEED, not the source of truth: copied only when the user
+    folder has no preset of that name, stamped "bundled": true so the tag survives, and never
+    overwritten after that - a reseed that clobbered edits would defeat the point. Deleting a
+    seeded file resets it to pristine on the next start, which doubles as reset-to-default.
+    """
+    seeded: list[str] = []
+    src = bundled_dir()
+    if not src.is_dir():
+        return seeded
+    have = {e["name"].strip().lower() for e in _dir_entries(user_dir(), False)}
+    for p in sorted(src.glob("*.json")):
+        obj = _read(p)
+        if not obj or obj["name"].strip().lower() in have:
+            continue
+        obj["bundled"] = True
+        (user_dir() / p.name).write_text(json.dumps(obj, indent=2), encoding="utf-8")
+        seeded.append(obj["name"])
+    return seeded
+
+
+def _dir_entries(d: Path, bundled: bool) -> list[dict]:
+    out = []
+    if d.is_dir():
+        for p in sorted(d.glob("*.json")):
+            obj = _read(p)
+            if obj:
+                out.append(_entry(obj, p, bundled))
+    return out
 
 
 def _sources() -> list[tuple[Path, bool]]:
@@ -206,14 +245,18 @@ def _sources() -> list[tuple[Path, bool]]:
 
 
 def list_presets() -> list[dict]:
+    # Deduped by name, user copy first: after seeding, every shipped starter exists in BOTH
+    # directories, and listing both would show each twice - with the read-only resource copy
+    # shadowing the edits the seeding exists to allow.
     out: list[dict] = []
+    seen: set[str] = set()
     for d, bundled in _sources():
-        if not d.is_dir():
-            continue
-        for p in sorted(d.glob("*.json")):
-            obj = _read(p)
-            if obj:
-                out.append(_entry(obj, p, bundled))
+        for e in _dir_entries(d, bundled):
+            k = e["name"].strip().lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(e)
     return out
 
 

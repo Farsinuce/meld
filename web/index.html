@@ -74,6 +74,9 @@
           padding:10px 2px; margin-bottom:0; border-bottom:1px solid var(--hair2); }
   .card h2 { font-family:var(--pixel); font-size:12px; text-transform:uppercase; letter-spacing:.04em;
              color:var(--acc2); margin:0 0 9px; }
+  /* Info lines directly under a title were touching it on several cards (OSM data pack,
+     Overture, ...). One rule instead of chasing each card. */
+  .card h2 + .stat, .card h2 + .sub { margin-top:6px; }
   /* collapsible #side sections: click a heading to open/close; many can be open at once. The
      gold chevron + hover highlight make it read clearly as a dropdown. */
   #side .card { transition:background .12s; }
@@ -157,6 +160,11 @@
   #btnPrepBuild::before { content:''; display:inline-block; width:0; height:0; vertical-align:-2px;
     margin-right:8px; border-top:6px solid transparent; border-bottom:6px solid transparent;
     border-left:9px solid currentColor; }
+  /* Generate is the ONE loud control on the page: solid gold, dark text. Everything else is a
+     flat dark panel, so the single filled button reads as "this is the go button" without a
+     gradient anywhere. The triangle inherits the dark text via currentColor for free. */
+  #btnPrepBuild { background:var(--acc); color:#1a1408; border:1px solid var(--acc); }
+  #btnPrepBuild:hover { background:var(--acc2); border-color:var(--acc2); color:#1a1408; }
   button:active { transform:translateY(1px); }
   button.sec { background:var(--raise); color:var(--fg); border:1px solid var(--hair); border-radius:var(--rsm);
                box-shadow:none; font-weight:700; }
@@ -416,7 +424,7 @@
   </div>
   <!-- Presets panel: same overlay styling as the projects gallery, opened from its header.
        A preset is a shareable look (settings only, machine keys stripped server-side). -->
-  <div id="presetsOverlay" style="display:none;position:fixed;top:24px;left:340px;width:430px;max-height:min(82vh,780px);max-width:calc(100vw - 352px);z-index:6100;background:var(--glass);border:1px solid var(--hair);border-radius:var(--r);box-shadow:var(--ring);flex-direction:column;overflow:hidden">
+  <div id="presetsOverlay" style="display:none;position:fixed;top:12px;left:784px;width:430px;max-height:min(82vh,780px);max-width:calc(100vw - 352px);z-index:6100;background:var(--glass);border:1px solid var(--hair);border-radius:var(--r);box-shadow:var(--ring);flex-direction:column;overflow:hidden">
     <div id="presetsHeader" style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--hair);cursor:move;user-select:none">
       <div style="font-weight:700;font-size:14px;color:var(--acc2)" title="Drag to move">🎨 Presets</div>
       <span style="flex:1"></span>
@@ -467,11 +475,11 @@
         <span><i class="dot" style="background:var(--bad)"></i>failed</span>
       </div>
       <button id="btnPrepBuild" title="Runs the whole job for the current stage: bakes your local .pbf if set, pre-warms buildings if on, then generates only the cells that aren't merged yet, so it also resumes safely after a stop or crash. One button for prepare, build, and resume.">Generate world</button>
-      <button id="btnTestBuild" class="sec" title="Renders a small centre sample of your selection so you can check the look before the full run.">🧪 Test build — centre cells only</button>
       <button id="btnGen" class="sec" style="display:none" title="Generates only the cells that aren't merged yet, safe to re-run after a stop or crash. Set cell size + workers in Settings below.">Generate &amp; merge</button>
       <button id="btnResume" class="sec" style="display:none" title="Re-queue every cell that isn't merged (failed, drift, interrupted). Crash / overnight recovery.">Resume unfinished</button>
       <button id="btnPlan" class="sec" title="Split the selection into cells at the Settings cell size. Change cell size in Settings, then Plan.">Plan or re-split</button>
       <button id="btnTrimOcean" class="sec" title="Remove planned cells that are open ocean, no OSM features AND at/below sea level, so generation skips flat-water tiles. Needs the region's OSM + elevation cached. Reversible: Plan re-adds them.">🌊 Trim ocean cells</button>
+      <button id="btnTestBuild" class="sec" title="Renders a small centre sample of your selection so you can check the look before committing to the full run.">🧪 Test build — centre cells only</button>
       <div class="row" style="margin-top:6px">
         <button class="sec" id="btnStop">Stop</button>
         <button class="sec xbtn" id="btnClear" title="Clear plan" style="width:auto;flex:0 0 auto;padding:8px 12px">🗑️</button>
@@ -824,7 +832,7 @@
     </div>
 
     <div class="card" id="borderCard">
-      <h2>Border &amp; zones <span class="chip" style="color:#00e5ff">servers</span>
+      <h2>Border &amp; zones <span class="chip" style="color:#00e5ff;margin-left:8px">servers</span>
         <span class="i" title="Country/zone borders for a server. Builds concentric rings, exports WorldGuard regions.yml + per-ring point files + a ready border.sk Skript, previews them on the map, and trims the world to the outer ring. Independent of the render settings above.">i</span></h2>
       <div class="stat" style="margin-bottom:6px">Rings: <b style="color:#00e5ff">actual</b> border, <b style="color:#ff9800">soft</b> (+km safe edge), <b style="color:#ffeb3b">hard</b> (+km wall / trim), <b style="color:#76ff03">lime</b> internal line. Exports <code>regions.yml</code> + point files + <code>border.sk</code> to <code>&lt;project&gt;/border/</code>.</div>
       <!-- Zones flow directly under the header; all the numeric settings live in one closed drawer. -->
@@ -864,7 +872,7 @@
     </div>
 
     <div class="card" id="mcserverCard">
-      <h2>Server setup <span class="chip" style="color:#00e5ff">servers</span>
+      <h2>Server setup <span class="chip" style="color:#00e5ff;margin-left:8px">servers</span>
         <span class="i" title="Turn the finished world into a ready-to-run Leaf (Paper fork) server: pick a version, stage configs + the world, download the jar and the border/zone plugins (WorldGuard, WorldEdit, Skript + addons), accept the EULA, start. The server's region-format is auto-matched to your Export format (MCA / Linear / B_Linear). Everything runs locally (localhost, offline mode), going public is its own confirmed switch.">i</span></h2>
       <!-- Flat content: the card header itself is the only collapse, no dropdown-in-dropdown. -->
       <div>
@@ -1075,6 +1083,7 @@
       <div class="stat">OSM <span id="cacheOsm" style="float:right;color:var(--fg)">–</span></div>
       <div class="stat">Terrain <span id="cacheTerrain" style="float:right;color:var(--fg)">–</span></div>
       <div class="stat">Land cover <span id="cacheLand" style="float:right;color:var(--fg)">–</span></div>
+      <div class="stat">PBF downloads <span id="cachePbf" style="float:right;color:var(--fg)" title="Geofabrik .pbf extracts in the default bake folder - the biggest single files Meld keeps, and safe to clear once a region is baked.">–</span></div>
       <div class="row" style="margin-top:7px">
         <button class="sec" id="btnClearOsm" title="Delete cached OSM (re-downloads next run)">Clear OSM</button>
         <button class="sec" id="btnClearTerrain" title="Delete the cached terrain tiles (re-downloads next run)">Clear terrain</button>
@@ -1130,12 +1139,11 @@
     <div class="card">
       <h2>OSM data pack <span class="i" title="Bake a local OpenStreetMap .pbf (e.g. romania-latest.osm.pbf from Geofabrik) into the shared OSM grid, so generation reads buildings/roads OFFLINE with ZERO Overpass calls, and every overlapping selection reuses it instead of re-downloading. Draw/search an area, point at your .pbf folder, then Bake. Needs pyosmium on the server (pip install osmium).">i</span></h2>
       <div class="stat" id="osmCov" style="margin-bottom:4px">Draw or search an area, then check OSM coverage.</div>
-      <div class="stat" style="margin-bottom:6px;color:var(--mut)">
-        Live map data comes from Overpass, a free shared service with per-IP limits. A big or
-        repeated fetch can come back <b>rate limited (429)</b> or <b>server overloaded (403)</b>;
-        Meld rotates mirrors and retries, and everything it fetched is cached on the shared grid
-        so a re-run costs nothing. If your network blocks Overpass, or you fetch the same region
-        often, bake a local .pbf below and generation never calls out at all.</div>
+      <!-- One line on screen; the paragraph lives in the hover. People skim cards, they
+           read tooltips when they actually want the answer. -->
+      <div class="stat" style="margin:6px 0 8px;color:var(--mut)">Bake a local .pbf and generation
+        never calls Overpass at all
+        <span class="i" title="Live map data comes from Overpass, a free shared service with per-IP limits. A big or repeated fetch can come back rate limited (429) or server overloaded (403); Meld rotates mirrors and retries, and everything fetched is cached on the shared grid so a re-run costs nothing. If your network blocks Overpass, or you fetch the same region often, bake a local .pbf below instead.">i</span></div>
       <div class="row">
         <button class="sec" id="btnOsmCoverage" title="Check how much of the selection's OSM is baked/cached on the stable grid. Any red tiles are edge/sea tiles outside your .pbf (the seam ring + the Black Sea), not errors; generation fetches each live once and caches it.">Check OSM coverage</button>
         <button class="sec" id="btnOsmBake" title="Slice the .pbf folder below into the selection's missing OSM tiles. Offline, uses your CPU/RAM/disk, no Overpass calls.">⤓ Bake from .pbf</button>
@@ -5724,6 +5732,11 @@ async function loadCache(refresh) {
     if ($('cacheOsm')) $('cacheOsm').textContent = fmt(c.osm) + (c.computing ? ' (updating…)' : '');
     if ($('cacheTerrain')) $('cacheTerrain').textContent = fmt(c.terrain) + (c.computing ? ' (updating…)' : '');
     if ($('cacheLand')) $('cacheLand').textContent = fmt(c.landcover) + (c.computing ? ' (updating…)' : '');
+    if ($('cachePbf') && c.pbf) $('cachePbf').textContent = fmt(c.pbf) + (c.computing ? ' (updating…)' : '');
+    // The bake folder box defaults to the data-dir pbf folder Meld creates at startup; Browse
+    // still overrides it. Prefilled as a VALUE so the user can see and copy the real path.
+    if (c.pbf && c.pbf.path && $('osmPbfPath') && !$('osmPbfPath').value.trim())
+      $('osmPbfPath').value = c.pbf.path;
   } catch (e) {}
 }
 if ($('btnCacheRefresh')) $('btnCacheRefresh').onclick = () => {

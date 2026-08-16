@@ -90,3 +90,6 @@ assets/build-info.json
 # source checkout data_dir() IS the repo root - so a self-updated arnis lands here. 45 MB of
 # binary that must never reach a commit; the updater writes it, git ignores it.
 /bin/
+# The default .pbf download folder. data_dir() is the repo root from a source checkout, so the
+# eager-created drop folder lands here - same trap as /bin/ above, same fix.
+/pbf/

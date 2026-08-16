@@ -244,3 +244,32 @@ def test_apply_by_path_covers_the_downloaded_file_flow(client, tmp_path):
     a = client.post("/api/presets/apply", json={"path": str(p)}, headers=HDR).get_json()
     assert a["ok"] and a["applied"]["scale"] == 0.6
     assert a["applied"]["max_workers"] == 2, "path-apply gets the same strip as import"
+
+
+def test_seeding_copies_starters_as_editable_files(client):
+    """The shipped starters must land in the USER folder as real, editable JSON - the owner's
+    tuning workflow is edit-the-file, and a read-only resource copy made that impossible."""
+    from src import presets as P
+    seeded = P.seed_bundled()
+    assert seeded, "nothing seeded - bundled dir empty?"
+    for e in P.list_presets():
+        if e["bundled"]:
+            f = P.user_dir() / e["file"]
+            assert f.is_file(), "a bundled preset is not an editable user file"
+    # a second seed must NOT clobber edits
+    first = sorted(P.user_dir().glob("*.json"))[0]
+    first.write_text(first.read_text(encoding="utf-8").replace('"scale"', '"scale_edited"')
+                     if '"scale"' in first.read_text(encoding="utf-8")
+                     else first.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    before = first.read_text(encoding="utf-8")
+    P.seed_bundled()
+    assert first.read_text(encoding="utf-8") == before, "reseeding clobbered a user edit"
+
+
+def test_listing_never_shows_a_starter_twice(client):
+    """After seeding, every starter exists in BOTH directories; the list must dedupe by name
+    with the editable user copy winning."""
+    from src import presets as P
+    P.seed_bundled()
+    names = [e["name"].strip().lower() for e in P.list_presets()]
+    assert len(names) == len(set(names)), f"duplicate names listed: {names}"
