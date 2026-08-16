@@ -478,8 +478,6 @@
       <button id="btnGen" class="sec" style="display:none" title="Generates only the cells that aren't merged yet, safe to re-run after a stop or crash. Set cell size + workers in Settings below.">Generate &amp; merge</button>
       <button id="btnResume" class="sec" style="display:none" title="Re-queue every cell that isn't merged (failed, drift, interrupted). Crash / overnight recovery.">Resume unfinished</button>
       <button id="btnPlan" class="sec" title="Split the selection into cells at the Settings cell size. Change cell size in Settings, then Plan.">Plan or re-split</button>
-      <button id="btnTrimOcean" class="sec" title="Remove planned cells that are open ocean, no OSM features AND at/below sea level, so generation skips flat-water tiles. Needs the region's OSM + elevation cached. Reversible: Plan re-adds them.">🌊 Trim ocean cells</button>
-      <button id="btnTestBuild" class="sec" title="Renders a small centre sample of your selection so you can check the look before committing to the full run.">🧪 Test build — centre cells only</button>
       <div class="row" style="margin-top:6px">
         <button class="sec" id="btnStop">Stop</button>
         <button class="sec xbtn" id="btnClear" title="Clear plan" style="width:auto;flex:0 0 auto;padding:8px 12px">🗑️</button>
@@ -1052,6 +1050,8 @@
     <div class="card">
       <h2>Edit &amp; retry <span class="i" title="Tools that act on cells you've already planned: paint cells on/off, mark a clump to re-run, or regenerate just the cells inside your current selection. Kept separate from a full Generate.">i</span></h2>
       <button id="btnEditCells" class="sec" title="Paint individual cells. When ON, drag across the map to ADD cells over empty ground, or drag over existing cells to REMOVE them (the first cell you touch decides add vs remove). Merged cells are left alone.">✏️ Edit cells: off</button>
+      <button id="btnTestBuild" class="sec" title="Builds a 2×2 region around the centre of your selection - a quick look-check before committing to the full run.">🧪 Test build</button>
+      <button id="btnTrimOcean" class="sec" title="Remove planned cells that are open ocean, no OSM features AND at/below sea level, so generation skips flat-water tiles. Needs the region's OSM + elevation cached. Reversible: Plan re-adds them.">🌊 Trim ocean cells</button>
       <button id="btnRetrySelect" class="sec" title="Drag a square over the map to mark every cell inside it for re-run, they get a cyan fill + 🔁. A click toggles one cell; drag again over marked cells to unmark. The locked selection box can't move while this is on. Then hit Retry; marked cells switch to the normal build emoji as they run.">◉ Select to retry</button>
       <button id="btnRetryQueued" class="sec" style="display:none" title="Re-run the cells you marked with Select to retry.">↻ Retry selected</button>
       <button id="btnRedoSuspect" class="sec" style="display:none" title="Re-run only the cells flagged suspect (truncated terrain tiles / missing land cover). Fixes the localized cliffs without redoing the whole world; the redo pre-warms terrain so they cache cleanly.">↻ Redo suspect</button>
