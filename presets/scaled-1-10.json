@@ -1,0 +1,26 @@
+{
+  "meld_preset": 1,
+  "name": "Scaled 1:10",
+  "description": "One-tenth scale for fast city-sized builds: compact road detail, schematic props off (fixed-size builds look wrong at this scale).",
+  "author": "Meld",
+  "meld_version": "1.8.4",
+  "created": "2026-08-16",
+  "settings": {
+    "scale": 0.1,
+    "road_detail_level": "compact",
+    "props": {
+      "boat": false,
+      "car": false,
+      "crane": false,
+      "excavator": false,
+      "fountain": false,
+      "helicopter": false,
+      "lighthouse": false,
+      "playground": false,
+      "starship": false,
+      "tombstone": false,
+      "tractor": false,
+      "windturbine": false
+    }
+  }
+}

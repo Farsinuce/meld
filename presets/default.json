@@ -1,0 +1,14 @@
+{
+  "meld_preset": 1,
+  "name": "Default",
+  "description": "Meld's baseline look at real 1:1 scale: terrain, buildings and schematic trees all on.",
+  "author": "Meld",
+  "meld_version": "1.8.4",
+  "created": "2026-08-16",
+  "settings": {
+    "scale": 1.0,
+    "terrain": true,
+    "buildings": true,
+    "trees": true
+  }
+}

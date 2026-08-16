@@ -1,0 +1,12 @@
+{
+  "meld_preset": 1,
+  "name": "Extended height",
+  "description": "Worlds taller than the vanilla build limit, with terrain height stretched 1.5x for dramatic mountains.",
+  "author": "Meld",
+  "meld_version": "1.8.4",
+  "created": "2026-08-16",
+  "settings": {
+    "disable_height_limit": true,
+    "vertical_exaggeration": 1.5
+  }
+}

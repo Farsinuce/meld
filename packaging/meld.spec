@@ -64,6 +64,7 @@ datas += tree("web")                    # index.html, mini.html, images
 datas += tree("assets")                 # countries.geojson, loot presets, item registry, icons
 datas += tree("tree-packs")             # region tree schematics
 datas += tree("cave-pack")              # cave decoration schematics
+datas += tree("presets")                # bundled settings presets (see src/presets.py)
 datas += tree("region-convert/bin")     # prebuilt .b_linear converter, if vendored
 datas += tree("packaging")              # shortcut scripts, shipped so the user can run them
 datas += one("CHANGELOG.md")            # the version shown in the banner is read from here
