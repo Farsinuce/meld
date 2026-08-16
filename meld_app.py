@@ -281,4 +281,15 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # MUST run before anything else - before the single-instance lock above all. The parallel
+    # .pbf bake uses a multiprocessing spawn pool, and in a frozen build spawn re-executes
+    # Meld.exe from the top. Without this call each pool worker booted as a full Meld: it found
+    # the single-instance lock held, opened a browser tab at the running instance and exited -
+    # so "pressing bake opened 2 Meld tabs" (one per planned worker), the pool saw its workers
+    # die ("parallel pool failed ... falling back to sequential"), and every frozen bake has
+    # silently run sequential since the first exe. freeze_support() recognises the spawn
+    # sentinel in argv and diverts the child into worker mode instead; everywhere else it is a
+    # no-op, including from source.
+    import multiprocessing
+    multiprocessing.freeze_support()
     raise SystemExit(main())

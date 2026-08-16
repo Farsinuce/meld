@@ -915,23 +915,60 @@ def _cache_targets() -> dict:
 
 
 def _cache_info() -> dict:
-    """Location + per-type size/file-count of the shared Meld cache. Computed on demand (the
-    terrain dir can be 500k files, ~1-2s), NOT in the status poll."""
+    """Location + per-type size/file-count of the shared Meld cache. One os.walk pass per dir,
+    size and count together - rglob twice per directory is double the I/O for the same answer."""
     t = _cache_targets()
     def info(p: Path) -> dict:
+        mb = files = 0
         try:
-            files = sum(1 for f in p.rglob("*") if f.is_file()) if p.exists() else 0
+            for base, _dirs, names in os.walk(p):
+                for n in names:
+                    try:
+                        mb += os.path.getsize(os.path.join(base, n))
+                        files += 1
+                    except OSError:
+                        pass
         except Exception:
-            files = 0
-        return {"mb": _dir_size_mb(p), "files": files}
+            pass
+        return {"mb": round(mb / (1024 * 1024), 1), "files": files}
     return {"root": str(t["_root"]),
             "osm": info(t["osm"]), "terrain": info(t["terrain"]), "landcover": info(t["landcover"])}
 
 
+# The walk is NEVER run in the request thread. A comment above used to say it takes ~1-2 s;
+# after one country-sized bake the cache is 60-100 GB across half a million files, a cold-cache
+# walk takes minutes, and doing that synchronously is what made "refresh sizes" hang the card at
+# "..." indefinitely - reported, with a screenshot, the day 1.8.7 shipped. The request returns
+# the last computed answer immediately plus a `computing` flag; a daemon thread refreshes.
+_CACHE_SIZES_LOCK = threading.Lock()
+_CACHE_SIZES: dict = {"computing": False, "at": 0.0, "data": None}
+
+
+def _cache_recompute() -> None:
+    data = _cache_info()
+    with _CACHE_SIZES_LOCK:
+        _CACHE_SIZES.update(computing=False, at=time.time(), data=data)
+
+
 @app.route("/api/cache", methods=["GET"])
 def api_cache():
-    """Where the shared cache lives + how big each part is (OSM / terrain / land-cover)."""
-    return jsonify({"ok": True, **_cache_info()})
+    """Where the shared cache lives + how big each part is (OSM / terrain / land-cover).
+
+    Returns instantly. `computing: true` means the numbers shown are the previous answer (or
+    absent on first call) and a fresh walk is running - poll until it flips false.
+    """
+    force = request.args.get("refresh") in ("1", "true", "yes")
+    with _CACHE_SIZES_LOCK:
+        stale = (time.time() - _CACHE_SIZES["at"]) > 60
+        if (force or stale or _CACHE_SIZES["data"] is None) and not _CACHE_SIZES["computing"]:
+            _CACHE_SIZES["computing"] = True
+            threading.Thread(target=_cache_recompute, name="meld-cache-sizes",
+                             daemon=True).start()
+        out = {"ok": True, "computing": _CACHE_SIZES["computing"],
+               "root": str(_cache_targets()["_root"])}
+        if _CACHE_SIZES["data"]:
+            out.update(_CACHE_SIZES["data"])
+    return jsonify(out)
 
 
 @app.route("/api/cache/clear", methods=["POST"])

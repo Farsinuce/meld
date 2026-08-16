@@ -832,6 +832,16 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
     except Exception as ex:  # noqa: BLE001
         shutil.rmtree(tmp_root, ignore_errors=True)
         _log(f"  [OSM bake] parallel pool failed ({ex}) — falling back to sequential")
+        # The plan's ETA assumed `cap` parallel workers; sequential is that many times slower,
+        # and a reader watching the old figure concludes the bake is stuck when it is merely
+        # honest. "Prediction was 29min" against a 50-minute sequential run is exactly the
+        # report that motivated this line.
+        try:
+            _left_gb = sum(os.path.getsize(p) for p in pbfs) / 1e9
+            _log(f"  [OSM bake] sequential ETA ~{_left_gb * 1000 / PBF_MB_PER_SEC / 60:.0f} min "
+                 f"(the {cap}-worker estimate no longer applies)")
+        except Exception:                                          # noqa: BLE001
+            pass
         return bake_tiles(pbfs, tiles, on_progress=on_progress, should_stop=should_stop,
                           log=log, force=force)
 

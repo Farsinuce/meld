@@ -5409,20 +5409,32 @@ function restoreSelection() {
 // without re-drawing. (New world / clear selection wipes the saved entry, so it stays clean then.)
 try { restoreSelection(); } catch (e) {}
 // ── Cache card: location + per-type sizes (loaded on demand; terrain can be 500k files) ──
-async function loadCache() {
+let _cacheTimer = null;
+async function loadCache(refresh) {
   try {
-    const c = await api('/api/cache');
+    const c = await api('/api/cache' + (refresh ? '?refresh=1' : ''));
     if (!c || !c.ok) return;
     if ($('cacheRoot')) $('cacheRoot').textContent = c.root;
+    // The server walks the tree on a background thread - a country-sized cache is 60-100 GB
+    // across half a million files, and walking that synchronously is what used to hang this
+    // card at "..." forever. `computing` means the numbers are the previous answer (or not
+    // there yet); poll until the fresh walk lands.
+    if (c.computing) {
+      ['cacheOsm', 'cacheTerrain', 'cacheLand'].forEach(id => {
+        if ($(id) && !c.osm) $(id).textContent = 'counting…';
+      });
+      clearTimeout(_cacheTimer);
+      _cacheTimer = setTimeout(() => loadCache(false), 2000);
+    }
+    if (!c.osm) return;
     const fmt = t => `${fmtMB(t.mb)}${t.files ? ' · ' + t.files.toLocaleString() + ' files' : ''}`;
-    if ($('cacheOsm')) $('cacheOsm').textContent = fmt(c.osm);
-    if ($('cacheTerrain')) $('cacheTerrain').textContent = fmt(c.terrain);
-    if ($('cacheLand')) $('cacheLand').textContent = fmt(c.landcover);
+    if ($('cacheOsm')) $('cacheOsm').textContent = fmt(c.osm) + (c.computing ? ' (updating…)' : '');
+    if ($('cacheTerrain')) $('cacheTerrain').textContent = fmt(c.terrain) + (c.computing ? ' (updating…)' : '');
+    if ($('cacheLand')) $('cacheLand').textContent = fmt(c.landcover) + (c.computing ? ' (updating…)' : '');
   } catch (e) {}
 }
 if ($('btnCacheRefresh')) $('btnCacheRefresh').onclick = () => {
-  ['cacheOsm', 'cacheTerrain', 'cacheLand'].forEach(id => { if ($(id)) $(id).textContent = '…'; });
-  loadCache();
+  loadCache(true);
 };
 async function clearCache(what, label) {
   if (!(await modalConfirm('Clear cache', `Delete the ${label} cache? It re-downloads as needed on the next run.`, 'Clear ' + label))) return;
