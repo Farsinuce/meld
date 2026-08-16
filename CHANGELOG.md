@@ -4,6 +4,57 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.8.8] - unreleased
+
+The release-day reports, fixed at the root; a cleaner face; and settings that
+travel.
+
+### Fixed
+
+- **Pressing Bake no longer opens extra Meld tabs.** The parallel bake spawns
+  worker processes, and in a packaged build each worker accidentally booted as a
+  full second Meld — which found the app already running, opened a browser tab at
+  it and died. Two workers, two tabs, exactly as screenshotted. The same fault
+  meant **every bake in every packaged build has secretly run single-file** since
+  the first exe; parallel baking now actually works there, for the first time.
+- **The bake's time estimate is restated when it loses its workers.** A predicted
+  29 minutes against an actual 50 was the difference between "slower than hoped"
+  and "looks stuck".
+- **"Refresh sizes" no longer hangs the cache card.** Counting a 100 GB cache
+  happened inside the request, while a bake was writing to it. It now counts in
+  the background and the card says "counting…" instead of freezing on "…".
+
+### Added
+
+- **"Get the data for this region."** Meld reads the selection, asks Geofabrik's
+  own index which extract fits it — the smallest one that contains it, or the
+  set of neighbouring countries when the selection crosses a border — and
+  downloads into the default `.pbf` folder with progress and a Stop. No more
+  choosing between `europe-latest` and a country file by hand: that choice being
+  gotten wrong is what produced the 75 GB / 190 GB-pagefile report.
+- **The bake's disk estimate corrects itself** from the tiles it has actually
+  written, and the scan warns when an extract is more than six months old.
+- **Presets.** A preset is one JSON file that carries the render-defining
+  settings — scale, terrain, trees, climate, caves, props, textures — and none
+  of the machine-specific ones, so a file from a big desktop is safe on a
+  laptop and never leaks a private Overpass mirror. Save yours, export it, send
+  it to someone, import theirs. Selection travels only when both sides opt in.
+  Three starters ship built in: Default, Scaled 1:10, Extended height.
+- **Test build.** Renders the few cells at the centre of your selection so you
+  can check the look before committing to the full run.
+
+### Changed
+
+- **One "Props & 3D models" drawer** replaces the two controls whose difference
+  nobody could explain, with schematic props and downloaded 3D models as
+  labelled groups inside it.
+- **The football-field stadium is gone.** The 3D pipeline kept dropping a
+  generated stadium model onto ordinary soccer grounds (arnis 3.0.10 removes the
+  archetype outright). Pitch lines and goals are untouched.
+- **Flat dark theme throughout** — gradients removed, drawer triangles full-size
+  with a visible hover cue, the Generate area reordered to match the order you
+  actually work in: selection first, then export, then retry tools.
+
 ## [1.8.7] - unreleased
 
 Everything here came from the first day of people actually running the packaged
