@@ -675,6 +675,7 @@
             <option value="untagged_mix">Untagged land</option>
           </select></label>
         <div style="font-size:11px;color:#9aa;margin:2px 0 3px">Relative shares for the selected profile.</div>
+        <div id="fieldCostHint" class="stat" style="margin:2px 0 4px">Classic: all Farmland, one uniform sheet of crops. Nothing is sent to the generator and the render is unchanged.</div>
         <div id="fieldMixSliders" style="margin-top:2px"></div>
         <div style="font-size:11px;color:#cdbfa3;margin:6px 0 1px">Farm plots
           <span class="i" title="What the Farmland share grows. Each plot (parcel) gets ONE crop picked by these weights, real monoculture fields: golden wheat plots next to potato plots next to sunflower rows. Default = the combined patchwork. Wheat/fallow plots also get small hay-bale bundles; pumpkin patches sit on a grass/coarse mosaic; bare patches use packed mud (never regrows grass) with dead bushes.">i</span></div>
@@ -3512,6 +3513,32 @@ function fmPaint(){
     const vs = $('fmv_' + k); if (vs) vs.textContent = parseInt(el.value, 10) + '%';
     if (typeof paintRange === 'function') paintRange(el);
   });
+  fmCostHint();
+}
+// Says which of the two layouts the current sliders actually produce, and what the
+// expensive one costs. The rule mirrors _mix_spec in src/arnis_cmd.py exactly: with
+// every non-farm share at zero Meld sends no mix flag at all and the generator keeps
+// its uniform sheet of crops, so "all Farmland" is genuinely the classic render and
+// not merely a farm-flavoured patchwork.
+function fmCostHint(){
+  const el = $('fieldCostHint'); if (!el) return;
+  const mix = fmCollect();
+  const nonFarm = ['coarse', 'plains', 'flower', 'moss']
+    .reduce((sum, k) => sum + (parseInt(mix[k], 10) || 0), 0);
+  const profile = fmProfileKey() === 'field_mix' ? 'Farmland'
+    : (fmProfileKey() === 'grass_mix' ? 'Grassland' : 'Untagged land');
+  if (nonFarm === 0) {
+    el.textContent = fmProfileKey() === 'field_mix'
+      ? 'Classic: all Farmland, one uniform sheet of crops. No mix flag is sent and the render is unchanged.'
+      : profile + ': all Farmland share, so this profile adds no pattern.';
+    el.style.color = '';
+  } else {
+    el.textContent = profile + ': split into separate plots, each growing one crop, '
+      + 'divided by dirt tracks. Costs roughly 15% longer generation and about 1.5x the '
+      + 'peak memory of Classic on farmland-heavy areas. Set every share except Farmland '
+      + 'to 0 to go back to Classic.';
+    el.style.color = '#cdbfa3';
+  }
 }
 function fmSave(){
   const key = fmProfileKey();
