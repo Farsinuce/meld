@@ -4,6 +4,42 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.9.1] - 2026-08-18
+
+Compatibility release for **Arnis fork 3.1.0**. No new features; this is the
+Meld half of that upgrade.
+
+### Fixed
+- **Scale is now validated before a render starts.** The generator's 3.1.0
+  rejects `--scale` outside 0.01 to 4.0 at the parser, so a value Meld would
+  previously have passed through now fails the cell outright with a usage
+  error - thousands of times over, on a country render. Meld clamps instead,
+  on write in the settings API so the stored value is always usable and the UI
+  shows what will actually run, and again when building the command line as a
+  last line of defence for a project or preset written by an older Meld.
+
+  Non-finite values fall back to 1.0 rather than clamping. NaN needs the
+  special case anyway - it fails every comparison, so a plain min/max would
+  pass it straight through - and clamping the infinities is actively harmful:
+  positive infinity would land on the maximum and quietly start a 4:1 render of
+  the entire selection.
+
+- **The Scale box gains an upper bound and says when a value is out of range**,
+  instead of accepting it silently and failing later.
+
+### Changed
+- **Image signage is explicitly held off.** Arnis 3.1.0 added `--signage`,
+  defaulting to on. It draws street plates, transit signs and billboards as map
+  items in item frames, and the map payloads live in the world's `data/`
+  directory - which Meld's merge does not carry across cells, since it copies
+  `region/`, `poi/`, `entities/`, `datapacks/` and `level.dat`. Every cell would
+  restart map ids at 0 and the merge would drop them all, leaving blank frames
+  throughout the world: strictly worse than the feature being off.
+
+  Meld therefore states the value rather than inheriting a default it does not
+  control. The flag is only emitted to a generator that advertises it, so
+  nothing changes for the current fork build, which does not carry it.
+
 ## [1.9.0] "Unbound" - 2026-08-16
 
 The milestone release. Meld is a standalone desktop app: download, run,
