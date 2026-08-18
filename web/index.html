@@ -488,7 +488,7 @@
     <div class="card">
       <h2>Settings</h2>
       <label>Scale <span id="scaleRatio" style="float:right;color:var(--acc2)">1:10</span>
-        <input id="scale" type="number" step="0.05" min="0.01"></label>
+        <input id="scale" type="number" step="0.05" min="0.01" max="4"></label>
       <div class="stat" id="scaleHint" style="margin-top:3px">1:10 &middot; 1 block = 10 m &middot; a 1 km city = 100 blocks wide</div>
       <label>Cell size (regions)
         <span class="i" title="Side length of each generation cell in 512-block regions. Any value 1 to 64; 4 is the sweet spot. Bigger cells write larger save bursts (heavier on RAM + the save disk); 8 and up auto stream-to-disk so they don't run out of memory. Presets: 1, 2, 4, 6, 8, 12, 16, 32, 64. Change this then Plan to re-split.">i</span>
@@ -4395,6 +4395,12 @@ function updateScaleHint() {
   const n = 1 / s;                                         // 1:n ratio, and 1 block = n metres
   const fmt = x => Math.abs(x - Math.round(x)) < 0.05 ? String(Math.round(x)) : x.toFixed(1);
   rEl.textContent = `1:${fmt(n)}`;
+  // The generator refuses anything outside 0.01-4 outright, so say so here rather than
+  // letting the value be accepted, stored, and then fail every cell of a long render.
+  if (s < 0.01 || s > 4) {
+    hEl.textContent = `out of range - the generator accepts 0.01 to 4 (1:100 to 4:1). ${fmt(n)} will be pulled back into range.`;
+    return;
+  }
   hEl.textContent = `1:${fmt(n)} · 1 block = ${fmt(n)} m · a 1 km city = ${Math.round(s * 1000)} blocks wide`;
 }
 if ($('scale')) $('scale').addEventListener('input', () => { updateScaleHint(); propsScaleWarn(); });

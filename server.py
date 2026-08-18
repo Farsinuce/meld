@@ -3301,6 +3301,10 @@ def api_settings():
         PROJECT.set_seed(patch.pop("seed"))
     # Guard rails: cell size 1-16 (snapped to a power of two on the UI), workers 1-64,
     # CPU budget 10-95% (95 cap leaves the OS + disk-save phase headroom).
+    # Scale: the fork rejects anything outside [0.01, 4.0] at the parser since 3.1.0, so an
+    # unclamped value here turns into a failed cell rather than a smaller world.
+    if patch.get("scale") is not None:
+        patch["scale"] = arnis_cmd.clamp_scale(patch["scale"])
     if patch.get("job_size_regions") is not None:
         patch["job_size_regions"] = max(1, min(64, int(patch["job_size_regions"])))
     if patch.get("max_workers") is not None:
@@ -3344,6 +3348,9 @@ def api_settings():
     if patch.get("scatter_mode") is not None:
         sm = str(patch["scatter_mode"]).strip().lower()
         patch["scatter_mode"] = sm if sm in ("none", "rocks", "bushes", "both") else "both"
+    if patch.get("signage") is not None:
+        sg = str(patch["signage"]).strip().lower()
+        patch["signage"] = sg if sg in ("none", "basic", "full") else "none"
     if patch.get("field_scale") is not None:
         try:
             patch["field_scale"] = max(25, min(400, int(patch["field_scale"])))

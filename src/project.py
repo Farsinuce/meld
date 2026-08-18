@@ -20,6 +20,10 @@ def default_settings() -> dict:
         # 1:10 default so a first build is fast and a whole city fits. 1:1 (real size) is huge + slow;
         # users raise it deliberately. The guided (Simplified) UI starts here.
         "scale": 0.1,
+        # Image signage: none | basic | full. Held at "none" because the generator writes
+        # signage map payloads into the world's data/ directory, which merge.py does not
+        # carry across cells - see the note in arnis_cmd.build_arnis_cmd.
+        "signage": "none",
         "job_size_regions": 4,   # sweet spot: small save bursts, safe on any disk (see Workers note)
         "seam_buffer_chunks": 8,    # 8 chunks = 128 blocks of overlap per side
         "ground_level": -56,

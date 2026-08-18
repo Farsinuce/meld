@@ -23,6 +23,7 @@ emits nothing. Wire it to a real flag once the fork gains the upstream feature
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import subprocess
@@ -216,12 +217,42 @@ def arnis_version(arnis_exe: str) -> tuple[int, ...]:
     return _VER_CACHE[key]
 
 
+# Scale envelope the generator accepts. Mirrors MIN_SCALE/MAX_SCALE in the fork's
+# src/args.rs, which since 3.1.0 rejects anything outside it at the clap parser - an
+# out-of-range value used to reach the fetch stage and produce a hung or empty cell, and
+# now fails the cell outright. Meld clamps instead of failing: these come from a settings
+# POST or a preset, where the useful behaviour is to pull the value back into range and
+# carry on, the same way job_size_regions and cpu_target_pct are handled.
+#
+# The floor is 0.01 (1:100) because Meld's planet renders live down there; upstream arnis
+# floors at 0.05, which is why the fork deliberately widened it.
+MIN_SCALE = 0.01
+MAX_SCALE = 4.0
+
+
+def clamp_scale(value) -> float:
+    """Pull a scale into the generator's accepted range. Non-numeric falls back to 1.0."""
+    try:
+        scale = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    # Every non-finite value falls back rather than clamping. NaN has to be special-cased
+    # anyway (it fails both comparisons, so min/max would pass it straight through), and
+    # clamping the infinities is worse than useless: +inf would land on MAX_SCALE and
+    # quietly start a 4:1 render of whatever the selection is.
+    if not math.isfinite(scale):
+        return 1.0
+    return max(MIN_SCALE, min(MAX_SCALE, scale))
+
+
 def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
                     settings: dict, origin: dict, elevation: dict | None,
                     seed: int, osm_file: str | None = None,
                     loot_table: str | None = None) -> list[str]:
     s, w, n, e = bbox["south"], bbox["west"], bbox["north"], bbox["east"]
-    scale = float(settings.get("scale", 1.0) or 1.0)
+    # Last line of defence. The settings API clamps on write, so a stored scale is already
+    # in range; this catches a preset or project file written by an older Meld.
+    scale = clamp_scale(settings.get("scale", 1.0) or 1.0)
     cmd = [
         str(arnis_exe),
         "--bbox", f"{s},{w},{n},{e}",
@@ -289,6 +320,16 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     # generator has the flag: it landed in the fork after 3.0.7, and older binaries reject it.
     if not settings.get("overture", True) and arnis_supports(arnis_exe, "--overture"):
         cmd.append("--overture=false")
+    # Image signage (street-name plates, transit signs, billboards) is drawn as map items in
+    # item frames, and the map payloads live in the world's data/ directory. merge.py copies
+    # region/, poi/, entities/, datapacks/ and level.dat - never data/ - so every cell's maps
+    # are discarded at merge and the frames in the master world would point at map ids that
+    # do not exist. Upstream's default is `basic`, i.e. ON, so this is emitted explicitly and
+    # unconditionally rather than relying on the generator's default. The fork does not carry
+    # the flag today, which is what arnis_supports() is for; the guard exists so pointing Meld
+    # at a stock upstream 3.1.0 binary does not quietly fill a merged world with blank frames.
+    if arnis_supports(arnis_exe, "--signage"):
+        cmd += ["--signage", str(settings.get("signage", "none"))]
     # Schematic props (boats, cranes, tractors, wind turbines) are fixed-size builds, so the fork
     # skips them below --props-min-scale (default 0.35) - at 1:10 a parked crane is the size of a
     # district. Meld's own default scale is 0.1, so the default silently dropped every family
