@@ -10,10 +10,12 @@ _archive/
 # Shared map cache (terrain / OSM / land cover) - huge, regenerated on demand, never committed
 cache/
 
-# Backup / pre-merge binaries (only the live arnis.exe is committed)
+# Generator binaries are never committed. The tracked "live" arnis.exe froze every
+# Windows release from 1.8.5 to 1.9.1 at fork 3.0.6: CI's clean checkout carried it,
+# and the build's local-copy shortcut preferred it over the fork's latest release.
+arnis.exe
 arnis-*.exe
 *.exe.bak*
-!arnis.exe
 
 # Python
 __pycache__/

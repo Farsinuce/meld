@@ -91,7 +91,17 @@ def fetch_arnis(dest_dir: Path) -> bool:
         log(f"arnis already present: {target}")
         return True
 
-    for candidate in (ROOT / outname, ROOT.parent / outname):
+    # The local-copy shortcut is for offline development only. In CI it is the exact
+    # failure mode that shipped a stale generator: the 1.8.5-1.9.1 Windows archives
+    # all bundled the 3.0.6 arnis.exe that was tracked in the repo, because the
+    # checkout won over the download of the fork's latest release. A CI build
+    # therefore always downloads; MELD_ARNIS_LOCAL=1 forces the shortcut back on
+    # for a deliberate offline build.
+    if os.environ.get("GITHUB_ACTIONS") and os.environ.get("MELD_ARNIS_LOCAL") != "1":
+        candidates: tuple[Path, ...] = ()
+    else:
+        candidates = (ROOT / outname, ROOT.parent / outname)
+    for candidate in candidates:
         if candidate.is_file():
             shutil.copy2(candidate, target)
             log(f"arnis copied from {candidate}")
