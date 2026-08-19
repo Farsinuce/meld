@@ -128,6 +128,20 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      - name: Stable-alias copies
+        # Duplicate each versioned archive under a fixed name (Meld-win-x64.zip and friends) so
+        # that .../releases/latest/download/Meld-win-x64.zip stays valid forever - the versioned
+        # name changes every release, the alias never does. The copies land in artifacts/ so the
+        # release step below uploads them the same way as everything else. A platform that failed
+        # has no archive here and therefore no alias, which is the right outcome: better a 404
+        # than a stale binary from the previous release.
+        run: |
+          shopt -s nullglob
+          for suffix in win-x64.zip mac-arm64.tar.gz mac-x64.tar.gz linux-x64.tar.gz; do
+            for src in artifacts/Meld-*-"$suffix"; do
+              cp "$src" "artifacts/Meld-$suffix"
+            done
+          done
       - uses: softprops/action-gh-release@v2
         with:
           # A platform that failed simply has no archive here; it must not sink the release.
