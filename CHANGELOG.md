@@ -4,6 +4,30 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.9.2] - 2026-08-19
+
+Windows bundling fix. The 1.8.5 through 1.9.1 Windows archives all carried
+**Arnis fork 3.0.6** no matter what the fork's latest release was; every other
+platform got the right binary. Reported on Discord - the version in the
+generator's own footer is what gave it away.
+
+### Fixed
+- **The Windows archive bundles the fork's latest release again** (3.1.1 as of
+  this release). The repo used to track a "live" `arnis.exe` for local
+  development, and the build's offline shortcut - a local copy next to the repo
+  wins - meant CI's checkout of that binary beat the download of the fork's
+  latest release. That tracked copy was frozen at 3.0.6 on 2026-08-10, so every
+  Windows zip since shipped it. The binary is untracked and ignored now, and a
+  CI build refuses the local-copy shortcut altogether, so it can only bundle
+  what the fork actually released (`MELD_ARNIS_LOCAL=1` forces the shortcut
+  back on for a deliberate offline build).
+
+### Added
+- **Stable download aliases.** Each release now also uploads its archives under
+  fixed names (`Meld-win-x64.zip` and friends), so
+  `releases/latest/download/Meld-win-x64.zip` always fetches the newest release
+  without knowing its version number.
+
 ## [1.9.1] - 2026-08-18
 
 Compatibility release for **Arnis fork 3.1.0**. No new features; this is the
