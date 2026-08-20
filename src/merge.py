@@ -27,10 +27,15 @@ from .constants import REGION_CHUNKS
 from .coords import canonical_region_bounds
 from .level_dat import patch_level_name, gold_name
 
-_MCA_RE = re.compile(r"^r\.(-?\d+)\.(-?\d+)\.mca$")
+# Region containers a cell may be generated in. `.b_linear` is Leaf's B_Linear v3,
+# written natively by the fork when a project turns on native region generation; the
+# merge treats both identically because it never looks inside a region file.
+REGION_SUFFIXES = (".mca", ".b_linear")
+
+_MCA_RE = re.compile(r"^r\.(-?\d+)\.(-?\d+)\.(?:mca|b_linear)$")
 
 # Serialises mutation of the shared master world (level.dat copy/patch) across
-# the concurrent worker threads. Region .mca writes are disjoint per cell so they
+# the concurrent worker threads. Region writes are disjoint per cell so they
 # need no lock; level.dat is a single shared file and must not be rewritten by two
 # workers at once.
 _MASTER_LOCK = threading.Lock()
@@ -49,6 +54,31 @@ def _parse_mca(name: str) -> tuple[int, int] | None:
     if not m:
         return None
     return int(m.group(1)), int(m.group(2))
+
+
+def _region_files(directory: Path):
+    """Region files of any supported container, in a stable order."""
+    for suffix in REGION_SUFFIXES:
+        yield from sorted(directory.glob(f"*{suffix}"))
+
+
+def world_container(world_path: str | Path) -> str | None:
+    """Which container a world's region/ directory holds: "mca", "b_linear", or None.
+
+    Returns None for an empty or missing directory. A world holding both is a bug
+    upstream of here (a cell generated in the other container, or a stale sibling left
+    by a format switch), so callers treat "mixed" as an error rather than merging.
+    """
+    region_dir = Path(world_path) / "region"
+    if not region_dir.is_dir():
+        return None
+    found = {suffix.lstrip(".") for suffix in REGION_SUFFIXES
+             if any(region_dir.glob(f"r.*{suffix}"))}
+    if not found:
+        return None
+    if len(found) > 1:
+        return "mixed"
+    return found.pop()
 
 
 def merge_cell_into_master(
@@ -91,6 +121,24 @@ def merge_cell_into_master(
     }
 
     # ── PRE-FLIGHT (read-only) ───────────────────────────────────────────────
+    # A master world holds exactly one container. Merging a cell of the other kind
+    # would leave a world no server can open as a whole, and because the two use
+    # different file names the mismatch would not even show up as a collision.
+    cell_container = world_container(cell_p)
+    master_container = world_container(master_p)
+    if cell_container == "mixed" or master_container == "mixed":
+        raise MeldCollisionError(
+            f"{cell_key}: a world already holds both .mca and .b_linear regions "
+            f"(cell={cell_container}, master={master_container}). Merge refused — "
+            f"no files changed."
+        )
+    if cell_container and master_container and cell_container != master_container:
+        raise MeldCollisionError(
+            f"{cell_key}: cell was generated as .{cell_container} but the master world "
+            f"is .{master_container}. Regenerate the cell with the project's region "
+            f"format. Merge refused — no files changed."
+        )
+
     copy_plans: list[tuple[Path, Path, str]] = []   # (src, dst, sub)
     collisions: list[str] = []
     region_coords: list[tuple[int, int]] = []       # all region files (canonical + seam)
@@ -100,7 +148,7 @@ def merge_cell_into_master(
         if not cell_sub.exists():
             continue
         master_sub = master_p / sub
-        for src in cell_sub.glob("*.mca"):
+        for src in _region_files(cell_sub):
             rc = _parse_mca(src.name)
             if rc is not None:
                 frx, frz = rc
@@ -224,7 +272,7 @@ def strip_buffer_regions(cell_world_path: str, cell_key: str) -> int:
         d = p / sub
         if not d.exists():
             continue
-        for f in d.glob("*.mca"):
+        for f in _region_files(d):
             rc = _parse_mca(f.name)
             if rc is None:
                 continue

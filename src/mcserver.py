@@ -342,7 +342,15 @@ def pick_world_source(master_world: Path, export_format: str, export_destination
     if choice == "blinear":
         if _has(blin, ".b_linear"):
             return blin, "B_LINEAR"
-        raise RuntimeError("no [BLinear] world found — run Export with format = blinear first")
+        # Generated natively as B_Linear: the master world already IS the served world.
+        if _has(master_world, ".b_linear"):
+            return master_world, "B_LINEAR"
+        raise RuntimeError("no B_Linear world found — run Export with format = blinear, "
+                           "or generate with the native B_Linear region format")
+    # A natively-generated B_Linear master has no .mca to fall back to, so it decides the
+    # format regardless of the export setting (which had nothing to convert).
+    if _has(master_world, ".b_linear") and not _has(master_world, ".mca"):
+        return master_world, "B_LINEAR"
     src = resolve_world_source(master_world, export_format, export_destination)
     return src, REGION_FORMAT_BY_EXPORT.get(export_format, "MCA")
 

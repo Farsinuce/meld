@@ -234,6 +234,18 @@ def default_settings() -> dict:
         # The .mca is only ever removed AFTER the [BLinear] world (and the zip, for archive_mca)
         # verify — never before. A failed/partial run is forced back to "both" (safeguard B).
         "export_blinear_keep": "both",
+        # EXPERIMENTAL. Region container the fork GENERATES directly, skipping the
+        # separate .mca -> .b_linear conversion pass entirely:
+        #   mca     Anvil (default) — universal: vanilla client, Paper, every server
+        #   blinear Leaf B_Linear v3 — SERVER ONLY, and only Leaf 1.21.11 (June 2026
+        #           builds) or newer / 26.x. Not readable by Paper, older Leaf, or the
+        #           vanilla client, and there is no .mca original to fall back on.
+        # Worth it at scale: ~3.7x smaller on disk for a dense city, and the conversion
+        # pass disappears. The map item is unavailable for these worlds (its renderer
+        # only reads Anvil).
+        "native_region_format": "mca",
+        # zstd level for native blinear buckets, 1..22. Leaf's own default is 6.
+        "native_blinear_level": 6,
         # One-click Leaf server profile — the Server setup card remembers its choices
         # per project (see server.py /api/mcserver/*). server_dir "" = the default
         # <project>/server/leaf-<version>. Reachability is NOT stored here: staging

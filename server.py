@@ -2427,6 +2427,15 @@ def _start_export_job(kind: str, *, force_keep_both: bool = False,
             "dest": (dest_world.name if dest_world else None)}
 
 
+def _native_blinear_active() -> bool:
+    """True when the fork generated this project's worlds as Leaf B_Linear directly.
+
+    Such a world is already in its final container, so the export pass has nothing to
+    convert, and the map item cannot be rendered from it.
+    """
+    return str(PROJECT.settings().get("native_region_format", "mca") or "mca").lower() == "blinear"
+
+
 def _maybe_write_map_item() -> None:
     """Once per finished run: if the 'map_item' setting is on, add a locked filled-map of the
     whole world to the player's inventory. Runs a single post-merge `--map-item-only` arnis pass
@@ -2436,6 +2445,10 @@ def _maybe_write_map_item() -> None:
     try:
         s = PROJECT.settings()
         if not s.get("map_item"):
+            return
+        if _native_blinear_active():
+            log("[MapItem] skipped: the map renderer reads Anvil regions, and this world "
+                "was generated as B_Linear")
             return
         exe = resolve_arnis_exe()
         if exe is None:
@@ -2466,6 +2479,10 @@ def _maybe_run_export() -> None:
     with any failed cell forces keep-both (safeguard B) so an incomplete world's raw survives."""
     s = PROJECT.settings()
     fmt = str(s.get("export_format", "none") or "none").strip().lower()
+    if _native_blinear_active() and fmt in ("blinear", "linear"):
+        log(f"[Export] skipped: the world was generated natively as B_Linear, so there is "
+            f"no .mca to convert to {fmt}")
+        return
     with _STREAM_LOCK:
         has_session = _STREAM["session"] is not None
     if fmt == "none" or fmt not in exportmod.VALID_FORMATS:

@@ -262,6 +262,12 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
         "--rotation", str(settings.get("rotation", 0)),
     ]
 
+    # EXPERIMENTAL native B_Linear: the fork writes Leaf's container directly instead of
+    # Anvil, so no conversion pass runs afterwards. Server-only output (Leaf 1.21.11+/26.x).
+    if str(settings.get("native_region_format", "mca")).lower() == "blinear":
+        cmd += ["--region-format", "blinear",
+                "--blinear-level", str(int(settings.get("native_blinear_level", 6)))]
+
     # Pre-fetched OSM. Two shapes, both Overpass-free at generation time:
     #   • a DIRECTORY → Meld's stable z11 grid cache. Arnis computes this cell's covering
     #     tiles from --bbox and reads them straight from the dir (--osm-tile-dir), so there

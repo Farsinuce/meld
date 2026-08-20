@@ -9,8 +9,9 @@ coast / ocean-trim edges that merge.py already treats as normal are never flagge
 The owning cells feed straight into the existing retry path (server._start_generation), the same
 one the failed-cell system uses, so leftover holes get regenerated + re-merged seamlessly.
 
-Pure read-only disk scan. Counts a `.linear` region as present too, so it still works if this
-runs after an export has converted some `.mca` regions.
+Pure read-only disk scan. Counts `.linear` and `.b_linear` regions as present too, so it still
+works after an export has converted some `.mca` regions and for worlds the fork generated
+natively in Leaf's B_Linear container.
 """
 from __future__ import annotations
 
@@ -22,31 +23,40 @@ from .coords import canonical_region_bounds, mpd_lon
 
 _MCA_RE = re.compile(r"^r\.(-?\d+)\.(-?\d+)\.mca$")
 _LINEAR_RE = re.compile(r"^r\.(-?\d+)\.(-?\d+)\.linear$")
+_BLINEAR_RE = re.compile(r"^r\.(-?\d+)\.(-?\d+)\.b_linear$")
 # A header-only Anvil region (two 4 KiB sector tables, zero chunks) is exactly 8192 bytes; any
 # region holding even one chunk is larger. So <= this = no chunks = treat as absent.
 _EMPTY_MCA_BYTES = 8192
+# The B_Linear v3 equivalent: a 14-byte header plus a 16-entry all-zero bucket offset table,
+# and not one byte more until a bucket carries a chunk.
+_EMPTY_BLINEAR_BYTES = 142
 
 
 def _scan_present(region_dir: Path) -> tuple[set, set]:
-    """(present, empty): region coords with a real file on disk, and the subset whose `.mca` is
-    header-only/tiny (treated as absent). `.linear` files always count as present (post-export)."""
+    """(present, empty): region coords with a real file on disk, and the subset holding no
+    chunks (treated as absent). `.linear` files always count as present (post-export); `.mca`
+    and `.b_linear` each have a known chunkless size to compare against."""
     present: set = set()
     empty: set = set()
     if not region_dir.is_dir():
         return present, empty
     for f in region_dir.iterdir():
+        empty_at = _EMPTY_MCA_BYTES
         m = _MCA_RE.match(f.name)
-        is_linear = False
         if not m:
+            m = _BLINEAR_RE.match(f.name)
+            empty_at = _EMPTY_BLINEAR_BYTES
+        if not m:
+            # Linear carries no cheap chunkless-size tell, so it only counts as present.
             m = _LINEAR_RE.match(f.name)
-            is_linear = bool(m)
+            empty_at = None
         if not m:
             continue
         rx, rz = int(m.group(1)), int(m.group(2))
         present.add((rx, rz))
-        if not is_linear:
+        if empty_at is not None:
             try:
-                if f.stat().st_size <= _EMPTY_MCA_BYTES:
+                if f.stat().st_size <= empty_at:
                     empty.add((rx, rz))
             except OSError:
                 pass
