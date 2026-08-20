@@ -972,7 +972,7 @@
       <!-- Region container written DURING generation. Separate from Export below, which
            converts a finished world: this one skips the conversion entirely. -->
       <details class="drawer" style="margin-top:10px">
-        <summary>&#129514; Region format (experimental)</summary>
+        <summary>&#129514; Region format &mdash; written during generation (experimental)</summary>
       <label style="margin-top:8px;font-weight:bold">Generate regions as
         <span class="i" title="Anvil is the universal container every server and the vanilla client read. B_Linear is Leaf's own container, written directly by the generator so no conversion pass runs afterwards - measured ~3.7x smaller on disk for a dense city and ~14x for open countryside, and only one world is ever written instead of two. SERVER ONLY, and only Leaf 1.21.11 (June 2026 builds) or newer / 26.x: Paper, older Leaf and the vanilla client cannot open it, the map item is unavailable, and there is no .mca original to fall back on.">i</span></label>
       <select id="nativeRegionFmt" style="width:100%">
@@ -986,7 +986,9 @@
         <div class="stat" style="margin-top:4px;color:var(--mut,#9a917f)">
           Server-only world: needs Leaf 1.21.11 or newer (or 26.x) with
           <code>region-format: B_LINEAR</code>. Server setup pins this for you. The map item
-          and the export formats are unavailable, and no .mca original is kept.
+          is unavailable and no .mca original is kept. <b>Export &amp; compression below is
+          skipped</b> &mdash; the world is already in its final format, so there is nothing
+          left to convert.
         </div>
       </div>
       </details>
@@ -994,7 +996,11 @@
       <!-- Export / compression. Default None = a working vanilla .mca world. See MELD_EXPORT_PLAN.md.
            Kept in its own <details> dropdown, the block is longer than the rest of the card. -->
       <details class="drawer" style="margin-top:10px">
-        <summary>&#128230; Export &amp; compression</summary>
+        <summary>&#128230; Export &amp; compression &mdash; converts the finished world</summary>
+      <div id="exportNativeNote" class="stat" style="margin-top:8px;display:none;color:var(--mut,#9a917f)">
+        Not used: this project generates <b>B_Linear</b> regions directly (see Region format
+        above), so the world needs no conversion. Switch that back to Anvil .mca to export.
+      </div>
       <label style="margin-top:8px;font-weight:bold">Export format
         <span class="i" title="How the finished world is packaged after generation. None keeps raw .mca (vanilla single-player). Zip / tar.zst shrink ~1.85× and still open in single-player after extracting. Linear shrinks ~4.8× but is SERVER ONLY (Leaf/Folia), run linear2mca to open it in vanilla single-player. Numbers are from the real benchmark in MELD_EXPORT_PLAN.md.">i</span></label>
       <select id="exportFmt" style="width:100%">
@@ -4582,8 +4588,17 @@ function updateExportUI(){
 });
 function updateNativeRegionUI() {
   const el = $('nativeRegionFmt');
+  const native = el && el.value === 'blinear';
   const row = $('nativeBlinearRow');
-  if (el && row) row.style.display = el.value === 'blinear' ? '' : 'none';
+  if (row) row.style.display = native ? '' : 'none';
+  // Export converts a finished .mca world. With native B_Linear there is nothing to
+  // convert, and the run skips the pass anyway, so the controls would only mislead.
+  const note = $('exportNativeNote');
+  if (note) note.style.display = native ? '' : 'none';
+  ['exportFmt', 'exportLevel', 'exportWorkers'].forEach(id => {
+    const c = $(id);
+    if (c) { c.disabled = !!native; c.style.opacity = native ? 0.45 : 1; }
+  });
 }
 $('nativeRegionFmt') && $('nativeRegionFmt').addEventListener('change', () => {
   api('/api/settings', { native_region_format: $('nativeRegionFmt').value });
