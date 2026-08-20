@@ -90,6 +90,38 @@ Leaf 1.21.11 build 175 (sha256-verified), `format-name: B_LINEAR`, world generat
 
 So the full round trip holds: arnis writes → Leaf reads → Leaf writes → our tools read.
 
+### Block-level verification — are blocks actually in the right place?
+
+The container tests prove the same NBT comes back out. These decode it and compare the
+resolved block at every position, so a wrong bucket index or a swapped chunk would show
+as blocks in the wrong place rather than as bytes that merely differ. Each world is also
+checked against itself: the chunk in slot *i* must carry `xPos`/`zPos` that map back to
+slot *i*.
+
+| World (same seed, one run per container) | Chunks | Chunks misplaced | Non-air positions compared | Positions differing |
+|---|---|---|---|---|
+| Farmland, flat (seed 42) | 6,144 ×2 | **0** | 4,958,282 | **0** |
+| Dense city, buildings (seed 99) | 16,384 ×2 | **0** | 22,326,618 | **0** |
+| Terrain + caves + baked lighting (seed 11) | 4,096 ×2 | **0** | 11,891,414 | 69 |
+
+**27.3 million block positions across 22,528 chunks with zero differences** on the first
+two. The third needs its own explanation, and it is not the container:
+
+| Control: two runs, **both Anvil**, same seed, caves on | Positions compared | Chunks differing | Positions differing |
+|---|---|---|---|
+| `.mca` run A vs `.mca` run B | 12,147,012 | 15 | **158** |
+
+Two Anvil runs of the same seed disagree *more* than Anvil-vs-B_Linear did (158 vs 69),
+so `--caves` makes generation itself non-reproducible run to run — a pre-existing
+property of the fork, unrelated to the container. The differences are alternate materials
+on cave props deep underground (oak_planks vs gray_concrete, sand vs grass_block), about
+0.001% of positions, not corruption.
+
+**Conclusion:** the container is lossless — proven byte-for-byte in-process, and
+block-for-block over 27.3M positions on the content that is deterministic. With caves
+enabled, no two runs match exactly whichever container you write, and that was already
+true before this work.
+
 ### A note on how equivalence had to be proven
 
 Comparing two generated worlds byte-for-byte does not work, and this is worth recording
@@ -178,6 +210,29 @@ headline is: **~3.7–4× smaller on disk for real cities, conversion step gone,
 +7% at scale.**
 
 ---
+
+## Sizing a real project
+
+Measured on the settings of the Romania project in this workspace — scale 0.05 (1:20),
+terrain, caves and baked lighting on, buildings off — over a 4-region sample near Brasov:
+
+| | Anvil | B_Linear | Ratio |
+|---|---|---|---|
+| Per region | 4.69 MiB | 1.20 MiB | **3.91×** |
+
+Cave-and-terrain content compresses less than the 14× of flat farmland (fuller chunks
+waste less of Anvil's 4 KiB sector padding) and lands near the dense-city figure.
+
+| Build | Regions | Anvil | B_Linear | Saved |
+|---|---|---|---|---|
+| The existing 1:20 Romania project | 3,276 | ~15 GB measured (Meld's own estimator says 37.6 GB) | ~3.8 GB (est. ~9.6 GB) | **~11–28 GB** |
+| Romania at **1:1** (20× linear = 400× the regions) | ~1,310,400 | **~6–15 TB** | **~1.5–3.9 TB** | **~4.4–11 TB** |
+
+The wide range is Meld's deliberately conservative planning constant (11.5 MB/region)
+against what the generator actually wrote (4.69 MiB/region). Either way a 1:1 Romania is
+far beyond the 232 GB free on this machine in *both* containers — B_Linear changes the
+multiple, not the feasibility. Where it does pay off today is the 1:20 project: roughly
+a quarter of the disk, and no moment where both worlds exist at once.
 
 ## The one regression found, and its fix
 
