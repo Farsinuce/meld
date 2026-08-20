@@ -3442,6 +3442,16 @@ def api_settings():
         patch["cpu_stagger_adaptive"] = bool(patch["cpu_stagger_adaptive"])
     if patch.get("map_item") is not None:
         patch["map_item"] = bool(patch["map_item"])
+    # Native region container. Only "blinear" turns it on; anything else means Anvil, so a
+    # stale or malformed value can never silently produce a server-only world.
+    if patch.get("native_region_format") is not None:
+        nrf = str(patch["native_region_format"]).strip().lower()
+        patch["native_region_format"] = "blinear" if nrf == "blinear" else "mca"
+    if patch.get("native_blinear_level") is not None:
+        try:
+            patch["native_blinear_level"] = max(1, min(22, int(patch["native_blinear_level"])))
+        except (TypeError, ValueError):
+            patch["native_blinear_level"] = 6
     # Export / compression. Format is validated against the known set; level 0-22 (0=auto);
     # compression workers 0-256 (0=auto=cores-1, INDEPENDENT of max_workers by contract).
     if patch.get("export_format") is not None:

@@ -969,10 +969,32 @@
         <span class="i" title="Delete each per-cell Arnis subregion once it merges into the master world, avoids doubling storage. Merged content stays in the master.">i</span>
         <input id="prune" type="checkbox"></label>
 
+      <!-- Region container written DURING generation. Separate from Export below, which
+           converts a finished world: this one skips the conversion entirely. -->
+      <details class="drawer" style="margin-top:10px">
+        <summary>&#129514; Region format (experimental)</summary>
+      <label style="margin-top:8px;font-weight:bold">Generate regions as
+        <span class="i" title="Anvil is the universal container every server and the vanilla client read. B_Linear is Leaf's own container, written directly by the generator so no conversion pass runs afterwards - measured ~3.7x smaller on disk for a dense city and ~14x for open countryside, and only one world is ever written instead of two. SERVER ONLY, and only Leaf 1.21.11 (June 2026 builds) or newer / 26.x: Paper, older Leaf and the vanilla client cannot open it, the map item is unavailable, and there is no .mca original to fall back on.">i</span></label>
+      <select id="nativeRegionFmt" style="width:100%">
+        <option value="mca">Anvil .mca (default, universal)</option>
+        <option value="blinear">B_Linear .b_linear (Leaf 1.21.11+ / 26.x only, no conversion pass)</option>
+      </select>
+      <div id="nativeBlinearRow" style="margin-top:6px;display:none">
+        <label style="font-weight:normal">zstd level
+          <span class="i" title="Compression level for each 64-chunk bucket, 1-22. Leaf's own default is 6. Higher shrinks the world a little more and costs CPU during the save.">i</span></label>
+        <input id="nativeBlinearLevel" type="number" min="1" max="22" step="1" style="width:100%">
+        <div class="stat" style="margin-top:4px;color:var(--mut,#9a917f)">
+          Server-only world: needs Leaf 1.21.11 or newer (or 26.x) with
+          <code>region-format: B_LINEAR</code>. Server setup pins this for you. The map item
+          and the export formats are unavailable, and no .mca original is kept.
+        </div>
+      </div>
+      </details>
+
       <!-- Export / compression. Default None = a working vanilla .mca world. See MELD_EXPORT_PLAN.md.
            Kept in its own <details> dropdown, the block is longer than the rest of the card. -->
       <details class="drawer" style="margin-top:10px">
-        <summary>📦 Export &amp; compression</summary>
+        <summary>&#128230; Export &amp; compression</summary>
       <label style="margin-top:8px;font-weight:bold">Export format
         <span class="i" title="How the finished world is packaged after generation. None keeps raw .mca (vanilla single-player). Zip / tar.zst shrink ~1.85× and still open in single-player after extracting. Linear shrinks ~4.8× but is SERVER ONLY (Leaf/Folia), run linear2mca to open it in vanilla single-player. Numbers are from the real benchmark in MELD_EXPORT_PLAN.md.">i</span></label>
       <select id="exportFmt" style="width:100%">
@@ -2149,6 +2171,9 @@ async function refreshState() {
   if (document.activeElement !== $('workers')) $('workers').value = st.max_workers;
   // export / compression controls
   if ($('exportFmt')) $('exportFmt').value = st.export_format || 'none';
+  if ($('nativeRegionFmt')) $('nativeRegionFmt').value = st.native_region_format || 'mca';
+  if ($('nativeBlinearLevel')) $('nativeBlinearLevel').value = st.native_blinear_level || 6;
+  updateNativeRegionUI();
   if ($('exportWorkers') && document.activeElement !== $('exportWorkers'))
     $('exportWorkers').value = (parseInt(st.export_compression_workers) > 0) ? st.export_compression_workers : '';
   if ($('exportLevel') && document.activeElement !== $('exportLevel')) $('exportLevel').value = parseInt(st.export_level) || 0;
@@ -4554,6 +4579,18 @@ function updateExportUI(){
 }
 ['exportFmt','exportWorkers','exportLevel'].forEach(id => {
   const el = $(id); if (el) el.addEventListener('input', updateExportUI);
+});
+function updateNativeRegionUI() {
+  const el = $('nativeRegionFmt');
+  const row = $('nativeBlinearRow');
+  if (el && row) row.style.display = el.value === 'blinear' ? '' : 'none';
+}
+$('nativeRegionFmt') && $('nativeRegionFmt').addEventListener('change', () => {
+  api('/api/settings', { native_region_format: $('nativeRegionFmt').value });
+  updateNativeRegionUI();
+});
+$('nativeBlinearLevel') && $('nativeBlinearLevel').addEventListener('change', () => {
+  api('/api/settings', { native_blinear_level: parseInt($('nativeBlinearLevel').value, 10) || 6 });
 });
 $('exportFmt') && $('exportFmt').addEventListener('change', () => {
   api('/api/settings', { export_format: $('exportFmt').value }); updateExportUI();
