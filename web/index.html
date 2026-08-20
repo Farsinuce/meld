@@ -64,6 +64,47 @@
   ::-webkit-scrollbar-thumb { background:var(--acc); border-radius:0; border:2px solid #060504; }
   ::-webkit-scrollbar-thumb:hover { background:var(--acc2); }
   #sideL .logo { display:block; line-height:0; margin-bottom:10px; }
+
+  /* ---- animated wordmark (mirrors the site hero's build-in) ---- */
+  .meld-mark { display:block; cursor:pointer; text-decoration:none !important; }
+  .mm-stage {
+    position:relative; display:block; width:100%; max-width:268px;
+    aspect-ratio:1022 / 400;      /* the art's own canvas */
+  }
+  .mm-stage img { position:absolute; display:block; image-rendering:pixelated; }
+  /* Measured placements as percentages of the 1022x400 canvas, same as the site:
+     M (3,0) 349x360 · E (332,0) 239x360 · L (565,0) 216x360 · D (752,0) 266x360 ·
+     subtitle (0,302) 1022x98 — it overlaps the letters' lower extrusions. */
+  .mm-m   { left:0.2935%;  top:0; width:34.1487%; height:90%; }
+  .mm-e   { left:32.4853%; top:0; width:23.3855%; height:90%; }
+  .mm-l   { left:55.2838%; top:0; width:21.1350%; height:90%; }
+  .mm-d   { left:73.5812%; top:0; width:26.0274%; height:90%; }
+  .mm-sub { left:0; top:75.5%; width:100%; height:24.5%; }
+  .mm-full{ inset:0; width:100%; height:100%; }
+
+  /* Choreography, in the site's timings. The letters and subtitle start hidden ONLY
+     once we know the animation will run, so a browser without animation support still
+     shows every layer stacked on the finished art rather than an empty box. */
+  @media (prefers-reduced-motion: no-preference) {
+    .mm-letter { opacity:0; animation:mm-place .2s steps(3,end) both, mm-clear .5s linear 2.2s both; }
+    .mm-m { animation-delay:.05s, 2.2s; }
+    .mm-e { animation-delay:.20s, 2.2s; }
+    .mm-l { animation-delay:.35s, 2.2s; }
+    .mm-d { animation-delay:.50s, 2.2s; }
+    .mm-sub  { opacity:0; animation:mm-rise .5s cubic-bezier(.16,1,.3,1) .8s both, mm-clear .5s linear 2.2s both; }
+    /* The finished art fades in UNDER the still-opaque build-up, then the layers
+       clear. Sequenced, not crossed, so nothing shows through mid-swap. */
+    .mm-full { opacity:0; animation:mm-settle .45s ease-in-out 1.7s both; }
+  }
+  /* Dropped in small, overshoots with a brightness flash on landing, then settles. */
+  @keyframes mm-place {
+    0%   { opacity:0; transform:translateY(-30%) scale(.2); filter:brightness(1); }
+    70%  { opacity:1; transform:translateY(3%) scale(1.12); filter:brightness(1.75); }
+    100% { opacity:1; transform:translateY(0) scale(1);     filter:brightness(1); }
+  }
+  @keyframes mm-rise   { from { opacity:0; transform:translateY(42%); } to { opacity:1; transform:translateY(0); } }
+  @keyframes mm-settle { from { opacity:0; } to { opacity:1; } }
+  @keyframes mm-clear  { from { opacity:1; } to { opacity:0; } }
   h1 { font-size:15px; margin:0 0 4px; letter-spacing:.5px; }
   .sub { color:var(--mut); font-size:12px; margin-bottom:12px; }
   /* Cards sit ON the rail, not on top of it. A raised, bordered, shadowed box for every
@@ -342,8 +383,22 @@
 <div id="app">
   <div id="sideL">
     <div style="margin-bottom:8px">
-      <a href="https://meldmc.com" target="_blank" rel="noopener" title="meldmc.com" class="logo" style="margin:0">
-        <img src="assets/meld_icon.png" alt="Meld" style="height:40px;width:auto;display:block;cursor:pointer"/></a>
+      <!-- The wordmark is the same Blockbench art the site hero uses: the M, E, L and D
+           are placed one by one like blocks, ARNIS WORLDS rises under them, and the whole
+           thing settles onto the single finished composition. Layers are hard-positioned
+           at percentages of the art's own 1022x400 canvas, so the build-up overlays the
+           full image pixel for pixel before the swap. Without CSS animation, or with
+           reduced motion, the finished composition is simply what renders. -->
+      <a href="https://meldmc.com" target="_blank" rel="noopener" title="meldmc.com &mdash; Meld, Arnis worlds at scale" class="logo meld-mark" style="margin:0" aria-label="Meld &mdash; Arnis worlds, at scale. Opens meldmc.com">
+        <span class="mm-stage" aria-hidden="true">
+          <img class="mm-letter mm-m" src="assets/hero-m.webp" alt="" width="349" height="360" decoding="async"/>
+          <img class="mm-letter mm-e" src="assets/hero-e.webp" alt="" width="239" height="360" decoding="async"/>
+          <img class="mm-letter mm-l" src="assets/hero-l.webp" alt="" width="216" height="360" decoding="async"/>
+          <img class="mm-letter mm-d" src="assets/hero-d.webp" alt="" width="266" height="360" decoding="async"/>
+          <img class="mm-sub" src="assets/hero-arnis-worlds.webp" alt="" width="1022" height="98" decoding="async"/>
+          <img class="mm-full" src="assets/hero-title-full.webp" alt="" width="1022" height="400" decoding="async"/>
+        </span>
+      </a>
       <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
         <button id="btnRecommend" class="sec" style="flex:1;margin:0;padding:5px 8px;font-size:11px;white-space:nowrap" title="Check this PC (CPU, RAM, save-disk speed) and recommend the best cell size + worker count.">⚡ Recommend</button>
         <button id="btnDocs" class="sec" style="flex:1;margin:0;padding:5px 8px;font-size:11px;white-space:nowrap" title="Open the Meld documentation.">📖 Docs</button>
