@@ -972,7 +972,7 @@
       <!-- Region container written DURING generation. Separate from Export below, which
            converts a finished world: this one skips the conversion entirely. -->
       <details class="drawer" style="margin-top:10px">
-        <summary>&#129514; Region format &mdash; written during generation (experimental)</summary>
+        <summary>&#129514; Region format (experimental)</summary>
       <label style="margin-top:8px;font-weight:bold">Generate regions as
         <span class="i" title="Anvil is the universal container every server and the vanilla client read. B_Linear is Leaf's own container, written directly by the generator so no conversion pass runs afterwards - measured ~3.7x smaller on disk for a dense city and ~14x for open countryside, and only one world is ever written instead of two. SERVER ONLY, and only Leaf 1.21.11 (June 2026 builds) or newer / 26.x: Paper, older Leaf and the vanilla client cannot open it, the map item is unavailable, and there is no .mca original to fall back on.">i</span></label>
       <select id="nativeRegionFmt" style="width:100%">
@@ -996,7 +996,7 @@
       <!-- Export / compression. Default None = a working vanilla .mca world. See MELD_EXPORT_PLAN.md.
            Kept in its own <details> dropdown, the block is longer than the rest of the card. -->
       <details class="drawer" style="margin-top:10px">
-        <summary>&#128230; Export &amp; compression &mdash; converts the finished world</summary>
+        <summary>&#128230; Export &amp; compression</summary>
       <div id="exportNativeNote" class="stat" style="margin-top:8px;display:none;color:var(--mut,#9a917f)">
         Not used: this project generates <b>B_Linear</b> regions directly (see Region format
         above), so the world needs no conversion. Switch that back to Anvil .mca to export.
@@ -4753,11 +4753,18 @@ function syncCardMapLayers(slug, collapsed) {
     it.card.remove();
   };
   // Order inside Generate: Selection / search FIRST (the thing you actually do first), then the
-  // Export & compression drawer, then Edit & retry, then the rest of Project & world (name, save
+  // Region format and Export & compression drawers, then Edit & retry, then the rest of
+  // Project & world (name, save
   // location, prune). Whole DOM blocks move; every id and listener rides along untouched.
   // 1) Selection / search drawer.
   mkDrawer('selection-search');
-  // 2) Export & compression: lift the whole drawer out of the Project & world card.
+  // 2) Region format, then Export & compression: lift both drawers out of the Project &
+  //    world card. Region format goes first because it decides what the generation writes;
+  //    Export only converts afterwards. Anything left behind in Project & world is moved in
+  //    step 4, which would land it BELOW Export.
+  const natDrawer = document.getElementById('nativeRegionFmt')
+    && document.getElementById('nativeRegionFmt').closest('details.drawer');
+  if (natDrawer) gen.card.appendChild(natDrawer);
   const expDrawer = document.getElementById('exportFmt')
     && document.getElementById('exportFmt').closest('details.drawer');
   if (expDrawer) gen.card.appendChild(expDrawer);
