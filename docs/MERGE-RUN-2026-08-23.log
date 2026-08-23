@@ -1,0 +1,93 @@
+==============================================================
+ MELD + ARNIS TRIAGE MERGE RUN
+==============================================================
+
+--- PRE-MERGE STATE ---
+fork  main=dba724c3  branch=72aaadad (+5)
+meld  main=5bf5d48  branch=f1d820b (+11)
+
+--- PRE-MERGE TESTS: MELD ---
+........................................................................ [ 93%]
+..............                                                           [100%]
+230 passed in 3.08s
+
+--- PRE-MERGE TESTS: ARNIS FORK ---
+
+test result: ok. 410 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 8.27s
+
+
+--- cargo check ---
+    Checking arnis v3.1.2 (C:\Users\LEGION\Documents\Meld\arnis-triagefix)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.82s
+
+--- RELEASE COMMITS ---
+fork: 0ce2c37b release(3.1.3): Overture resilience, the Bake lighting fix, and the block-light saving
+meld: 95d511c release(1.9.4): the August Discord triage fixes
+
+--- FINAL PRE-MERGE CONFLICT CHECK ---
+fork  ff-able: YES   vs-theirs conflicts: 0
+meld  ff-able: YES   vs-theirs conflicts: 0
+
+--- MERGE: ARNIS FORK ---
+main before: dba724c3
+From .
+   dba724c3..0ce2c37b  fix/overture-lighting-bounds -> main
+main after:  0ce2c37b
+
+--- MERGE: MELD ---
+main before: 5bf5d48
+From .
+   5bf5d48..95d511c  fix/discord-triage-aug -> main
+main after:  95d511c
+
+--- POST-MERGE VERIFY ---
+fork main log:
+  0ce2c37b release(3.1.3): Overture resilience, the Bake lighting fix, and the block-light saving
+  72aaadad docs(changelog): the block-light saving
+  ff893258 perf(lighting): skip the block-light pass, and the array, when nothing emits
+  ded7fd36 docs(changelog): the two silent failures fixed on this branch
+  4a4eced7 fix(gui): the Bake lighting checkbox has never done anything
+  63d74825 fix(overture): survive a stale release pointer instead of dropping every building
+  dba724c3 release(3.1.2): optional B_Linear region output
+fork branch == main: YES
+
+meld main log:
+  95d511c release(1.9.4): the August Discord triage fixes
+  f1d820b docs: record the three measured refusals, including one of my own
+  7282858 docs(project): record why the seam halo is 128 blocks and not tunable
+  3d3d84d fix(estimate): charge for terrain relief, which is what build height actually buys
+  b0587e1 docs: changelog + a merge handoff for the August triage branch
+  4e266be fix(estimate): let a calibrated project keep responding to its settings
+  8637d92 fix(estimate): stop charging for build height that costs nothing
+  2b5815d fix(osm): pick .pbf files by their border, not their bounding rectangle
+  e7b2f6b fix(quit): stop Quit looking hung, which is what was orphaning the bake workers
+  0b7a25b fix(map): let the yellow selection box actually be removed
+  8640912 fix(build): say so before building a world that will look empty
+  f4a32e7 fix(ui): report RAM the way Windows does, and stop the two estimates disagreeing
+  5bf5d48 release: Meld 1.9.3, generate straight into Leaf's B_Linear format
+meld branch == main: YES
+
+--- POST-MERGE TESTS: MELD (on main) ---
+..............                                                           [100%]
+230 passed in 1.98s
+
+--- POST-MERGE TESTS: ARNIS FORK (on main) ---
+test result: ok. 410 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 8.56s
+
+
+--- clippy ---
+      1 warning: using `contains()` instead of `iter().any()` is more efficient
+      1 warning: `arnis` (bin "arnis") generated 1 warning (run `cargo clippy --fix --bin "arnis" -p arnis -- ` to apply 1 suggestion)
+      1 warning: `arnis` (bin "arnis" test) generated 1 warning (1 duplicate)
+clippy exit: 0
+
+--- FIX ALONG THE WAY ---
+clippy::manual_contains in src/overture.rs:426 -> fixed, main now a4784cc0
+
+--- FINAL STATE ---
+fork main:   a4784cc0  (3.1.3)   tests 410 pass, clippy 0 warnings
+meld main:   95d511c  (1.9.4)   tests 230 pass
+
+--- OTHER AGENT UNTOUCHED ---
+light-meld/    on feat/gpu-void-naming, 0 uncommitted file(s)
+arnis-283-src/ on feat/gpu-void-naming, 0 uncommitted file(s)
