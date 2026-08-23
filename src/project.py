@@ -25,7 +25,22 @@ def default_settings() -> dict:
         # carry across cells - see the note in arnis_cmd.build_arnis_cmd.
         "signage": "none",
         "job_size_regions": 4,   # sweet spot: small save bursts, safe on any disk (see Workers note)
-        "seam_buffer_chunks": 8,    # 8 chunks = 128 blocks of overlap per side
+        # 8 chunks = 128 blocks per side. NOT a tuning knob, and lowering it saves nothing.
+        #
+        # Cost: none on disk. tile.rs aligns arnis's output to 512-block regions, so ANY halo
+        # from 1 block to 512 writes the same (job_size_regions+2)^2 region files - measured over
+        # seven real renders, 9 files and 37,822,464 bytes at halo 1 and at halo 8 alike.
+        #
+        # Correctness: the 128 is spent exactly. road_bearings.rs budgets 96 (a field-texture
+        # domain is 192 blocks and asks for the road bearing at its own centre) + 32 (the bearing
+        # lattice half-cell) = 128, with zero margin, and at 1:1 the elevation built-up Gaussian
+        # independently wants ~90. Two independently rendered adjacent cells agree on 100.000% of
+        # shared surface columns at 64 blocks and on 85.3% at 16 - the parcel grid rotates at the
+        # seam, which is the exact regression the 2026-08-04 seam fix removed.
+        #
+        # To cut wasted work, raise job_size_regions instead: the share of generated regions that
+        # survives the merge is J^2/(J+2)^2 - 44.4% at J=4, 56.3% at J=6, 64.0% at J=8.
+        "seam_buffer_chunks": 8,
         "ground_level": -56,
         "rotation": 0,
         "terrain": True,
