@@ -2168,7 +2168,16 @@ def _runner(job: dict, state: dict) -> bool:
     core_budget = max(1, int((os.cpu_count() or 4) * cpu_pct / 100.0))
     rayon_threads = max(min_threads, core_budget // max(1, POOL.max_workers))
     log(f"  [{cell_key}] {rayon_threads} threads/cell (cpu {int(cpu_pct)}% · {POOL.max_workers} workers, live)")
-    child_env = {"RAYON_NUM_THREADS": str(rayon_threads)}
+    # The fork's region flush pool defaults to cores/4 PER PROCESS - correct for a
+    # lone arnis, oversubscribed the moment several workers run (8 workers x 6 flush
+    # threads = 48 compression threads on 24 cores). Scale it with the same per-worker
+    # budget the rayon threads get: about half a worker's threads, floor 2 so the pool
+    # never degenerates back into the serial writer that cost 63 s a cell.
+    flush_threads = max(2, min(6, rayon_threads // 2))
+    child_env = {
+        "RAYON_NUM_THREADS": str(rayon_threads),
+        "ARNIS_FLUSH_THREADS": str(flush_threads),
+    }
     if settings.get("stream_to_disk") or cell_size >= 8:
         child_env["ARNIS_STREAM_TO_DISK"] = "1"
     # Elevation source zoom: caps Arnis's terrain zoom so the whole world generates at the chosen
