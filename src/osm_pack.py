@@ -234,6 +234,56 @@ def _bbox_overlaps(a: dict, b: dict) -> bool:
                 or a["east"] < b["west"] or a["west"] > b["east"])
 
 
+def pbf_reaches(path, target_bbox: dict | None, osmium_mod=None) -> bool:
+    """Same question as pbf_covers, asked about a path on disk rather than a scan entry.
+
+    The two bake entry points each grew their own copy of the header-rectangle test, spelled
+    differently and neither aware of the cutting polygon, so the parallel path could re-admit a
+    file the planner had already rejected. Both call this now.
+    """
+    if target_bbox is None:
+        return True
+    entry = {"name": Path(str(path)).name, "path": str(path), "bbox": None}
+    if osmium_mod is not None:
+        try:
+            hb = osmium_mod.FileProcessor(str(path)).header.box()
+            if hb.valid():
+                entry["bbox"] = {"south": hb.bottom_left.lat, "west": hb.bottom_left.lon,
+                                 "north": hb.top_right.lat, "east": hb.top_right.lon}
+        except Exception:  # noqa: BLE001
+            return True                  # unreadable header: scan it, never guess it away
+    return pbf_covers(entry, target_bbox)
+
+
+def pbf_covers(entry: dict, region_bbox: dict | None) -> bool:
+    """Could this .pbf hold anything inside `region_bbox`? Conservative: unsure means yes.
+
+    The header bbox alone is not a good enough answer. A country's header box is its bounding
+    RECTANGLE, and neighbouring countries' rectangles overlap heavily - so rendering one cell in
+    Germany selected france-latest as well and then streamed all of it, which is where
+    "2 countrys baking for 1 cell in germany" and a 13.7-minute single-tile bake came from.
+
+    Geofabrik publishes the real cutting polygon for every extract, and this module already
+    depends on it for suggestions, so the honest test is available for free: reject on the
+    header rectangle first (cheap, and it clears most of a folder), then confirm against the
+    polygon. Anything we cannot place - an unknown filename, a hand-cut extract, an unreachable
+    index - keeps its file. Excluding data on a guess produces a world with holes in it, which
+    is far worse than reading a file we did not need.
+    """
+    if not region_bbox:
+        return True
+    if not _bbox_overlaps(entry.get("bbox"), region_bbox):
+        return False
+    try:
+        from . import geofabrik
+        rings = geofabrik.rings_for_pbf_name(entry.get("name") or entry.get("path") or "")
+        if not rings:
+            return True                  # unknown extract: keep it
+        return geofabrik.rings_intersect_bbox(rings, region_bbox)
+    except Exception:  # noqa: BLE001
+        return True                      # any failure at all: keep it
+
+
 def select_pbfs(files: list[dict], region_bbox: dict | None) -> tuple[list[dict], list[dict]]:
     """Split scanned .pbf files into (needed, skipped) for this region.
 
@@ -246,7 +296,7 @@ def select_pbfs(files: list[dict], region_bbox: dict | None) -> tuple[list[dict]
     """
     if not region_bbox:
         return list(files), []
-    need = [f for f in files if _bbox_overlaps(f.get("bbox"), region_bbox)]
+    need = [f for f in files if pbf_covers(f, region_bbox)]
     skip = [f for f in files if f not in need]
     return need, skip
 
@@ -474,22 +524,13 @@ def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None
             if should_stop and should_stop():
                 raise _Stopped()      # discard partial tiles (a border tile may need a later .pbf too)
             pbf = str(pbf)
-            # Skip a .pbf whose header bbox doesn't overlap any tile we still need — the header is at
-            # the start of the file, so this avoids streaming a whole country for nothing. Header
-            # missing/unreadable → fall through and scan it (safe default).
-            if target_bbox is not None:
-                try:
-                    hb = osmium.FileProcessor(pbf).header.box()
-                    if hb.valid():
-                        pb_s, pb_w = hb.bottom_left.lat, hb.bottom_left.lon
-                        pb_n, pb_e = hb.top_right.lat, hb.top_right.lon
-                        if not (pb_w <= target_bbox["east"] and pb_e >= target_bbox["west"]
-                                and pb_s <= target_bbox["north"] and pb_n >= target_bbox["south"]):
-                            _log(f"  [OSM bake] skipping {Path(pbf).name} "
-                                 f"({pi + 1}/{len(pbf_paths)}) — bbox doesn't reach the needed tile(s)")
-                            continue
-                except Exception:  # noqa: BLE001
-                    pass
+            # Skip a .pbf that cannot reach any tile we still need — the header is at the start
+            # of the file, so this avoids streaming a whole country for nothing. Header missing
+            # or extract unrecognised → scan it (safe default).
+            if not pbf_reaches(pbf, target_bbox, osmium):
+                _log(f"  [OSM bake] skipping {Path(pbf).name} "
+                     f"({pi + 1}/{len(pbf_paths)}) — outside the needed tile(s)")
+                continue
             _log(f"  [OSM bake] reading {Path(pbf).name} ({pi + 1}/{len(pbf_paths)})…")
             # A single corrupt/truncated/unreadable .pbf (e.g. a half-copied file or a flaky drive
             # dropping mid-read → 'failed to uncompress data: buffer error') must NOT kill the whole
@@ -719,6 +760,17 @@ def _scan_pbf_into(pbf: str, target_list, out_dir: str, z: int, stop_path):
                 for w in writers.values():
                     w.abort()
                 return {"written": [], "elements": 0, "bytes": 0, "ok": True, "stopped": True}
+            # Heartbeat. The sequential bake logs "N M elements…" as it goes; this path runs in
+            # a worker PROCESS and cannot reach the parent's logger, so it had no way to say
+            # anything between "parallel: N .pbf across N process(es)" and finishing. On a
+            # country .pbf that is minutes of total silence, which is why a working bake was
+            # read as a hang. A counter file costs nothing and the parent is already awake once
+            # a second to poll the stop flag.
+            if (seen & 0x1FFFFF) == 0:            # ~ every 2M elements
+                try:
+                    (od / ".progress").write_text(str(seen), encoding="utf-8")
+                except Exception:  # noqa: BLE001
+                    pass
             if isinstance(o, osmium.osm.Node):
                 loc = o.location
                 if not loc.valid():
@@ -887,15 +939,9 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
     pbfs = []
     for pbf in pbf_paths:
         pbf = str(pbf)
-        try:
-            hb = osmium.FileProcessor(pbf).header.box()
-            if hb.valid() and not (
-                    hb.bottom_left.lon <= tbb["east"] and hb.top_right.lon >= tbb["west"]
-                    and hb.bottom_left.lat <= tbb["north"] and hb.top_right.lat >= tbb["south"]):
-                _log(f"  [OSM bake] skipping {Path(pbf).name} — bbox doesn't reach the needed tile(s)")
-                continue
-        except Exception:  # noqa: BLE001
-            pass
+        if not pbf_reaches(pbf, tbb, osmium):
+            _log(f"  [OSM bake] skipping {Path(pbf).name} — outside the needed tile(s)")
+            continue
         pbfs.append(pbf)
 
     if len(pbfs) < 2:   # nothing to parallelize → the proven sequential path
@@ -924,6 +970,7 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
             done_bytes = 0
             pending = set(futs)
             stopped_now = False
+            _last_beat = [time.time()]
             while pending:
                 # Poll the stop flag on a TIMER, not once per finished .pbf: one country .pbf
                 # runs for minutes, so waiting for a completion made "Stop bake" look dead.
@@ -934,6 +981,18 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
                     stopped_now = True
                     open(stop_path, "w").close()
                     _log("  [OSM bake] stop requested — asking the bake workers to abort…")
+                # Relay the workers' heartbeats, so a long bake shows it is moving.
+                if time.time() - _last_beat[0] >= 15.0:
+                    _last_beat[0] = time.time()
+                    live = []
+                    for i, pbf in enumerate(pbfs):
+                        try:
+                            n = int((tmp_root / f"p{i}" / ".progress").read_text(encoding="utf-8"))
+                        except Exception:  # noqa: BLE001
+                            continue
+                        live.append(f"{Path(pbf).name}: {n // 1_000_000}M")
+                    if live:
+                        _log("  [OSM bake] " + " · ".join(live) + " elements…")
                 for fut in done_set:
                     i, pbf = futs[fut]
                     res = fut.result()
