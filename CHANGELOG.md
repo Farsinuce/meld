@@ -4,7 +4,7 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [1.9.4] - 2026-08-23
 
 Community bug reports from 22–23 August, root-caused against 19,018 cell logs and
 2,428 region files rather than by reading the code alone. Full write-up, including
@@ -47,6 +47,10 @@ what the measurements overturned, in `docs/TRIAGE-2026-08.md`.
 - **A calibrated project keeps responding to its settings.** Once a project had
   built anything, the measured MB/region was returned unchanged for ever, so
   turning caves or baked lighting on moved nothing.
+- **The benchmark report says which Meld actually ran.** `meld_version` was
+  hardcoded to `"1.7.0"` in the report builder, so every report on disk claims a
+  version six releases old — including the ones used to calibrate the estimates.
+  It reads `src.__version__` now.
 
 ### Added
 - A warning before Generate when the settings mean the world will look empty —

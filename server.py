@@ -50,6 +50,7 @@ BASE_DIR = resource_dir()
 # the unpacked payload is a temp directory on some platforms, so it is the wrong answer for both.
 APP_DIR = exe_dir()
 
+import src
 from src import update
 from src import updater
 from src.project import Project, default_settings
@@ -787,7 +788,7 @@ def _write_run_report() -> None:
                    "ram_speed": hw.get("ram_speed"), "ram_modules": hw.get("ram_modules"),
                    "drive_type": hw.get("drive_type")}
         rep = runreport.build_report(
-            world_name=name, meld_version="1.7.0", run=run, timing=timing,
+            world_name=name, meld_version=src.__version__, run=run, timing=timing,
             timeline=timeline, grid=PROJECT.load_grid(), prefetch_timings=pf_timings,
             settings=PROJECT.settings(), actual_mb=run.get("actual_mb"),
             max_workers=POOL.max_workers, machine=machine,
