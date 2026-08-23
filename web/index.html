@@ -1795,10 +1795,14 @@ function estBuildSeconds(todoRegions, todoCells, workers, bake) {
   if (todoRegions <= 0) return 0;
   const w = Math.max(1, Math.min(64, workers || 4));
   const wf = Math.sqrt(12 / Math.max(6, Math.min(16, w)));   // mild: 8-16 workers ~ same
-  // An extended-height world writes proportionally more sections per region, and cave
-  // carving is extra work per column; the flat figure below was measured on a
-  // vanilla-height, cave-less build and read far too low for either.
-  const hf = Math.max(1, (projHeightBlocks || 384) / 384);
+  // Cave carving is real extra work per column. Extended height mostly is not: the fork emits
+  // sections from the world floor up to the highest one holding content, so lifting the ceiling
+  // adds no sections and no work. Two matched real builds differing only in the ceiling came out
+  // byte-identical at 24.00 sections/chunk. Scaling linearly with declared height inflated both
+  // the size and the time estimate roughly tenfold on mountainous 1:1 selections, which is what
+  // "clicking extend shoots it up to 22 GB" actually was. Only a lowered FLOOR costs anything,
+  // and the server now models that additively; here it is small enough to fold into the base.
+  const hf = 1;
   const cf = projCaves ? 1.35 : 1;
   const perRegion = 0.13 * wf * (bake ? 1 : 0.82) * hf * cf;  // ~0.19 s/region @ 8w, bake on
   const cellOverhead = (todoCells || 0) * 8 / Math.max(1, Math.min(16, w)); // fetch+prep per cell, shared across workers
@@ -5024,10 +5028,33 @@ syncStaggerStep();
 // Cell size lives only in Settings now. Clamp to 1-6 (bigger cells = much slower
 // saves) and PERSIST on change so the chosen size survives refreshes and New world.
 const clampSize = v => { const n = parseInt(v); return isNaN(n) ? '' : snapSize(n); };
-const saveSize = () => {
+// Every cell is generated with a seam halo around it and the surplus is thrown away after the
+// merge, so the useful fraction is size^2/(size+2)^2 -- 11% at size 1, 44% at 4, 56% at 6.
+// Measured across every arnis run logged locally: 343.6M chunks written, 128.9M kept. At size 1
+// that is 9,216 chunks generated and 9 region files written to keep 1,024 chunks in 1 file.
+// Nothing said so, and a 2-hour benchmark had been run at size 1 by hand.
+const cellEfficiency = n => (n * n) / ((n + 2) * (n + 2));
+const saveSize = async () => {
   const n = clampSize($('size').value);
   if (n === '') return;
+  const prev = parseInt($('size').dataset.prev || '') || null;
+  if (n < 4) {
+    const pct = Math.round(cellEfficiency(n) * 100);
+    const ok = await modalConfirm('Small cells waste most of the work',
+      `At cell size ${n}, each cell generates a ${n + 2}x${n + 2}-region area to keep ${n}x${n} of it: ` +
+      `about ${pct}% of the chunks built are discarded after the merge.\n\n` +
+      `Size 4 keeps 44% and size 6 keeps 56%, for the same world. Unless you are deliberately ` +
+      `testing one small area, 4 to 6 finishes the same job several times faster.\n\n` +
+      `Use ${n} anyway?`, `Use ${n}`, 'Use 4 instead');
+    if (!ok) {
+      $('size').value = 4;
+      $('size').dataset.prev = '4';
+      api('/api/settings', { job_size_regions: 4 });
+      return;
+    }
+  }
   $('size').value = n;
+  $('size').dataset.prev = String(n);
   api('/api/settings', { job_size_regions: n });
 };
 $('size').addEventListener('change', saveSize);

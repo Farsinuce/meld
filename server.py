@@ -248,8 +248,43 @@ _RQ = {"active": False, "stop": False, "pause": False, "slugs": [], "idx": 0, "c
 _MB_PER_REGION = 3.5
 _VANILLA_HEIGHT = 384          # -64..319, the height the base figure was measured at
 _CAVES_SIZE_FACTOR = 1.15      # carved air + ores + decoration widen the palette
-_BAKE_SIZE_FACTOR = 1.35       # SkyLight + BlockLight = 8 KB per section before compression
+# Measured, not assumed: one real 1024-chunk region (Brasov r.0.0) resimulated both ways came to
+# 7.344 MiB lit against 4.566 MiB unlit. The old 1.35 came from "8 KB of light per section before
+# compression", which is the wrong number to reason with - uniform light arrays are the MOST
+# compressible payload in a section, not the least (zlib of 2048 zero bytes is 24 bytes).
+_BAKE_SIZE_FACTOR = 1.61
+_VANILLA_MIN_Y = -64           # vanilla floor; sections below this are the ones that cost
+# Marginal cost of ONE extra all-air section, per region (x1024 chunks), measured on real .mca
+# over k=1..128 extra sections: 52.3 B/chunk baked, 3.9 B/chunk unbaked.
+_MB_PER_EXTRA_SECTION_BAKED = 52.3 * 1024 / (1024 * 1024)
+_MB_PER_EXTRA_SECTION_PLAIN = 3.9 * 1024 / (1024 * 1024)
+# Not every chunk reaches the declared floor. A matched pair of real arnis builds (underroom 96,
+# floor -160, i.e. 6 sections of headroom below vanilla) averaged 26.11 sections/chunk against
+# vanilla's 24.00 - so about a third of the theoretical maximum actually materialises.
+_EXTRA_SECTION_FILL = 2.11 / 6.0
+# An .mca cannot be smaller than its header plus one sector per chunk, whatever it holds:
+# 1024*4096 + 8192 bytes. 20.1% of the 2,396 real region files on this machine sit exactly here.
+_SECTOR_FLOOR_MB = (1024 * 4096 + 8192) / (1024 * 1024)
 _FMT_RATIO = {"none": 1.0, "zip": 1.85, "tarzst": 1.85, "linear": 4.8, "blinear": 4.3}
+
+
+def _world_floor_y(settings: dict, elevation: dict | None) -> int:
+    """Lowest Y this project will declare. Only the FLOOR costs bytes - see _mb_per_region."""
+    if not settings.get("disable_height_limit"):
+        return _VANILLA_MIN_Y
+    try:
+        lo = settings.get("world_min_y")
+        # "blank means fit it" — and an absent key is blank. `str(None)` is "None", which is
+        # emphatically not blank, so testing the string alone silently took the explicit branch
+        # and threw on int(None).
+        if lo is not None and str(lo).strip() != "":
+            return min(_VANILLA_MIN_Y, int(lo))
+        # Fitted: the floor sits underroom below the ground level the terrain is built from.
+        ground = float(settings.get("ground_level", -56) or -56)
+        under = float(settings.get("height_underroom", 16) or 0)
+        return int(min(_VANILLA_MIN_Y, ground - under))
+    except (TypeError, ValueError):
+        return _VANILLA_MIN_Y
 
 
 def _world_height_blocks(settings: dict, elevation: dict | None) -> int:
@@ -277,8 +312,24 @@ def _world_height_blocks(settings: dict, elevation: dict | None) -> int:
 
 def _mb_per_region(settings: dict | None = None, elevation: dict | None = None) -> float:
     """MB per built region for THIS project. A measurement from finished runs when there is
-    one (`mb_per_region_observed`), otherwise the model: taller worlds hold proportionally
-    more sections, caves and baked lighting each add their own bulk."""
+    one (`mb_per_region_observed`), otherwise the model below.
+
+    The model used to be linear in declared height: mb = base * height / 384. That is the wrong
+    variable. arnis emits sections from the world floor up to the highest section that actually
+    holds something (world_editor/java.rs), so RAISING THE CEILING COSTS NOTHING - a chunk whose
+    terrain tops out at Y=40 gets the same sections whether the ceiling is 319 or 2031. Only
+    lowering the floor adds any. Matched real builds prove it: vanilla and extended (ceiling
+    lifted) came out at 24.00 sections/chunk and 1,057 compressed bytes each, byte for byte,
+    while the linear model predicted extended would be 1.042x bigger. Only `deep` (floor lowered
+    to -160) actually grew, to 26.11 sections and 1,161 bytes.
+
+    That mismatch is what put "~22.4 GB" on the BUILD panel for a mountainous 1:1 selection and
+    sent someone to Discord asking why extending build height made their world 10x bigger. It
+    did not; the estimate did.
+
+    So: a content term, multiplied by the things that genuinely thicken every section, plus an
+    additive term for sections below the vanilla floor, floored at what an .mca cannot go under.
+    """
     s = settings if settings is not None else PROJECT.settings()
     try:
         seen = float(s.get("mb_per_region_observed") or 0)
@@ -286,12 +337,17 @@ def _mb_per_region(settings: dict | None = None, elevation: dict | None = None) 
         seen = 0.0
     if seen > 0:
         return seen
-    mb = _MB_PER_REGION * (_world_height_blocks(s, elevation) / _VANILLA_HEIGHT)
+    baked = bool(s.get("bake_lighting"))
+    mb = _MB_PER_REGION
     if s.get("caves"):
         mb *= _CAVES_SIZE_FACTOR
-    if s.get("bake_lighting"):
+    if baked:
         mb *= _BAKE_SIZE_FACTOR
-    return mb
+    below = max(0, _VANILLA_MIN_Y - _world_floor_y(s, elevation)) / 16.0
+    if below:
+        per = _MB_PER_EXTRA_SECTION_BAKED if baked else _MB_PER_EXTRA_SECTION_PLAIN
+        mb += below * _EXTRA_SECTION_FILL * per
+    return max(mb, _SECTOR_FLOOR_MB)
 
 
 def _record_size_calibration() -> None:
@@ -1906,9 +1962,23 @@ def _world_meta_dict() -> dict:
     }
 
 
-def write_world_meta(world_path=None) -> Path | None:
+_META_WRITE = {"at": 0.0}
+_META_MIN_INTERVAL_S = 20.0
+
+
+def write_world_meta(world_path=None, *, throttle: bool = False) -> Path | None:
     """Write meld-world.json into the saved world folder (origin + elevation lock +
-    seed + settings). Best-effort: never raises into the merge/save path."""
+    seed + settings). Best-effort: never raises into the merge/save path.
+
+    `throttle` is for the per-cell merge path. The sidecar records the world's provenance, not
+    its progress: re-serialising the whole project dict after every single merge meant doing it
+    13,092 times on one benchmark run, inside the merge critical section, to write a file whose
+    contents barely change. Throttled it is written at most every 20 s during a run, and the
+    end-of-run call is unthrottled so the finished world always has a current one.
+    """
+    if throttle and (time.time() - _META_WRITE["at"]) < _META_MIN_INTERVAL_S:
+        return None
+    _META_WRITE["at"] = time.time()
     try:
         wp = Path(world_path) if world_path else master_world_path(create=True)
         wp.mkdir(parents=True, exist_ok=True)
@@ -2259,7 +2329,7 @@ def _runner(job: dict, state: dict) -> bool:
             pass
     # Refresh the world's reproducibility sidecar so origin + elevation + seed +
     # settings stay current with the latest merged state.
-    write_world_meta(Path(master))
+    write_world_meta(Path(master), throttle=True)
     state.update(progress=100, message="Merged.")
     return True
 
