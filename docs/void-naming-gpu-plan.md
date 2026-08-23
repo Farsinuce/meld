@@ -41,58 +41,107 @@ zero-cost GPU cave kernel buys about 3% of end-to-end wall clock.**
 
 ### Why it gets worse, not better, in a real Meld run
 
-- **Meld runs many arnis processes at once** (up to ~11 on this box). They would
-  all contend for one GPU.
-- **CUDA MPS — the feature that lets processes share a GPU concurrently — is
+**Correction to an intuition worth stating, because it is the crux.** It is tempting
+to argue "the CPU is saturated, so move work to the idle GPU". Meld does **not**
+saturate the CPU at default settings. Per-worker demand is ~0.81 cores, so:
+
+| workers | cores demanded | CPU utilisation |
+|---|---|---|
+| 4 (the stored default, `src/project.py:145`) | 3.2 | **13%** |
+| 11 (what Recommend produces on this box) | 8.9 | **37%** |
+| ~30 | 24 | 100% |
+
+Default Meld leaves **63-87% of the CPU idle, waiting on Overpass.** You cannot
+relieve an idle resource. Offloading there is not neutral, it is negative.
+
+The rest of the case against:
+
+- **CUDA MPS - the feature that lets processes share a GPU concurrently - is
   Linux only.** On Windows/WDDM, concurrent processes are *time-sliced*, never
-  co-resident. Eight processes wanting the GPU queue behind each other.
-- **Meld has no cross-worker resource serialiser.** There is no semaphore
-  anywhere in `server.py`; every lock is a state mutex. Gating a GPU across
-  workers means building that machinery first.
-- **Each process pays a fresh GPU context init** (tens to hundreds of ms), on a
-  phase that only lasts ~1 s.
-- **The CPU is already saturated.** arnis parallelises with rayon inside each
-  process and Meld runs several processes; offloading to one shared GPU moves the
-  queue rather than shortening it.
-- **No CUDA toolkit on this machine** (`nvcc` absent), so the CUDA path also adds
-  a user-facing install dependency. `wgpu` avoids that but gives up peak throughput.
-- **The world model is GPU-hostile.** It is
-  `FnvHashMap<region> → FnvHashMap<chunk> → FnvHashMap<section>` with per-block
-  `Arc<NBT>` side tables, not a dense array. Element placement, the post passes
-  and flood fill are hash probes, allocations and early exits. Porting them means
-  rewriting the world model.
+  co-resident, so N processes give the aggregate throughput of one. A 24-way CPU
+  queue becomes a 1-way GPU queue.
+- **Meld spawns one `arnis.exe` per cell**, so GPU context init is paid **per
+  cell** (100-300 ms realistic on a 33.8 GB + 16 GB box). Against a ~400 ms
+  serialized per-cell GPU budget, that *straddles the budget* - at the pessimistic
+  end the GPU becomes the new bottleneck and throughput ends up worse than
+  CPU-only.
+- **VRAM:** 8 contexts x 300-800 MB = 2.4-6.4 GB of 16 GB burned on empty
+  contexts, on a laptop GPU that is also driving the display.
+- **WDDM's 2-second TDR** becomes a scheduling hazard with 8 queued contenders; a
+  driver reset kills a multi-hour render.
+- **Meld has no cross-worker resource serialiser** - no semaphore anywhere in
+  `server.py`. Gating a GPU across workers means building that machinery first.
+- **It breaks the golden-hash gate.** `tests/golden_hashes.txt` pins five worlds
+  to exact 64-bit hashes. GPU floating point is not bit-reproducible across
+  vendors, generations or drivers. The one prior-art project with a published
+  win, C2ME-OCL, ships exactly that failure: "biome borders may get shifted by one
+  or two blocks."
+- **The world model is GPU-hostile.** `FnvHashMap<region> -> FnvHashMap<chunk> ->
+  FnvHashMap<section>` with per-block `Arc<NBT>` side tables and first-writer-wins
+  semantics. Porting element placement means rewriting ~20k lines (buildings.rs
+  alone is 7,951) into a language with no strings and no hash maps. No prior art
+  exists for GPU OSM-to-voxel.
+
+### The arithmetic
+
+| GPU eats... | share of wall | max speedup |
+|---|---|---|
+| cave density only | 1.4% | **1.014x** |
+| all of `element_placement` | 6.5% | 1.070x |
+| **every CPU phase in the program** | 13.8% | **1.161x** |
+
+With OSM pre-cached (`--osm-tile-dir`), the cell drops to ~2883 ms and the numbers
+improve but stay modest: cave density **1.108x**, every GPU-mappable FP kernel
+1.275x, a full `element_placement` port 1.83x. At fleet saturation the hard
+ceiling for the one defensible kernel, with a *free and instant* GPU, is
+**1.70x** (16.3 -> 9.6 core-seconds).
+
+Worth conceding: the cave density field is **41% of the cell's CPU core-seconds**
+while being **1.4% of its wall clock**. That gap is the entire argument.
 
 ### Confidence
 
 | Claim | Confidence |
 |---|---|
-| GPU gives **< 20%** end-to-end improvement in a real Meld run | **~90%** |
-| GPU gives **< 2×** | **~97%** |
-| Cave density field alone could be 10–50× faster *as a kernel* | ~70% |
-| That kernel changes end-to-end wall clock by more than 5% | **~10%** |
+| GPU gives **> 20%** end-to-end improvement in a real Meld run | **12%** |
+| GPU gives **> 2x** | **2%** |
+| Cave density is a genuinely GPU-shaped kernel | ~95% (conceded) |
+| A 30-line CPU cache captures ~half the same win | ~85% |
 
-### What to do instead — same goal, far cheaper
+### What to do instead - four fixes that beat the GPU ceiling
 
-Two CPU fixes beat the GPU port outright, and both were confirmed by reading the code:
+Ranked. The first deletes work (helps latency *and* throughput); the rest add
+parallelism or remove waiting.
 
-1. **Parallelise the post passes.** `sweep_floating_veg` (`water_depth.rs`) and
-   `seal_floating_fluid_region` (`caves/mod.rs`) contain **zero rayon** — 382–446 ms
-   runs on ONE core while 23 sit idle. They are independent per-column scans.
-2. **Halve the cave density work.** `caves/mod.rs:143` parallelises across cell
-   columns, but inside a column every cell recomputes all 8 corners, and
-   vertically adjacent cells share exactly 4 of them (`caves/mod.rs:150-159`).
-   Carrying the top corner plane into the next iteration is ~30 lines and
-   byte-identical output. (The full 8× the corner layout suggests would need
-   cross-column sharing, which fights the parallel decomposition — claim 2×.)
+1. **Corner-plane cache in `carve_region`** (`caves/mod.rs:150-159`). Every 4x8x4
+   cell recomputes all 8 corners; vertically adjacent cells share exactly 4, so
+   carrying the top plane into the next iteration **halves** `combined_density`
+   calls - verified by reading the loop. (Sharing across columns could approach
+   4-8x but fights the `par_iter` decomposition at `caves/mod.rs:143`.)
+   Byte-identical, ~30 lines, golden gate intact. **Do this before benchmarking
+   any shader - it shrinks the GPU's remaining prize by about half.**
+2. **Parallelise the post passes.** `sweep_floating_veg` (`water_depth.rs`) and
+   `seal_floating_fluid_region` (`caves/mod.rs`) contain **zero rayon** - 382-446 ms
+   on **1 of 24 cores**. rayon over Z-strips: ~17% off `generation_time`, in an
+   afternoon.
+3. **Raise `max_workers`.** Stored default is **4**; saturation is ~30. Going
+   4 -> 11 is **~2.75x fleet throughput for free** - more than the theoretical
+   ceiling of GPU-ing the only defensible kernel. It is a number, not code.
+4. **Kill `osm_fetch`.** 16.7-21.2 s of a 20-24 s cell. `--osm-tile-dir` and
+   `--offline` already exist and Meld already has a .pbf bake pipeline. Fully
+   overlapping or eliminating the fetch is worth **~7x end-to-end** - roughly 6x
+   better than an infinite GPU applied to every compute phase combined.
 
-Both are ordinary Rust, keep the golden-hash gate intact, and need no new
-dependency, no driver, and no toggle.
+Also worth noting from the profile: `tile::DEFAULT_TILE_SIZE = 512` gives a cell
+of this size only **4 tiles**, so element placement runs 4-wide on a 24-core box.
+Halving the tile size would widen it, but the eviction bookkeeping assumes one
+tile per region, so it needs care.
 
 ### If a GPU toggle is still wanted
 
-Ship it only after a 30-minute spike measuring `wgpu` device-init cost on this
-machine. There is nothing to drive today: arnis 3.1.2 has no GPU flag among its
-CLI flags and no GPU crate in `Cargo.toml`.
+Ship it only after the four fixes above, and only if `--caves` stays on by
+default, OSM goes fully offline, and the profile *still* shows noise on top. There
+is nothing to drive today: arnis 3.1.2 has no GPU flag and no GPU crate.
 
 ---
 
