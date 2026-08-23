@@ -428,9 +428,9 @@
       <h2>System</h2>
       <div class="stat">CPU <span id="statCpu" style="float:right;color:var(--fg)">–</span></div>
       <div class="bar"><i id="statCpuBar" style="width:0%"></i></div>
-      <div class="stat" style="margin-top:7px">RAM <span id="statRam" style="float:right;color:var(--fg)">–</span></div>
+      <div class="stat" style="margin-top:7px" title="In use / installed, counted the way Windows counts it (GiB), so this matches Task Manager.">RAM <span id="statRam" style="float:right;color:var(--fg)">–</span></div>
       <div class="bar"><i id="statRamBar" style="width:0%"></i></div>
-      <div class="stat" style="margin-top:7px">Disk <span id="statDisk" style="float:right;color:var(--fg)">–</span></div>
+      <div class="stat" style="margin-top:7px" title="Free space in decimal GB, the way drive makers label capacity — so a 4 TB disk reads as ~4000 GB here and as 3.63 TB in Explorer. Both are the same disk.">Disk <span id="statDisk" style="float:right;color:var(--fg)">–</span></div>
       <div class="bar"><i id="statDiskBar" style="width:0%"></i></div>
       <div class="stat" id="statDiskWarn" style="display:none;color:var(--bad);margin-top:5px"></div>
       <canvas id="statHist" height="46" style="width:100%;height:46px;display:block;margin-top:9px;background:#1c1916;border:1px solid var(--line);border-radius:2px"></canvas>
@@ -1764,7 +1764,12 @@ function fmtTime(s) {
   const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
   return (h ? String(h).padStart(2, '0') + ':' : '') + String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0');
 }
-function fmtDur(s) {
+// Coarse duration for ESTIMATES ("14 min"): a predicted build time has no business
+// claiming to-the-second precision. Named apart from the export formatter at the bottom
+// of this file, which is fine-grained ("13m 54s") - both were called fmtDur, both are
+// top-level in the same script block, so the later declaration silently won and every
+// estimate has been rendering in the export style.
+function fmtEta(s) {
   s = Math.max(0, Math.round(s));
   if (s < 90) return s + 's';
   const m = Math.round(s / 60);
@@ -1808,7 +1813,7 @@ function updateStats(grid) {
   const km = v => v >= 10 ? Math.round(v) : v.toFixed(1);
   const workers = parseInt($('workers').value) || 4;
   const bake = $('bakelight') ? $('bakelight').checked : true;
-  const timeStr = todo > 0 ? `~${fmtDur(estBuildSeconds(todo, todoCells, workers, bake))} @ ${workers}w` : 'all merged';
+  const timeStr = todo > 0 ? `~${fmtEta(estBuildSeconds(todo, todoCells, workers, bake))} @ ${workers}w` : 'all merged';
   $('estSize').textContent = '~' + fmtMB(regions * projMbPerRegion);
   $('estSub').innerHTML =
     `${keys.length} cells · ${regions.toLocaleString()} regions · ${wBlk.toLocaleString()}×${hBlk.toLocaleString()} blocks`

@@ -348,7 +348,7 @@ def _machine_specs() -> dict:
     """Total RAM (GB) + logical cores, for adapting the server's RAM/CPU knobs."""
     try:
         import psutil
-        ram = round(psutil.virtual_memory().total / (1024 ** 3))
+        ram = round(psutil.virtual_memory().total / _GIB)
     except Exception:  # noqa: BLE001
         ram = 8
     return {"ram_gb": ram, "cores": os.cpu_count() or 4}
@@ -3831,7 +3831,8 @@ def _submit_cells(cells: list[dict], osm_files: dict | None = None,
         # OSM/terrain warm-up too (the prefetch DOES cost wall time). Otherwise start now.
         started = _RUN.get("started") if (keep_started and _RUN.get("started")) else time.time()
         _RUN.update(started=started, ended=None, total=len(cells), done=0, failed=0,
-                    est_regions=est_regions, est_mb=est_regions * _mb_per_region(),
+                    est_regions=est_regions,
+                    est_mb=est_regions * _mb_per_region(PROJECT.settings(), PROJECT.elevation()),
                     actual_mb=None, phase="generating")
     # Hours of work with no input events looks exactly like an idle machine to every power
     # policy there is. Released when the run ends (or is stopped) in _on_cell_complete.
@@ -3885,7 +3886,8 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
     est_regions = sum(int(c["cell_key"].split(",")[2]) ** 2 for c in cells)
     with _RUN_LOCK:
         _RUN.update(started=time.time(), ended=None, total=len(cells), done=0, failed=0,
-                    est_regions=est_regions, est_mb=est_regions * _mb_per_region(),
+                    est_regions=est_regions,
+                    est_mb=est_regions * _mb_per_region(PROJECT.settings(), PROJECT.elevation()),
                     actual_mb=None, phase="prefetch")
     with _PREFETCH_LOCK:
         _PREFETCH.update(active=True, done=False, chunks=[], started=time.time(), phase="osm",
@@ -5090,8 +5092,8 @@ def _sys_stats() -> dict:
             vm = psutil.virtual_memory()
             # "in use" the way Task Manager shows it = total - available (NOT psutil's .used, which
             # on Windows excludes the modified/standby cache and reads low vs the task manager number).
-            out["ram_used_gb"] = round((vm.total - vm.available) / 1e9, 1)
-            out["ram_total_gb"] = round(vm.total / 1e9, 1)
+            out["ram_used_gb"] = _gib(vm.total - vm.available)
+            out["ram_total_gb"] = _gib(vm.total)
             out["ram_pct"] = round(vm.percent)
         else:
             out["ram_total_gb"] = _total_ram_gb()
@@ -5159,7 +5161,7 @@ def _hw_specs(drive_hint: str | None = None) -> dict:
             if typs:
                 out["ram_kind"] = typs[0]
             if caps:
-                gb = [round(c / 1e9) for c in caps]
+                gb = [round(c / _GIB) for c in caps]   # a 32 GiB stick is sold as "32 GB"
                 out["ram_modules"] = (f"{len(gb)}×{gb[0]} GB" if len(set(gb)) == 1
                                       else " + ".join(f"{g} GB" for g in gb))
             media = (data.get("media") or "").strip()
@@ -5172,6 +5174,23 @@ def _hw_specs(drive_hint: str | None = None) -> dict:
             pass
     _HW_CACHE[key] = out
     return out
+
+
+_GIB = 1024 ** 3
+
+
+def _gib(n_bytes, nd: int = 1) -> float | None:
+    """Bytes -> GiB, which is what every memory figure Meld shows must use.
+
+    Windows labels GiB as "GB" everywhere the user can check us against: Task Manager,
+    msinfo32, Explorer, and the sticker on the DIMM. Dividing by 1e9 instead made 64 GiB
+    of installed RAM read as "68.3 GB" and a 32 GiB stick read as "2x34 GB" - reported on
+    Discord by two people on different machines. Disk stays decimal (see _sys_stats):
+    drive vendors really do sell decimal GB, so a 4 TB disk showing 3999.7 is correct.
+    """
+    if not n_bytes:
+        return None
+    return round(n_bytes / _GIB, nd)
 
 
 # ── recommend settings wizard: probe this PC + the save disk ────────────────────
@@ -5187,11 +5206,11 @@ def _total_ram_gb() -> float | None:
                         ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
         m = _MEMSTAT(); m.dwLength = ctypes.sizeof(_MEMSTAT)
         if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
-            return round(m.ullTotalPhys / (1024 ** 3), 1)
+            return _gib(m.ullTotalPhys)
     except Exception:
         pass
     try:  # POSIX
-        return round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024 ** 3), 1)
+        return _gib(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"))
     except Exception:
         return None
 
