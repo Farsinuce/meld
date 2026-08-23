@@ -4,6 +4,38 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.9.5] - 2026-08-23
+
+The GPU/void/naming feature branch, merged on top of the triage release. The
+generator side ships in fork 3.1.4; this release wires it into Meld and teaches
+the worker pool to size itself from measurements instead of a stored number.
+Full branch history and measurements in `docs/BRANCH-STATUS.md`.
+
+### Added
+- **A GPU acceleration toggle.** `gpu_accel` in the Region format drawer: off,
+  auto, dedicated, integrated. Passed to the fork as `--gpu`; a missing or
+  mismatched adapter falls back to CPU with a log line, and off stays the
+  default. Measured on a 224-region 1:1 cell: 64.7 → 54.7 s wall (1.18×),
+  852 → 623 core-seconds (1.37× fleet throughput), and the 5080 and the iGPU
+  disagree on one block in 176 million.
+- **The worker governor.** Each finished cell reports what it actually used —
+  CPU cores from process time, RAM, and its share of the one shared GPU — and
+  the pool is sized by three budgets, tightest wins: CPU at the existing target
+  percentage, RAM at 95% of free, GPU at 95% of the adapter. Advisory in the
+  log by default; the `worker_autoscale` toggle lets it act, stepping by at
+  most 2 workers and re-measuring before the next move. Exists because a 1:20
+  cell keeps ~1 core busy and a 1:1 cell ~12 — no stored `max_workers` is
+  right for both.
+
+### Changed
+- The fork's flush pool scales with each worker's thread budget
+  (`max(2, min(6, rayon_threads // 2))`) instead of a flat per-process
+  default — 8 workers used to spawn 48 flush threads into 24 cores.
+
+### Fixed
+- World meta no longer stamps `meld_version` "1.7.0". The report builder was
+  fixed in 1.9.4; the world-meta dict had the same hardcode.
+
 ## [1.9.4] - 2026-08-23
 
 Community bug reports from 22–23 August, root-caused against 19,018 cell logs and

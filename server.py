@@ -2047,7 +2047,7 @@ _META_SKIP_SETTINGS = {
 def _world_meta_dict() -> dict:
     data = PROJECT.load()
     return {
-        "meld_version": "1.7.0",
+        "meld_version": src.__version__,
         "saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "name": data.get("name", "Meld World"),
         "origin": data.get("origin", {}),                  # lat, lon, locked
