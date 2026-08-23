@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -145,6 +146,97 @@ def _point_in_rings(lon: float, lat: float, rings: list) -> bool:
                     inside = not inside
             j = i
     return inside
+
+
+def _seg_crosses_bbox(x1, y1, x2, y2, b: dict) -> bool:
+    """Does the segment (x1,y1)-(x2,y2) touch the axis-aligned box `b`? Liang-Barsky clip."""
+    dx, dy = x2 - x1, y2 - y1
+    t0, t1 = 0.0, 1.0
+    for p, q in ((-dx, x1 - b["west"]), (dx, b["east"] - x1),
+                 (-dy, y1 - b["south"]), (dy, b["north"] - y1)):
+        if p == 0:
+            if q < 0:
+                return False             # parallel to this edge and outside it
+            continue
+        r = q / p
+        if p < 0:
+            if r > t1:
+                return False
+            t0 = max(t0, r)
+        else:
+            if r < t0:
+                return False
+            t1 = min(t1, r)
+    return t0 <= t1
+
+
+def rings_intersect_bbox(rings: list, b: dict) -> bool:
+    """Does a polygon (list of rings) touch an axis-aligned lat/lon box?
+
+    Exact, not sampled. Sampling a box against a country polygon is unsafe in exactly the case
+    that matters here: a country reaching into the box as a strip narrower than the sample
+    spacing scores zero hits and gets dropped, and dropping an extract means a hole in somebody's
+    world. Three tests cover every way a simple polygon and a rectangle can meet - a vertex
+    inside the box, a box corner inside the polygon, or an edge crossing - and the caller is
+    expected to bbox-reject first, since this is per-vertex work.
+    """
+    if not rings or not b:
+        return True                      # unknown geometry: never exclude on a guess
+    for ring in rings:
+        for lon, lat in ring:
+            if b["west"] <= lon <= b["east"] and b["south"] <= lat <= b["north"]:
+                return True
+    for lon, lat in ((b["west"], b["south"]), (b["east"], b["south"]),
+                     (b["west"], b["north"]), (b["east"], b["north"])):
+        if _point_in_rings(lon, lat, rings):
+            return True
+    for ring in rings:
+        for i in range(len(ring)):
+            x1, y1 = ring[i]
+            x2, y2 = ring[(i + 1) % len(ring)]
+            if _seg_crosses_bbox(x1, y1, x2, y2, b):
+                return True
+    return False
+
+
+def rings_for_pbf_name(name: str, index: dict | None = None) -> list | None:
+    """Local .pbf filename -> that extract's border polygon, or None if we cannot place it.
+
+    None means "unknown", and every caller must treat unknown as "keep the file". Filenames in
+    the wild carry a date or `-latest` that the index id does not: germany-260814.osm.pbf and
+    germany-latest.osm.pbf are both the `germany` feature.
+    """
+    stem = str(name or "").strip()
+    if not stem:
+        return None
+    stem = Path(stem).name
+    for suffix in (".osm.pbf", ".pbf"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    stem = re.sub(r"-(?:latest|\d{6,8})$", "", stem)
+    if not stem:
+        return None
+    try:
+        idx = index if index is not None else fetch_index()
+    except Exception:  # noqa: BLE001
+        return None                      # offline / unreadable index: unknown, so keep the file
+    feats = idx.get("features", [])
+    by_id = {f["properties"]["id"]: f for f in feats
+             if (f.get("properties") or {}).get("id")}
+    f = by_id.get(stem)
+    if f is None:
+        # Fall back to matching on the filename the index itself would download as, so a
+        # renamed-but-recognisable file still resolves.
+        for cand in feats:
+            url = ((cand.get("properties") or {}).get("urls") or {}).get("pbf")
+            if url and pbf_name(url).startswith(stem):
+                f = cand
+                break
+    if f is None:
+        return None
+    rings = _feature_rings(f, by_id)
+    return rings or None
 
 
 def _rings_bbox(rings: list) -> dict:

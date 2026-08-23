@@ -4,6 +4,67 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.9.4] - 2026-08-23
+
+Community bug reports from 22–23 August, root-caused against 19,018 cell logs and
+2,428 region files rather than by reading the code alone. Full write-up, including
+what the measurements overturned, in `docs/TRIAGE-2026-08.md`.
+
+### Fixed
+- **RAM is reported the way Windows reports it.** A 2×32 GB kit read as "68.3 GB"
+  total and "2×34 GB" per stick, because byte counts were divided by 1e9 and
+  labelled GB while other places in the same file used 1024³. Every memory figure
+  goes through one helper now. Disk stays decimal on purpose — drive makers really
+  do sell decimal GB — and both stats say which convention they use.
+- **The two size estimates no longer disagree.** The BUILD panel passed elevation
+  to the size model and the run path did not, so the same project could be quoted
+  22.4 GB and 2.2 GB in the same second, from the same function.
+- **Build-time estimates are formatted as estimates again.** Two top-level
+  `fmtDur` declarations in one script block meant the export-progress formatter
+  silently won, rendering guesses as "13m 54s".
+- **The yellow selection box can be removed.** There was no reachable way to clear
+  it: the map's own trash is disabled, the Plan card's trash clears cells, and the
+  one code path that did clear it sits behind a button that is `display:none`.
+  There is now a labelled button, plus Esc and Delete, and a toggle to hide the
+  cell overlay so you can see the ground you are selecting.
+- **Quit no longer looks hung.** Quitting during a `.pbf` bake tore down the tray
+  icon and window immediately while the interpreter stayed blocked for the rest of
+  the bake — 346 s for one country file. People reasonably ended the task, and
+  *that* is what left bake workers orphaned. Quit now runs with the icon still up
+  and says what it is doing. The bake pool is also adopted into the job object it
+  had been escaping, shutdown is serialised, and the self-update successor is no
+  longer killed by the job of the instance that spawned it.
+- **One cell no longer bakes two countries.** `.pbf` files were selected by header
+  bounding box, and a country's bounding rectangle overlaps its neighbours' — so
+  rendering one cell in Germany streamed France as well, for about 13.7 minutes.
+  Selection now confirms against Geofabrik's real cutting polygon, with an exact
+  test rather than a sampled one, and anything unrecognisable is still read.
+- **Extending build height no longer inflates the estimate.** The size model
+  scaled linearly with declared height, but the generator emits sections from the
+  world floor up to the highest one holding content — so raising the ceiling costs
+  nothing. Matched real builds differing only in the ceiling are byte-identical.
+  The model is now additive in floor depth, with every constant measured.
+- **A calibrated project keeps responding to its settings.** Once a project had
+  built anything, the measured MB/region was returned unchanged for ever, so
+  turning caves or baked lighting on moved nothing.
+- **The benchmark report says which Meld actually ran.** `meld_version` was
+  hardcoded to `"1.7.0"` in the report builder, so every report on disk claims a
+  version six releases old — including the ones used to calibrate the estimates.
+  It reads `src.__version__` now.
+
+### Added
+- A warning before Generate when the settings mean the world will look empty —
+  buildings off, or a scale small enough that houses become single blocks. Neither
+  default changed; both are deliberate, they were just invisible until the build
+  finished.
+- Overture failures are counted per run and surfaced in the log and the report.
+  A cell that loses Overture still finishes, but the world is thinner and nothing
+  said so.
+- A warning below cell size 4, which discards most of the chunks it generates.
+- Run reports record the settings the size and time models key on, so finished
+  runs can calibrate them. None of the reports on disk recorded caves or the
+  height flags, which is why those constants stayed guesses.
+
 ## [1.9.3] - 2026-08-21
 
 Worlds can now be generated straight into Leaf's B_Linear region format, skipping

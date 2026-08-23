@@ -428,9 +428,9 @@
       <h2>System</h2>
       <div class="stat">CPU <span id="statCpu" style="float:right;color:var(--fg)">–</span></div>
       <div class="bar"><i id="statCpuBar" style="width:0%"></i></div>
-      <div class="stat" style="margin-top:7px">RAM <span id="statRam" style="float:right;color:var(--fg)">–</span></div>
+      <div class="stat" style="margin-top:7px" title="In use / installed, counted the way Windows counts it (GiB), so this matches Task Manager.">RAM <span id="statRam" style="float:right;color:var(--fg)">–</span></div>
       <div class="bar"><i id="statRamBar" style="width:0%"></i></div>
-      <div class="stat" style="margin-top:7px">Disk <span id="statDisk" style="float:right;color:var(--fg)">–</span></div>
+      <div class="stat" style="margin-top:7px" title="Free space in decimal GB, the way drive makers label capacity — so a 4 TB disk reads as ~4000 GB here and as 3.63 TB in Explorer. Both are the same disk.">Disk <span id="statDisk" style="float:right;color:var(--fg)">–</span></div>
       <div class="bar"><i id="statDiskBar" style="width:0%"></i></div>
       <div class="stat" id="statDiskWarn" style="display:none;color:var(--bad);margin-top:5px"></div>
       <canvas id="statHist" height="46" style="width:100%;height:46px;display:block;margin-top:9px;background:#1c1916;border:1px solid var(--line);border-radius:2px"></canvas>
@@ -540,13 +540,15 @@
         <span><i class="dot" style="background:var(--ok)"></i>merged</span>
         <span><i class="dot" style="background:var(--bad)"></i>failed</span>
       </div>
+      <label class="stat" style="display:flex;align-items:center;gap:6px;margin-top:4px" title="Uncheck to hide the coloured cell squares so you can see the map underneath while picking a new area. The plan itself is not changed.">
+        <input id="showCells" type="checkbox" checked style="width:auto;margin:0">Show cells on the map</label>
       <button id="btnPrepBuild" title="Runs the whole job for the current stage: bakes your local .pbf if set, pre-warms buildings if on, then generates only the cells that aren't merged yet, so it also resumes safely after a stop or crash. One button for prepare, build, and resume.">Generate world</button>
       <button id="btnGen" class="sec" style="display:none" title="Generates only the cells that aren't merged yet, safe to re-run after a stop or crash. Set cell size + workers in Settings below.">Generate &amp; merge</button>
       <button id="btnResume" class="sec" style="display:none" title="Re-queue every cell that isn't merged (failed, drift, interrupted). Crash / overnight recovery.">Resume unfinished</button>
       <button id="btnPlan" class="sec" title="Split the selection into cells at the Settings cell size. Change cell size in Settings, then Plan.">Plan or re-split</button>
       <div class="row" style="margin-top:6px">
         <button class="sec" id="btnStop">Stop</button>
-        <button class="sec xbtn" id="btnClear" title="Clear plan" style="width:auto;flex:0 0 auto;padding:8px 12px">🗑️</button>
+        <button class="sec xbtn" id="btnClear" title="Clear the planned cells. Keeps the yellow selection box and every merged cell — to remove the box, use Clear selection in the Selection card." style="width:auto;flex:0 0 auto;padding:8px 12px">🗑️</button>
       </div>
       <button class="sec" id="btnNewWorld" style="display:none" title="Start a fresh world. The current one stays saved in your worlds folder; the map clears for a new selection.">✦ New world</button>
     </div>
@@ -1148,6 +1150,7 @@
       </div>
       <button class="sec" id="btnGrow" style="margin-top:6px" title="Add a ring of cells just OUTSIDE the current plan, following its shape. Great after a country/polygon search to extend tiles past the border. Click again to grow another ring.">➕ Grow edge (+1 ring)</button>
       <div class="stat" id="selVal" style="margin-top:6px">Draw a rectangle/polygon on the map, or search.</div>
+      <button class="sec" id="btnClearSel" style="margin-top:6px" title="Remove the yellow selection box so you can draw somewhere else. Planned and merged cells stay exactly as they are. Shortcut: Esc or Delete.">🗑️ Clear selection</button>
     </div>
 
     <div class="card">
@@ -1618,6 +1621,11 @@ function ensureCells(grid) {
   _lastGrid = grid;
   // Explore mode: no cell preview, just the world border (and stats). Clicks become teleport lookups.
   if (exploreMode) { drawCombinedBorder(grid); updateStats(grid); return; }
+  // Same escape hatch, user-controlled: with hundreds of cells drawn the map is a wall of
+  // squares and it is genuinely hard to see the ground you are trying to select. Hiding them
+  // is presentation only -- the plan is untouched, the border and the stats still show.
+  const showCells = $('showCells');
+  if (showCells && !showCells.checked) { drawCombinedBorder(grid); updateStats(grid); return; }
   // Cell positions depend on origin + scale. When either changes, every existing
   // rectangle/marker is at a STALE map position (we only ever drew them once), so
   // wipe and rebuild, this is what caused leftover/white cells after re-centering.
@@ -1772,7 +1780,12 @@ function fmtTime(s) {
   const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
   return (h ? String(h).padStart(2, '0') + ':' : '') + String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0');
 }
-function fmtDur(s) {
+// Coarse duration for ESTIMATES ("14 min"): a predicted build time has no business
+// claiming to-the-second precision. Named apart from the export formatter at the bottom
+// of this file, which is fine-grained ("13m 54s") - both were called fmtDur, both are
+// top-level in the same script block, so the later declaration silently won and every
+// estimate has been rendering in the export style.
+function fmtEta(s) {
   s = Math.max(0, Math.round(s));
   if (s < 90) return s + 's';
   const m = Math.round(s / 60);
@@ -1790,10 +1803,14 @@ function estBuildSeconds(todoRegions, todoCells, workers, bake) {
   if (todoRegions <= 0) return 0;
   const w = Math.max(1, Math.min(64, workers || 4));
   const wf = Math.sqrt(12 / Math.max(6, Math.min(16, w)));   // mild: 8-16 workers ~ same
-  // An extended-height world writes proportionally more sections per region, and cave
-  // carving is extra work per column; the flat figure below was measured on a
-  // vanilla-height, cave-less build and read far too low for either.
-  const hf = Math.max(1, (projHeightBlocks || 384) / 384);
+  // Cave carving is real extra work per column. Extended height mostly is not: the fork emits
+  // sections from the world floor up to the highest one holding content, so lifting the ceiling
+  // adds no sections and no work. Two matched real builds differing only in the ceiling came out
+  // byte-identical at 24.00 sections/chunk. Scaling linearly with declared height inflated both
+  // the size and the time estimate roughly tenfold on mountainous 1:1 selections, which is what
+  // "clicking extend shoots it up to 22 GB" actually was. Only a lowered FLOOR costs anything,
+  // and the server now models that additively; here it is small enough to fold into the base.
+  const hf = 1;
   const cf = projCaves ? 1.35 : 1;
   const perRegion = 0.13 * wf * (bake ? 1 : 0.82) * hf * cf;  // ~0.19 s/region @ 8w, bake on
   const cellOverhead = (todoCells || 0) * 8 / Math.max(1, Math.min(16, w)); // fetch+prep per cell, shared across workers
@@ -1816,7 +1833,7 @@ function updateStats(grid) {
   const km = v => v >= 10 ? Math.round(v) : v.toFixed(1);
   const workers = parseInt($('workers').value) || 4;
   const bake = $('bakelight') ? $('bakelight').checked : true;
-  const timeStr = todo > 0 ? `~${fmtDur(estBuildSeconds(todo, todoCells, workers, bake))} @ ${workers}w` : 'all merged';
+  const timeStr = todo > 0 ? `~${fmtEta(estBuildSeconds(todo, todoCells, workers, bake))} @ ${workers}w` : 'all merged';
   $('estSize').textContent = '~' + fmtMB(regions * projMbPerRegion);
   $('estSub').innerHTML =
     `${keys.length} cells · ${regions.toLocaleString()} regions · ${wBlk.toLocaleString()}×${hBlk.toLocaleString()} blocks`
@@ -4600,6 +4617,29 @@ function ramWorkerWarn(n) {
     `Guide: 32 GB -> 16 workers, 64 GB -> 32, 128 GB -> 64.\n\nUse ${n} anyway?`;
 }
 
+// Two settings quietly decide whether the finished world has recognisable buildings in it,
+// and neither announces itself until the build is over. Both were reported on Discord as
+// "buildings don't work in Meld", by people comparing against standalone Arnis -- which
+// defaults the opposite way on both counts. Measured across every arnis run logged locally:
+// 14,165 of 19,018 carried --no-buildings. And at 1:10, a house is a 1x1 nub: the same city
+// measured 425.9 building blocks per chunk at 1:1 against 9.6 at 1:10, doors in 46.6% of
+// chunks against 0.26%. Warn at the one moment the user is committing hours of CPU to it.
+function contentWarn() {
+  const out = [];
+  if ($('buildings') && !$('buildings').checked) {
+    out.push(`Buildings are OFF, so this world will have roads, water, land cover and terrain ` +
+      `but no houses at all. Additional buildings (Overture) are off with them -- the fork ` +
+      `skips that fetch entirely when buildings are off.`);
+  }
+  const sc = Number($('scale') && $('scale').value);
+  if (Number.isFinite(sc) && sc > 0 && sc < 0.25) {
+    out.push(`Scale is 1:${Math.round(1 / sc)}. Buildings are still generated, but a typical ` +
+      `12x8 m house shrinks to about one block, so from the air the world reads as empty. ` +
+      `Measured: 9.6 building blocks per chunk at 1:10 against 425.9 at 1:1.`);
+  }
+  return out;
+}
+
 // Workers: clamp 1-64 and PERSIST on change (remembered across refreshes). Changing this
 // LIVE during a run resizes the pool: raising spawns workers immediately, lowering lets the
 // extra workers finish their current cell then stop (no mid-save kill). Warns above the RAM max.
@@ -5000,10 +5040,33 @@ syncStaggerStep();
 // Cell size lives only in Settings now. Clamp to 1-6 (bigger cells = much slower
 // saves) and PERSIST on change so the chosen size survives refreshes and New world.
 const clampSize = v => { const n = parseInt(v); return isNaN(n) ? '' : snapSize(n); };
-const saveSize = () => {
+// Every cell is generated with a seam halo around it and the surplus is thrown away after the
+// merge, so the useful fraction is size^2/(size+2)^2 -- 11% at size 1, 44% at 4, 56% at 6.
+// Measured across every arnis run logged locally: 343.6M chunks written, 128.9M kept. At size 1
+// that is 9,216 chunks generated and 9 region files written to keep 1,024 chunks in 1 file.
+// Nothing said so, and a 2-hour benchmark had been run at size 1 by hand.
+const cellEfficiency = n => (n * n) / ((n + 2) * (n + 2));
+const saveSize = async () => {
   const n = clampSize($('size').value);
   if (n === '') return;
+  const prev = parseInt($('size').dataset.prev || '') || null;
+  if (n < 4) {
+    const pct = Math.round(cellEfficiency(n) * 100);
+    const ok = await modalConfirm('Small cells waste most of the work',
+      `At cell size ${n}, each cell generates a ${n + 2}x${n + 2}-region area to keep ${n}x${n} of it: ` +
+      `about ${pct}% of the chunks built are discarded after the merge.\n\n` +
+      `Size 4 keeps 44% and size 6 keeps 56%, for the same world. Unless you are deliberately ` +
+      `testing one small area, 4 to 6 finishes the same job several times faster.\n\n` +
+      `Use ${n} anyway?`, `Use ${n}`, 'Use 4 instead');
+    if (!ok) {
+      $('size').value = 4;
+      $('size').dataset.prev = '4';
+      api('/api/settings', { job_size_regions: 4 });
+      return;
+    }
+  }
   $('size').value = n;
+  $('size').dataset.prev = String(n);
   api('/api/settings', { job_size_regions: n });
 };
 $('size').addEventListener('change', saveSize);
@@ -5101,6 +5164,11 @@ $('btnGen').onclick = async () => {
   // Warn (do not block) if workers exceed the safe ceiling for this machine's RAM.
   const wk = parseInt($('workers').value) || 4, m = ramWorkerMax();
   if (wk > m && !(await modalConfirm('Workers above your RAM', ramWorkerWarn(wk), 'Generate anyway'))) return;
+  // Warn (do not block) if the settings mean the finished world will look empty.
+  const cw = contentWarn();
+  if (cw.length && !(await modalConfirm(
+        cw.length > 1 ? 'This world will look empty' : 'Check before you build',
+        cw.join('\n\n') + '\n\nBuild anyway?', 'Build anyway', 'Change settings'))) return;
   let r = await api('/api/queue', body);
   // World guard: scale/origin differs from the existing world. Offer to force.
   if (!r.ok && r.drift) {
@@ -5806,6 +5874,60 @@ async function poll() {
 }
 // Run a poll RIGHT NOW (after an action that changes state), then resume the adaptive schedule.
 function kickPoll() { if (_pollTimer) { clearTimeout(_pollTimer); _pollTimer = null; } poll(); }
+
+// Remove the yellow selection box and forget it everywhere it is remembered.
+//
+// Asked on Discord as "how do i remove the yellow border", and the honest answer was that you
+// could not: the draw control is built with edit:false so there is no stock trash, the 🗑️ in
+// the Plan card clears planned CELLS and never touches the box, and the one code path that did
+// clear it sits behind #btnNewWorld -- which is display:none and whose handler reloads the page
+// before reaching it. The box outlived the project it belonged to.
+//
+// Three places remember a selection and all three have to forget together, or a refresh brings
+// it back: the Leaflet layer, localStorage, and project.json on the server (which already
+// accepts a null selection). Planned and merged cells are deliberately left alone -- this
+// clears the box you draw with, not the work you have done.
+function clearSelection() {
+  if (drawLayer) { try { drawnItems.removeLayer(drawLayer); } catch (_) {} drawLayer = null; }
+  if (polyLayer) { try { map.removeLayer(polyLayer); } catch (_) {} polyLayer = null; }
+  selection = null;
+  selectionPolygon = null;
+  _recenteredBbox = null;
+  _userDrew = false;   // let a future saved selection restore normally again
+  localStorage.removeItem('meld-selection');
+  api('/api/selection', { selection: null }).catch(() => {});
+  const v = $('selVal');
+  if (v) v.textContent = 'No area selected — drag a box on the map to start one.';
+}
+
+if ($('btnClearSel')) $('btnClearSel').onclick = () => clearSelection();
+
+// Hiding the cells has to remove the layers, not just skip the next draw, or the existing
+// squares sit there for ever. Same wipe setExplore does, then rebuild from the last grid.
+if ($('showCells')) $('showCells').onchange = () => {
+  for (const k of Object.keys(cellLayers)) { map.removeLayer(cellLayers[k]); delete cellLayers[k]; }
+  for (const k of Object.keys(cellMarkers)) { map.removeLayer(cellMarkers[k]); delete cellMarkers[k]; }
+  _cellStatus = {}; _drawQueue = []; _drawSet.clear();
+  if (_drawRaf) { cancelAnimationFrame(_drawRaf); _drawRaf = null; }
+  _overlaySig = '';   // force a full rebuild when they come back
+  ensureCells(_lastGrid);
+};
+
+// Esc unwinds one level at a time -- whichever painting mode is on first, then the box -- so it
+// never destroys something the user could not see was armed. Delete goes straight to the box.
+// Both bail inside a text field or a modal, where they already mean something else.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' && e.key !== 'Delete') return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+  if (document.querySelector('.modal-overlay')) return;   // the modal owns Escape while it is up
+  if (e.key === 'Escape') {
+    if (editCells) { setEditCells(false); return; }
+    if (retrySelect) { setRetrySelect(false); return; }
+  }
+  if (!selection && !drawLayer) return;
+  clearSelection();
+});
 
 // Persist + restore the selection rectangle across refresh.
 let _userDrew = false;   // user set a selection THIS session → a server restore must not clobber it

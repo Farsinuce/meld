@@ -242,13 +242,25 @@ def main(argv: list[str] | None = None) -> int:
                     except Exception:
                         pass
 
+        # More than one thing can decide Meld is finished - the tray Quit, run() returning,
+        # KeyboardInterrupt - and they can arrive together. Idempotent so the second one is
+        # silent instead of printing a second "shutting down…" over the first one's work.
+        _down = {"done": False}
+
         def shutdown() -> None:
+            if _down["done"]:
+                return
+            _down["done"] = True
             print("[meld] shutting down…")
             try:
                 server.stop_server()
             except Exception:
                 pass
-            childproc.kill_all()
+            # Hooks first (the .pbf bake pool stops itself here), then every child. Anything
+            # still alive after this is inside the job object, which closes with us.
+            n = childproc.kill_all()
+            if n:
+                print(f"[meld] stopped {n} running child process(es)")
 
         t = tray.Tray(url, on_quit=shutdown, token=token) if want_tray else None
         worker = threading.Thread(target=serve, name="meld-server", daemon=True)

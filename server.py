@@ -50,6 +50,7 @@ BASE_DIR = resource_dir()
 # the unpacked payload is a temp directory on some platforms, so it is the wrong answer for both.
 APP_DIR = exe_dir()
 
+import src
 from src import update
 from src import updater
 from src.project import Project, default_settings
@@ -248,6 +249,15 @@ _RUN = {"started": None, "ended": None, "total": 0, "done": 0, "failed": 0,
         "est_regions": 0, "est_mb": 0, "actual_mb": None, "phase": "idle"}
 MB_PER_REGION = 4   # rough estimate for the size report
 
+# Cells whose Overture (Additional buildings) fetch failed this run. The fork treats that as a
+# warning and finishes the cell without the extra footprints, which is the right call -- losing
+# ~19% of a city's buildings beats losing the cell. But it only says so on stdout, so the user
+# gets a quietly thinner world and no reason why. Overture retires old releases, and a run that
+# starts while the release pointer is stale fails EVERY cell together, all-or-nothing: that is
+# exactly what happened on 2026-08-16, when 16 of 16 cells lost their additional buildings.
+# Counted here, surfaced in the run report and in the log line at the end of the run.
+_OVERTURE_FAIL: set = set()
+
 # ── render queue: generate several projects one after another, unattended ──────
 # Each entry is a project slug; the driver switches to it, plans its cells from the
 # saved selection, generates, waits for the run (+ export) to finish, then advances.
@@ -263,8 +273,78 @@ _RQ = {"active": False, "stop": False, "pause": False, "slugs": [], "idx": 0, "c
 _MB_PER_REGION = 3.5
 _VANILLA_HEIGHT = 384          # -64..319, the height the base figure was measured at
 _CAVES_SIZE_FACTOR = 1.15      # carved air + ores + decoration widen the palette
-_BAKE_SIZE_FACTOR = 1.35       # SkyLight + BlockLight = 8 KB per section before compression
+# Measured, not assumed: one real 1024-chunk region (Brasov r.0.0) resimulated both ways came to
+# 7.344 MiB lit against 4.566 MiB unlit. The old 1.35 came from "8 KB of light per section before
+# compression", which is the wrong number to reason with - uniform light arrays are the MOST
+# compressible payload in a section, not the least (zlib of 2048 zero bytes is 24 bytes).
+_BAKE_SIZE_FACTOR = 1.61
+_VANILLA_MIN_Y = -64           # vanilla floor; sections below this are the ones that cost
+# Marginal cost of ONE extra all-air section, per region (x1024 chunks), measured on real .mca
+# over k=1..128 extra sections: 52.3 B/chunk baked, 3.9 B/chunk unbaked.
+_MB_PER_EXTRA_SECTION_BAKED = 52.3 * 1024 / (1024 * 1024)
+_MB_PER_EXTRA_SECTION_PLAIN = 3.9 * 1024 / (1024 * 1024)
+# Not every chunk reaches the declared floor. A matched pair of real arnis builds (underroom 96,
+# floor -160, i.e. 6 sections of headroom below vanilla) averaged 26.11 sections/chunk against
+# vanilla's 24.00 - so about a third of the theoretical maximum actually materialises.
+_EXTRA_SECTION_FILL = 2.11 / 6.0
+# An .mca cannot be smaller than its header plus one sector per chunk, whatever it holds:
+# 1024*4096 + 8192 bytes. 20.1% of the 2,396 real region files on this machine sit exactly here.
+_SECTOR_FLOOR_MB = (1024 * 4096 + 8192) / (1024 * 1024)
+# Mirrors elevation/postprocess.rs: MAX_Y 319, ABS_MAX_Y 2031, TERRAIN_HEIGHT_BUFFER 15. The fork
+# fits the terrain's relief into (effective_max_y - buffer - ground_level) blocks and COMPRESSES it
+# if it does not fit, which is what "if i dont use that i get flat mountains" is - a 3,700 m range
+# squeezed into ~360 blocks. Lifting the limit lets the same relief use ~2,072 instead.
+_ENGINE_MAX_Y = 319
+_ENGINE_ABS_MAX_Y = 2031
+_TERRAIN_HEIGHT_BUFFER = 15
+# Every column is filled from the world floor to its surface, so taller relief means each chunk
+# spans proportionally more sections. Those extra sections are mostly uniform fill and air, so they
+# cost about the same as any other extra section - the point is that there are a great many more of
+# them once the relief stops being compressed.
 _FMT_RATIO = {"none": 1.0, "zip": 1.85, "tarzst": 1.85, "linear": 4.8, "blinear": 4.3}
+
+
+def _terrain_relief_blocks(settings: dict, elevation: dict | None) -> float:
+    """Blocks of vertical relief the terrain will actually occupy, after the fork's compression.
+
+    This is the term that genuinely scales a world's size with build height, and it is NOT the
+    declared height: it is how much of the real elevation range survives the fit. Extending the
+    limit does not add air - it stops the mountains being flattened, and a mountain that is five
+    times taller is five times more terrain to store.
+    """
+    try:
+        ev = elevation or {}
+        span_m = float(ev.get("max_m") or 0) - float(ev.get("min_m") or 0)
+        if span_m <= 0:
+            return 0.0
+        scale = float(settings.get("scale", 1.0) or 1.0)
+        exag = max(0.1, float(settings.get("vertical_exaggeration", 1.0) or 1.0))
+        ideal = span_m * scale * exag
+        top = _ENGINE_ABS_MAX_Y if settings.get("disable_height_limit") else _ENGINE_MAX_Y
+        ground = float(settings.get("ground_level", -56) or -56)
+        available = float(top - _TERRAIN_HEIGHT_BUFFER - ground)
+        return max(0.0, min(ideal, available))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _world_floor_y(settings: dict, elevation: dict | None) -> int:
+    """Lowest Y this project will declare. Only the FLOOR costs bytes - see _mb_per_region."""
+    if not settings.get("disable_height_limit"):
+        return _VANILLA_MIN_Y
+    try:
+        lo = settings.get("world_min_y")
+        # "blank means fit it" — and an absent key is blank. `str(None)` is "None", which is
+        # emphatically not blank, so testing the string alone silently took the explicit branch
+        # and threw on int(None).
+        if lo is not None and str(lo).strip() != "":
+            return min(_VANILLA_MIN_Y, int(lo))
+        # Fitted: the floor sits underroom below the ground level the terrain is built from.
+        ground = float(settings.get("ground_level", -56) or -56)
+        under = float(settings.get("height_underroom", 16) or 0)
+        return int(min(_VANILLA_MIN_Y, ground - under))
+    except (TypeError, ValueError):
+        return _VANILLA_MIN_Y
 
 
 def _world_height_blocks(settings: dict, elevation: dict | None) -> int:
@@ -292,21 +372,71 @@ def _world_height_blocks(settings: dict, elevation: dict | None) -> int:
 
 def _mb_per_region(settings: dict | None = None, elevation: dict | None = None) -> float:
     """MB per built region for THIS project. A measurement from finished runs when there is
-    one (`mb_per_region_observed`), otherwise the model: taller worlds hold proportionally
-    more sections, caves and baked lighting each add their own bulk."""
+    one (`mb_per_region_observed`), otherwise the model below.
+
+    The model used to be linear in declared height: mb = base * height / 384. That is the wrong
+    variable. arnis emits sections from the world floor up to the highest section that actually
+    holds something (world_editor/java.rs), so RAISING THE CEILING COSTS NOTHING - a chunk whose
+    terrain tops out at Y=40 gets the same sections whether the ceiling is 319 or 2031. Only
+    lowering the floor adds any. Matched real builds prove it: vanilla and extended (ceiling
+    lifted) came out at 24.00 sections/chunk and 1,057 compressed bytes each, byte for byte,
+    while the linear model predicted extended would be 1.042x bigger. Only `deep` (floor lowered
+    to -160) actually grew, to 26.11 sections and 1,161 bytes.
+
+    That mismatch is what put "~22.4 GB" on the BUILD panel for a mountainous 1:1 selection and
+    sent someone to Discord asking why extending build height made their world 10x bigger. It
+    did not; the estimate did.
+
+    So: a content term, multiplied by the things that genuinely thicken every section, plus an
+    additive term for sections below the vanilla floor, floored at what an .mca cannot go under.
+    """
     s = settings if settings is not None else PROJECT.settings()
     try:
         seen = float(s.get("mb_per_region_observed") or 0)
     except (TypeError, ValueError):
         seen = 0.0
     if seen > 0:
+        # A measurement beats the model - but it was a measurement of ONE configuration. Returning
+        # it verbatim froze the estimate: once a project had built anything, turning caves or baked
+        # lighting on left the number exactly where it was, so the panel stopped responding to the
+        # settings and quietly went stale. Carry the observation across by the ratio the model
+        # says the change is worth. With no recorded baseline (projects calibrated before this
+        # existed) fall back to the old behaviour rather than inventing a ratio.
+        try:
+            then = float(s.get("mb_per_region_model_at_obs") or 0)
+        except (TypeError, ValueError):
+            then = 0.0
+        if then > 0:
+            now = _model_mb_per_region(s, elevation)
+            return max(_SECTOR_FLOOR_MB, seen * (now / then))
         return seen
-    mb = _MB_PER_REGION * (_world_height_blocks(s, elevation) / _VANILLA_HEIGHT)
+    return _model_mb_per_region(s, elevation)
+
+
+def _model_mb_per_region(s: dict, elevation: dict | None = None) -> float:
+    """The modelled cost, with no measurement folded in. Split out so a past measurement can be
+    scaled by how much the model thinks the current settings differ from the ones it was taken
+    under, rather than being returned unchanged for ever."""
+    baked = bool(s.get("bake_lighting"))
+    mb = _MB_PER_REGION
     if s.get("caves"):
         mb *= _CAVES_SIZE_FACTOR
-    if s.get("bake_lighting"):
+    if baked:
         mb *= _BAKE_SIZE_FACTOR
-    return mb
+    per = _MB_PER_EXTRA_SECTION_BAKED if baked else _MB_PER_EXTRA_SECTION_PLAIN
+    # Sections added by dropping the floor below vanilla.
+    below = max(0, _VANILLA_MIN_Y - _world_floor_y(s, elevation)) / 16.0
+    if below:
+        mb += below * _EXTRA_SECTION_FILL * per
+    # Sections added because the terrain's relief is taller. The base figure was measured on
+    # worlds whose relief already fitted the vanilla range, so only the EXCESS over that counts.
+    relief = _terrain_relief_blocks(s, elevation)
+    vanilla_relief = float(_ENGINE_MAX_Y - _TERRAIN_HEIGHT_BUFFER
+                           - float(s.get("ground_level", -56) or -56))
+    excess = max(0.0, relief - vanilla_relief) / 16.0
+    if excess:
+        mb += excess * per
+    return max(mb, _SECTOR_FLOOR_MB)
 
 
 def _record_size_calibration() -> None:
@@ -324,7 +454,13 @@ def _record_size_calibration() -> None:
             except (IndexError, ValueError):
                 continue
         if mb and regions >= 4:      # a couple of cells is not a sample worth trusting
-            PROJECT.update_settings({"mb_per_region_observed": round(mb / regions, 3)})
+            # Record what the MODEL said for the settings in force when this was measured, so
+            # the observation can be carried across a settings change instead of freezing.
+            PROJECT.update_settings({
+                "mb_per_region_observed": round(mb / regions, 3),
+                "mb_per_region_model_at_obs": round(_model_mb_per_region(PROJECT.settings(),
+                                                                        PROJECT.elevation()), 4),
+            })
     except Exception:  # noqa: BLE001
         pass
 
@@ -372,7 +508,7 @@ def _machine_specs() -> dict:
     """Total RAM (GB) + logical cores, for adapting the server's RAM/CPU knobs."""
     try:
         import psutil
-        ram = round(psutil.virtual_memory().total / (1024 ** 3))
+        ram = round(psutil.virtual_memory().total / _GIB)
     except Exception:  # noqa: BLE001
         ram = 8
     return {"ram_gb": ram, "cores": os.cpu_count() or 4}
@@ -676,10 +812,16 @@ def _write_run_report() -> None:
                    "ram_speed": hw.get("ram_speed"), "ram_modules": hw.get("ram_modules"),
                    "drive_type": hw.get("drive_type")}
         rep = runreport.build_report(
-            world_name=name, meld_version="1.7.0", run=run, timing=timing,
+            world_name=name, meld_version=src.__version__, run=run, timing=timing,
             timeline=timeline, grid=PROJECT.load_grid(), prefetch_timings=pf_timings,
             settings=PROJECT.settings(), actual_mb=run.get("actual_mb"),
-            max_workers=POOL.max_workers, machine=machine)
+            max_workers=POOL.max_workers, machine=machine,
+            overture_failed_cells=len(_OVERTURE_FAIL))
+        if _OVERTURE_FAIL:
+            n = len(_OVERTURE_FAIL)
+            log(f"[Overture] additional buildings unavailable for {n} cell(s) - those cells were "
+                f"built from OpenStreetMap alone. Overture retires old data releases; if this was "
+                f"every cell, the release pointer was stale rather than your world being wrong.")
         paths = runreport.write_report(master_world_path(), rep)
         if paths.get("html"):
             _LAST_REPORT.update(html=str(paths["html"]), json=str(paths.get("json") or ""),
@@ -1915,9 +2057,23 @@ def _world_meta_dict() -> dict:
     }
 
 
-def write_world_meta(world_path=None) -> Path | None:
+_META_WRITE = {"at": 0.0}
+_META_MIN_INTERVAL_S = 20.0
+
+
+def write_world_meta(world_path=None, *, throttle: bool = False) -> Path | None:
     """Write meld-world.json into the saved world folder (origin + elevation lock +
-    seed + settings). Best-effort: never raises into the merge/save path."""
+    seed + settings). Best-effort: never raises into the merge/save path.
+
+    `throttle` is for the per-cell merge path. The sidecar records the world's provenance, not
+    its progress: re-serialising the whole project dict after every single merge meant doing it
+    13,092 times on one benchmark run, inside the merge critical section, to write a file whose
+    contents barely change. Throttled it is written at most every 20 s during a run, and the
+    end-of-run call is unthrottled so the finished world always has a current one.
+    """
+    if throttle and (time.time() - _META_WRITE["at"]) < _META_MIN_INTERVAL_S:
+        return None
+    _META_WRITE["at"] = time.time()
     try:
         wp = Path(world_path) if world_path else master_world_path(create=True)
         wp.mkdir(parents=True, exist_ok=True)
@@ -2130,6 +2286,8 @@ def _runner(job: dict, state: dict) -> bool:
                 pass
         state["message"] = text[:140]
         state["progress"] = parse_progress(text, state.get("progress", 0))
+        if "Failed to fetch Overture Maps data" in text:
+            _OVERTURE_FAIL.add(cell_tag)   # set.add is atomic; no lock needed
         # Unfiltered, into the console ring: this is the generator's own voice, which the
         # surfacing filter below deliberately throws most of away.
         arnis_console(f"[{cell_tag}] {text}")
@@ -2328,7 +2486,7 @@ def _runner(job: dict, state: dict) -> bool:
             pass
     # Refresh the world's reproducibility sidecar so origin + elevation + seed +
     # settings stay current with the latest merged state.
-    write_world_meta(Path(master))
+    write_world_meta(Path(master), throttle=True)
     state.update(progress=100, message="Merged.")
     return True
 
@@ -3922,8 +4080,10 @@ def _submit_cells(cells: list[dict], osm_files: dict | None = None,
         # OSM/terrain warm-up too (the prefetch DOES cost wall time). Otherwise start now.
         started = _RUN.get("started") if (keep_started and _RUN.get("started")) else time.time()
         _RUN.update(started=started, ended=None, total=len(cells), done=0, failed=0,
-                    est_regions=est_regions, est_mb=est_regions * _mb_per_region(),
+                    est_regions=est_regions,
+                    est_mb=est_regions * _mb_per_region(PROJECT.settings(), PROJECT.elevation()),
                     actual_mb=None, phase="generating")
+    _OVERTURE_FAIL.clear()   # per-run counter, see the note next to it
     # Hours of work with no input events looks exactly like an idle machine to every power
     # policy there is. Released when the run ends (or is stopped) in _on_cell_complete.
     power.acquire()
@@ -3976,8 +4136,10 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
     est_regions = sum(int(c["cell_key"].split(",")[2]) ** 2 for c in cells)
     with _RUN_LOCK:
         _RUN.update(started=time.time(), ended=None, total=len(cells), done=0, failed=0,
-                    est_regions=est_regions, est_mb=est_regions * _mb_per_region(),
+                    est_regions=est_regions,
+                    est_mb=est_regions * _mb_per_region(PROJECT.settings(), PROJECT.elevation()),
                     actual_mb=None, phase="prefetch")
+    _OVERTURE_FAIL.clear()   # per-run counter, see the note next to it
     with _PREFETCH_LOCK:
         _PREFETCH.update(active=True, done=False, chunks=[], started=time.time(), phase="osm",
                          terrain={"done": 0, "total": 0, "ok": 0, "failed": 0},
@@ -5181,8 +5343,8 @@ def _sys_stats() -> dict:
             vm = psutil.virtual_memory()
             # "in use" the way Task Manager shows it = total - available (NOT psutil's .used, which
             # on Windows excludes the modified/standby cache and reads low vs the task manager number).
-            out["ram_used_gb"] = round((vm.total - vm.available) / 1e9, 1)
-            out["ram_total_gb"] = round(vm.total / 1e9, 1)
+            out["ram_used_gb"] = _gib(vm.total - vm.available)
+            out["ram_total_gb"] = _gib(vm.total)
             out["ram_pct"] = round(vm.percent)
         else:
             out["ram_total_gb"] = _total_ram_gb()
@@ -5250,7 +5412,7 @@ def _hw_specs(drive_hint: str | None = None) -> dict:
             if typs:
                 out["ram_kind"] = typs[0]
             if caps:
-                gb = [round(c / 1e9) for c in caps]
+                gb = [round(c / _GIB) for c in caps]   # a 32 GiB stick is sold as "32 GB"
                 out["ram_modules"] = (f"{len(gb)}×{gb[0]} GB" if len(set(gb)) == 1
                                       else " + ".join(f"{g} GB" for g in gb))
             media = (data.get("media") or "").strip()
@@ -5263,6 +5425,23 @@ def _hw_specs(drive_hint: str | None = None) -> dict:
             pass
     _HW_CACHE[key] = out
     return out
+
+
+_GIB = 1024 ** 3
+
+
+def _gib(n_bytes, nd: int = 1) -> float | None:
+    """Bytes -> GiB, which is what every memory figure Meld shows must use.
+
+    Windows labels GiB as "GB" everywhere the user can check us against: Task Manager,
+    msinfo32, Explorer, and the sticker on the DIMM. Dividing by 1e9 instead made 64 GiB
+    of installed RAM read as "68.3 GB" and a 32 GiB stick read as "2x34 GB" - reported on
+    Discord by two people on different machines. Disk stays decimal (see _sys_stats):
+    drive vendors really do sell decimal GB, so a 4 TB disk showing 3999.7 is correct.
+    """
+    if not n_bytes:
+        return None
+    return round(n_bytes / _GIB, nd)
 
 
 # ── recommend settings wizard: probe this PC + the save disk ────────────────────
@@ -5278,11 +5457,11 @@ def _total_ram_gb() -> float | None:
                         ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
         m = _MEMSTAT(); m.dwLength = ctypes.sizeof(_MEMSTAT)
         if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
-            return round(m.ullTotalPhys / (1024 ** 3), 1)
+            return _gib(m.ullTotalPhys)
     except Exception:
         pass
     try:  # POSIX
-        return round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024 ** 3), 1)
+        return _gib(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"))
     except Exception:
         return None
 

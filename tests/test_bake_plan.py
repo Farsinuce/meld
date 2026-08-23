@@ -194,3 +194,78 @@ def test_live_bytes_come_from_the_open_writers(tmp_path):
     finally:
         w.abort()
     assert op._writers_bytes({}) == 0
+
+
+# ── the cutting polygon, not the bounding rectangle ────────────────────────────
+# Reported on Discord: generating ONE cell in Germany logged
+#   [OSM pack] baking 1 z11 tile(s) from 2 .pbf file(s)…
+#   [OSM bake] parallel: 2 .pbf across 2 process(es), then merge seams…
+# and then spent ~13.7 minutes streaming two whole countries for a single tile.
+# Nothing was wrong with the tile: France's bounding RECTANGLE reaches well into
+# Germany even though its border does not, and the selector only ever compared
+# rectangles. These tests pin the two halves of the fix: reject on the real
+# polygon, and never reject anything we cannot place.
+
+# A deliberately L-shaped country whose bbox covers ground its border does not.
+_L_SHAPE = [[(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (4.0, 4.0), (4.0, 10.0), (0.0, 10.0), (0.0, 0.0)]]
+
+# Inside the bbox (x>4, y>4) but outside the polygon - the France-over-Germany case.
+_NOTCH = {"south": 6.0, "west": 6.0, "north": 8.0, "east": 8.0}
+# Squarely inside the polygon's lower arm.
+_INSIDE = {"south": 1.0, "west": 1.0, "north": 2.0, "east": 2.0}
+# Straddling the border: must be kept, or the world gets a hole at the seam.
+_STRADDLE = {"south": 3.0, "west": 3.0, "north": 5.0, "east": 5.0}
+# A sliver that enters the polygon far too thinly for a 5x5 sample grid to notice.
+_SLIVER = {"south": 3.999, "west": 3.999, "north": 12.0, "east": 12.0}
+
+
+def test_polygon_rejects_a_box_inside_the_bbox_but_outside_the_border():
+    from src import geofabrik as gf
+    assert gf.rings_intersect_bbox(_L_SHAPE, _NOTCH) is False
+
+
+@pytest.mark.parametrize("box", [_INSIDE, _STRADDLE, _SLIVER])
+def test_polygon_keeps_anything_it_actually_touches(box):
+    from src import geofabrik as gf
+    assert gf.rings_intersect_bbox(_L_SHAPE, box) is True
+
+
+def test_unknown_geometry_is_never_excluded():
+    """Unknown must mean keep. Excluding data on a guess is a hole in somebody's world."""
+    from src import geofabrik as gf
+    assert gf.rings_intersect_bbox([], _NOTCH) is True
+    assert gf.rings_for_pbf_name("") is None
+    assert gf.rings_for_pbf_name("hand-cut-extract-of-mine.osm.pbf") is None
+
+
+def test_pbf_covers_keeps_a_file_it_cannot_place(monkeypatch):
+    """An unrecognised filename whose header bbox overlaps is still read."""
+    monkeypatch.setattr("src.geofabrik.rings_for_pbf_name", lambda *a, **k: None)
+    entry = _f("my-own-cut.osm.pbf", 1.0, {"south": 0, "west": 0, "north": 10, "east": 10})
+    assert op.pbf_covers(entry, _NOTCH) is True
+
+
+def test_pbf_covers_drops_a_neighbour_whose_bbox_only_looks_close(monkeypatch):
+    monkeypatch.setattr("src.geofabrik.rings_for_pbf_name", lambda *a, **k: _L_SHAPE)
+    entry = _f("lshapia-260814.osm.pbf", 5.0, {"south": 0, "west": 0, "north": 10, "east": 10})
+    assert op.pbf_covers(entry, _NOTCH) is False       # bbox says maybe, border says no
+    assert op.pbf_covers(entry, _INSIDE) is True
+    assert op.pbf_covers(entry, _STRADDLE) is True
+
+
+def test_bbox_rejection_still_short_circuits(monkeypatch):
+    """The cheap rectangle test must run first: it clears most of a folder for free."""
+    called = []
+    monkeypatch.setattr("src.geofabrik.rings_for_pbf_name",
+                        lambda *a, **k: called.append(1) or _L_SHAPE)
+    far = _f("elsewhere-260814.osm.pbf", 5.0, {"south": 50, "west": 50, "north": 60, "east": 60})
+    assert op.pbf_covers(far, _NOTCH) is False
+    assert called == []                                # never reached the polygon
+
+
+def test_filename_variants_resolve_to_the_same_extract(monkeypatch):
+    idx = {"features": [{"properties": {"id": "germany", "urls": {"pbf": "x/germany-latest.osm.pbf"}},
+                         "geometry": {"type": "Polygon", "coordinates": _L_SHAPE}}]}
+    from src import geofabrik as gf
+    for name in ("germany-260814.osm.pbf", "germany-latest.osm.pbf", "germany.osm.pbf"):
+        assert gf.rings_for_pbf_name(name, index=idx), name

@@ -362,7 +362,11 @@ def launch_staged(path: str) -> dict:
             kw["creationflags"] = 0x00000008 | 0x00000200        # DETACHED_PROCESS | NEW_GROUP
         else:
             kw["start_new_session"] = True
-        subprocess.Popen([str(target)], **kw)
+        # The successor has to survive us: we exit seconds from now, and the normal spawn
+        # policy would have put it inside this instance's kill-on-close job.
+        from . import childproc
+        with childproc.no_adopt():
+            subprocess.Popen([str(target)], **kw)
     except Exception as ex:                                       # noqa: BLE001
         return {"ok": False, "error": f"could not start {target}: {ex}"}
     return {"ok": True, "started": str(target)}

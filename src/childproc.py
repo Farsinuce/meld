@@ -41,6 +41,10 @@ _no_window = False
 _job = None                       # Windows HANDLE to the job object
 _lock = threading.Lock()
 _children: list = []              # live Popen handles, newest last
+_shutdown_hooks: list = []        # run first by kill_all, before anything is signalled
+_shutdown_lock = threading.Lock() # serialises kill_all; a second caller waits, not races
+_killed: dict = {"done": False, "n": 0}
+_adopt_warned = False             # the job-adoption warning is worth saying once, not per child
 
 
 def has_console() -> bool:
@@ -115,9 +119,91 @@ def _adopt(proc) -> None:
         import ctypes
         handle = getattr(proc, "_handle", None)
         if handle:
-            ctypes.windll.kernel32.AssignProcessToJobObject(_job, int(handle))
+            if not ctypes.windll.kernel32.AssignProcessToJobObject(_job, int(handle)):
+                _warn_adopt_failed(ctypes.GetLastError())
     except Exception:
         pass
+
+
+def _warn_adopt_failed(err: int) -> None:
+    """Say it once when the kernel refuses to adopt a child.
+
+    Silence here is expensive: if adoption is failing, the whole KILL_ON_JOB_CLOSE guarantee
+    is not in force and a crash leaves `arnis` processes pinning every core with no window to
+    close them from -- but everything still LOOKS fine, so nobody investigates. One line the
+    first time is enough to tell that story apart from a clean shutdown in a user's log.
+    """
+    global _adopt_warned
+    if _adopt_warned:
+        return
+    _adopt_warned = True
+    print(f"Warning: could not put a child process under Meld's job object (error {err}). "
+          f"Children started from here may survive if Meld is killed rather than quit.")
+
+
+def adopt_pid(pid: int) -> bool:
+    """Adopt a process we did not start through Popen, by pid.
+
+    `multiprocessing` on Windows spawns through _winapi.CreateProcess directly, so the
+    Popen wrapper below never sees the .pbf bake pool and those workers -- the largest
+    memory consumers in the app -- stayed outside the job. Measured: their in_our_job was
+    False while a Popen child's was True, and they survived a kill_all that killed the
+    Popen child. This is the door in for them.
+    """
+    if os.name != "nt" or _job is None or not pid:
+        return False
+    try:
+        import ctypes
+        PROCESS_SET_QUOTA, PROCESS_TERMINATE = 0x0100, 0x0001
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, False, int(pid))
+        if not h:
+            return False
+        try:
+            if not k32.AssignProcessToJobObject(_job, h):
+                _warn_adopt_failed(ctypes.GetLastError())
+                return False
+            return True
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        return False
+
+
+_exempt = threading.local()
+
+
+class no_adopt:
+    """Spawn something that must OUTLIVE this process, inside this block.
+
+    Exactly one caller needs it: the self-update hand-off, which starts the new build and then
+    exits. Going through the normal path put that new build inside the dying instance's
+    KILL_ON_JOB_CLOSE job, so Windows killed the successor moments after it started - measured
+    at about a second, against ten for an unadopted control. DETACHED_PROCESS does not save it;
+    neither does CREATE_BREAKAWAY_FROM_JOB, which fails with ERROR_ACCESS_DENIED unless the job
+    was created with BREAKAWAY_OK, and ours deliberately is not. Skipping adoption is the fix.
+
+    Thread-local, so a concurrent spawn on another thread is still adopted normally.
+    """
+
+    def __enter__(self):
+        _exempt.on = True
+        return self
+
+    def __exit__(self, *exc):
+        _exempt.on = False
+        return False
+
+
+def register_shutdown_hook(fn) -> None:
+    """Run `fn` at the very start of kill_all, before any child is signalled.
+
+    For subsystems that need to stop themselves cleanly rather than be shot: the .pbf bake
+    pool wants its stop sentinel written and its executor torn down, because merely killing
+    its workers leaves the parent blocked in ProcessPoolExecutor's own exit handler.
+    """
+    with _lock:
+        _shutdown_hooks.append(fn)
 
 
 def _basename(args) -> str:
@@ -149,7 +235,7 @@ def install(*, no_window: bool | None = None) -> None:
             # Own process group => one killpg reaches the child and anything it started.
             kw.setdefault("start_new_session", True)
         original_init(self, args, *a, **kw)
-        if opener:
+        if opener or getattr(_exempt, "on", False):
             return
         if os.name == "nt":
             _adopt(self)
@@ -167,7 +253,33 @@ def kill_all(timeout: float = 5.0) -> int:
 
     Order matters: ask politely first so `arnis` can close the region files it has open (a
     half-written .mca is a corrupt chunk, not a lost one), then insist.
+
+    Serialised and idempotent. Meld has more than one way to quit -- the tray, the window
+    closing, a signal, atexit -- and they can arrive together; the log showed "[meld] shutting
+    down..." printed twice. Unserialised, the second caller found the child list already
+    emptied by the first, reported "stopped 0" and let the process continue exiting while the
+    first was still waiting on terminate. Now the second caller blocks until the first is
+    genuinely finished and gets the same answer back.
     """
+    with _shutdown_lock:
+        if _killed["done"]:
+            return _killed["n"]
+        n = _kill_all_locked(timeout)
+        _killed.update(done=True, n=n)
+        return n
+
+
+def _kill_all_locked(timeout: float) -> int:
+    with _lock:
+        hooks = list(_shutdown_hooks)
+        _shutdown_hooks.clear()
+    for fn in hooks:
+        # A subsystem that stops itself cleanly beats one we shoot: hooks run before any
+        # child is signalled, and one that throws must not strand the rest.
+        try:
+            fn()
+        except Exception:
+            pass
     with _lock:
         procs = [p for p in _children if p.poll() is None]
         _children.clear()
