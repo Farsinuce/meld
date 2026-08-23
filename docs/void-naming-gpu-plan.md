@@ -70,6 +70,50 @@ reproducibility gate that GPU floating point cannot satisfy. It does, however,
 make the CPU fixes in this section considerably more valuable than the uncached
 numbers suggested, since they attack the ~75% that is genuinely compute.
 
+### Measured CPU core-seconds - and why scale decides the whole question
+
+Modelling per-phase parallelism was guesswork. Measuring the process's actual
+`TotalProcessorTime` is not, and it turns the earlier estimate on its head. Both
+runs use cached tiles, terrain and baked lighting:
+
+| cell | wall | **CPU core-seconds** | avg cores busy | cave share of CPU |
+|---|---|---|---|---|
+| ~1 region, scale 0.05 (a Romania 1:20 cell) | 4.05 s | **4.13** | **1.02** | **11%** |
+| 224 regions, scale 1.0 | 116.7 s | **904.5** | **7.75** | **52%** |
+
+Cave cost scales with *volume*, so at 1:1 the relief is ~20x taller, the carve band
+deepens, and caves go from a rounding error to **half the CPU in the program**.
+Any statement about GPU value is meaningless without saying which scale it refers
+to. The earlier "caves are 1.4% of wall clock" line was measured on a small
+uncached cell and does not describe a 1:1 build.
+
+**What a free GPU cave kernel would actually buy:**
+
+| | per cell | fleet throughput |
+|---|---|---|
+| 1:20 cell (Romania today) | ~1.09x | ~1.1x |
+| **1:1 cell** | **~1.85x** (116.7 -> 63.2 s) | **~2.10x** (904.5 -> 431.2 core-s) |
+
+So the honest answer to "would offloading free cores for more workers": **yes, and
+at 1:1 it is worth about 2x.** It is not worth chasing at 1:20.
+
+**But the GPU has to keep up, and precision decides that.** Cave demand is 473
+CPU core-seconds per 1:1 cell:
+
+- **f64 (bit-exact):** the 5080 Laptop does 384 GFLOPS f64 against the CPU's ~76
+  GFLOPS achieved, so ~5x - 95 GPU-seconds per cell against a 63 s wall. **One GPU
+  cannot sustain even a single worker.** f64 is not merely slow here, it is
+  infeasible.
+- **f32:** ~50-100x, so 5-9 GPU-seconds per cell. Three concurrent workers put the
+  GPU at 22-45% utilisation. **Feasible** - and non-reproducible, so the golden
+  gate forks.
+
+**And the free lever first.** At 1:20 each cell averages **1.02 cores**, so the box
+saturates at roughly **23 workers**, not 7 and not 4. The stored default of 4 is
+leaving most of the machine idle on exactly the project being rendered today - a
+bigger win than the GPU, available by changing a number (subject to RAM headroom,
+which Recommend already models).
+
 ### Why it gets worse, not better, in a real Meld run
 
 **Correction to an intuition worth stating, because it is the crux.** It is tempting
