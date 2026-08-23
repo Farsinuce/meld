@@ -1897,7 +1897,7 @@ WORLD_META_NAME = "meld-world.json"
 # settings (where it saves, how many workers, prefetch/timeout) are intentionally
 # excluded so loading a world's meta never hijacks the current machine's setup.
 _META_SKIP_SETTINGS = {
-    "master_world_dir", "max_workers", "prefetch_enabled", "prefetch_margin_m",
+    "gpu_accel", "master_world_dir", "max_workers", "prefetch_enabled", "prefetch_margin_m",
     "timeout", "overpass_url", "prune_cell_after_merge",
 }
 
@@ -3505,6 +3505,9 @@ def api_settings():
         patch["map_item"] = bool(patch["map_item"])
     # Native region container. Only "blinear" turns it on; anything else means Anvil, so a
     # stale or malformed value can never silently produce a server-only world.
+    if patch.get("gpu_accel") is not None:
+        ga = str(patch["gpu_accel"]).strip().lower()
+        patch["gpu_accel"] = ga if ga in ("off", "auto", "dgpu", "igpu") else "off"
     if patch.get("worker_autoscale") is not None:
         patch["worker_autoscale"] = bool(patch["worker_autoscale"])
     if patch.get("native_region_format") is not None:

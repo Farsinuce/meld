@@ -252,6 +252,12 @@ def default_settings() -> dict:
         "native_region_format": "mca",
         # zstd level for native blinear buckets, 1..22. Leaf's own default is 6.
         "native_blinear_level": 6,
+        # EXPERIMENTAL. Evaluate cave density on a GPU: off | auto | dgpu | igpu.
+        # Worth it on 1:1 renders with caves (measured 1.18x wall / 1.37x fleet on an
+        # RTX 5080; the iGPU is nearly as good). Does nothing measurable at 1:20.
+        # Approximate by contract: f32 shifts the odd cave wall vs the CPU (measured
+        # 0.0005% of blocks). Falls back to CPU when no adapter matches.
+        "gpu_accel": "off",
         # One-click Leaf server profile — the Server setup card remembers its choices
         # per project (see server.py /api/mcserver/*). server_dir "" = the default
         # <project>/server/leaf-<version>. Reachability is NOT stored here: staging

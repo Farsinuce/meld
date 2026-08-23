@@ -1045,6 +1045,14 @@
         <option value="mca">Anvil .mca (default, universal)</option>
         <option value="blinear">B_Linear .b_linear (Leaf 1.21.11+ / 26.x only, no conversion pass)</option>
       </select>
+      <label style="margin-top:8px;font-weight:bold">GPU acceleration (caves)
+        <span class="i" title="Evaluate the cave density field on a GPU. Worth it on 1:1 renders with caves: measured 1.18x faster per cell and 1.37x fleet throughput on an RTX 5080, with the iGPU nearly as good. Does nothing at 1:20 scale. Approximate by contract - f32 shifts the odd cave wall versus the CPU (measured 0.0005% of blocks; two GPU vendors differed by 1 block in 176 million). Falls back to the CPU when no adapter matches. This choice stays on THIS machine; it never travels with the world settings.">i</span></label>
+      <select id="gpuAccel" style="width:100%">
+        <option value="off">Off (CPU, exact - default)</option>
+        <option value="auto">Auto (best adapter, prefers dedicated)</option>
+        <option value="dgpu">Dedicated GPU only</option>
+        <option value="igpu">Integrated GPU only</option>
+      </select>
       <div id="nativeBlinearRow" style="margin-top:6px;display:none">
         <label style="font-weight:normal">zstd level
           <span class="i" title="Compression level for each 64-chunk bucket, 1-22. Leaf's own default is 6. Higher shrinks the world a little more and costs CPU during the save.">i</span></label>
@@ -2245,6 +2253,7 @@ async function refreshState() {
   if ($('exportFmt')) $('exportFmt').value = st.export_format || 'none';
   if ($('nativeRegionFmt')) $('nativeRegionFmt').value = st.native_region_format || 'mca';
   if ($('nativeBlinearLevel')) $('nativeBlinearLevel').value = st.native_blinear_level || 6;
+  if ($('gpuAccel')) $('gpuAccel').value = st.gpu_accel || 'off';
   updateNativeRegionUI();
   if ($('exportWorkers') && document.activeElement !== $('exportWorkers'))
     $('exportWorkers').value = (parseInt(st.export_compression_workers) > 0) ? st.export_compression_workers : '';
@@ -4669,6 +4678,9 @@ function updateNativeRegionUI() {
 $('nativeRegionFmt') && $('nativeRegionFmt').addEventListener('change', () => {
   api('/api/settings', { native_region_format: $('nativeRegionFmt').value });
   updateNativeRegionUI();
+});
+$('gpuAccel') && $('gpuAccel').addEventListener('change', () => {
+  api('/api/settings', { gpu_accel: $('gpuAccel').value });
 });
 $('nativeBlinearLevel') && $('nativeBlinearLevel').addEventListener('change', () => {
   api('/api/settings', { native_blinear_level: parseInt($('nativeBlinearLevel').value, 10) || 6 });

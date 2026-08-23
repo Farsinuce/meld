@@ -270,6 +270,12 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
         cmd += ["--region-format", "blinear",
                 "--blinear-level", str(int(settings.get("native_blinear_level", 6)))]
 
+    # EXPERIMENTAL GPU cave density. Host-specific (never travels in world metadata):
+    # the same project on another machine may have no such adapter.
+    gpu = str(settings.get("gpu_accel", "off") or "off").lower()
+    if gpu in ("auto", "dgpu", "igpu"):
+        cmd += ["--gpu", gpu]
+
     # Pre-fetched OSM. Two shapes, both Overpass-free at generation time:
     #   • a DIRECTORY → Meld's stable z11 grid cache. Arnis computes this cell's covering
     #     tiles from --bbox and reads them straight from the dir (--osm-tile-dir), so there
