@@ -224,6 +224,15 @@ _RUN = {"started": None, "ended": None, "total": 0, "done": 0, "failed": 0,
         "est_regions": 0, "est_mb": 0, "actual_mb": None, "phase": "idle"}
 MB_PER_REGION = 4   # rough estimate for the size report
 
+# Cells whose Overture (Additional buildings) fetch failed this run. The fork treats that as a
+# warning and finishes the cell without the extra footprints, which is the right call -- losing
+# ~19% of a city's buildings beats losing the cell. But it only says so on stdout, so the user
+# gets a quietly thinner world and no reason why. Overture retires old releases, and a run that
+# starts while the release pointer is stale fails EVERY cell together, all-or-nothing: that is
+# exactly what happened on 2026-08-16, when 16 of 16 cells lost their additional buildings.
+# Counted here, surfaced in the run report and in the log line at the end of the run.
+_OVERTURE_FAIL: set = set()
+
 # ── render queue: generate several projects one after another, unattended ──────
 # Each entry is a project slug; the driver switches to it, plans its cells from the
 # saved selection, generates, waits for the run (+ export) to finish, then advances.
@@ -655,7 +664,13 @@ def _write_run_report() -> None:
             world_name=name, meld_version="1.7.0", run=run, timing=timing,
             timeline=timeline, grid=PROJECT.load_grid(), prefetch_timings=pf_timings,
             settings=PROJECT.settings(), actual_mb=run.get("actual_mb"),
-            max_workers=POOL.max_workers, machine=machine)
+            max_workers=POOL.max_workers, machine=machine,
+            overture_failed_cells=len(_OVERTURE_FAIL))
+        if _OVERTURE_FAIL:
+            n = len(_OVERTURE_FAIL)
+            log(f"[Overture] additional buildings unavailable for {n} cell(s) - those cells were "
+                f"built from OpenStreetMap alone. Overture retires old data releases; if this was "
+                f"every cell, the release pointer was stale rather than your world being wrong.")
         paths = runreport.write_report(master_world_path(), rep)
         if paths.get("html"):
             _LAST_REPORT.update(html=str(paths["html"]), json=str(paths.get("json") or ""),
@@ -2096,6 +2111,8 @@ def _runner(job: dict, state: dict) -> bool:
             return
         state["message"] = text[:140]
         state["progress"] = parse_progress(text, state.get("progress", 0))
+        if "Failed to fetch Overture Maps data" in text:
+            _OVERTURE_FAIL.add(cell_tag)   # set.add is atomic; no lock needed
         # Unfiltered, into the console ring: this is the generator's own voice, which the
         # surfacing filter below deliberately throws most of away.
         arnis_console(f"[{cell_tag}] {text}")
@@ -3834,6 +3851,7 @@ def _submit_cells(cells: list[dict], osm_files: dict | None = None,
                     est_regions=est_regions,
                     est_mb=est_regions * _mb_per_region(PROJECT.settings(), PROJECT.elevation()),
                     actual_mb=None, phase="generating")
+    _OVERTURE_FAIL.clear()   # per-run counter, see the note next to it
     # Hours of work with no input events looks exactly like an idle machine to every power
     # policy there is. Released when the run ends (or is stopped) in _on_cell_complete.
     power.acquire()
@@ -3889,6 +3907,7 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
                     est_regions=est_regions,
                     est_mb=est_regions * _mb_per_region(PROJECT.settings(), PROJECT.elevation()),
                     actual_mb=None, phase="prefetch")
+    _OVERTURE_FAIL.clear()   # per-run counter, see the note next to it
     with _PREFETCH_LOCK:
         _PREFETCH.update(active=True, done=False, chunks=[], started=time.time(), phase="osm",
                          terrain={"done": 0, "total": 0, "ok": 0, "failed": 0},

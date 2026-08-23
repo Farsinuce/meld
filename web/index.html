@@ -4596,6 +4596,29 @@ function ramWorkerWarn(n) {
     `Guide: 32 GB -> 16 workers, 64 GB -> 32, 128 GB -> 64.\n\nUse ${n} anyway?`;
 }
 
+// Two settings quietly decide whether the finished world has recognisable buildings in it,
+// and neither announces itself until the build is over. Both were reported on Discord as
+// "buildings don't work in Meld", by people comparing against standalone Arnis -- which
+// defaults the opposite way on both counts. Measured across every arnis run logged locally:
+// 14,165 of 19,018 carried --no-buildings. And at 1:10, a house is a 1x1 nub: the same city
+// measured 425.9 building blocks per chunk at 1:1 against 9.6 at 1:10, doors in 46.6% of
+// chunks against 0.26%. Warn at the one moment the user is committing hours of CPU to it.
+function contentWarn() {
+  const out = [];
+  if ($('buildings') && !$('buildings').checked) {
+    out.push(`Buildings are OFF, so this world will have roads, water, land cover and terrain ` +
+      `but no houses at all. Additional buildings (Overture) are off with them -- the fork ` +
+      `skips that fetch entirely when buildings are off.`);
+  }
+  const sc = Number($('scale') && $('scale').value);
+  if (Number.isFinite(sc) && sc > 0 && sc < 0.25) {
+    out.push(`Scale is 1:${Math.round(1 / sc)}. Buildings are still generated, but a typical ` +
+      `12x8 m house shrinks to about one block, so from the air the world reads as empty. ` +
+      `Measured: 9.6 building blocks per chunk at 1:10 against 425.9 at 1:1.`);
+  }
+  return out;
+}
+
 // Workers: clamp 1-64 and PERSIST on change (remembered across refreshes). Changing this
 // LIVE during a run resizes the pool: raising spawns workers immediately, lowering lets the
 // extra workers finish their current cell then stop (no mid-save kill). Warns above the RAM max.
@@ -5094,6 +5117,11 @@ $('btnGen').onclick = async () => {
   // Warn (do not block) if workers exceed the safe ceiling for this machine's RAM.
   const wk = parseInt($('workers').value) || 4, m = ramWorkerMax();
   if (wk > m && !(await modalConfirm('Workers above your RAM', ramWorkerWarn(wk), 'Generate anyway'))) return;
+  // Warn (do not block) if the settings mean the finished world will look empty.
+  const cw = contentWarn();
+  if (cw.length && !(await modalConfirm(
+        cw.length > 1 ? 'This world will look empty' : 'Check before you build',
+        cw.join('\n\n') + '\n\nBuild anyway?', 'Build anyway', 'Change settings'))) return;
   let r = await api('/api/queue', body);
   // World guard: scale/origin differs from the existing world. Offer to force.
   if (!r.ok && r.drift) {

@@ -78,7 +78,8 @@ def _icon_data_uri() -> str:
 
 def build_report(*, world_name: str, meld_version: str, run: dict, timing: dict,
                  timeline: list, grid: dict, prefetch_timings: dict, settings: dict,
-                 actual_mb, max_workers: int, machine: dict | None = None) -> dict:
+                 actual_mb, max_workers: int, machine: dict | None = None,
+                 overture_failed_cells: int = 0) -> dict:
     grid = grid or {}
     timing = timing or {}
     timeline = list(timeline or [])
@@ -134,6 +135,11 @@ def build_report(*, world_name: str, meld_version: str, run: dict, timing: dict,
             "cores": machine.get("cores"),
             "scale": settings.get("scale"), "cell_size": settings.get("job_size_regions"),
             "buildings": bool(settings.get("buildings")),
+            # Cells that finished WITHOUT their Overture footprints. Not a failure -- the world
+            # is complete, just missing the ~19% of buildings OSM does not map -- but it is the
+            # difference between "Meld is broken" and "one upstream fetch was down", so it has
+            # to be visible somewhere the user actually looks.
+            "overture_failed_cells": int(overture_failed_cells or 0),
         },
         "machine": machine,
         "config": {k: settings.get(k) for k in cfg_keys},
