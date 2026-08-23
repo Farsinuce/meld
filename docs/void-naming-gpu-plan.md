@@ -155,13 +155,20 @@ parallelism or remove waiting.
    `seal_floating_fluid_region` (`caves/mod.rs`) contain **zero rayon** - 382-446 ms
    on **1 of 24 cores**. rayon over Z-strips: ~17% off `generation_time`, in an
    afternoon.
-3. **Raise `max_workers`.** Stored default is **4**; saturation is ~30. Going
-   4 -> 11 is **~2.75x fleet throughput for free** - more than the theoretical
-   ceiling of GPU-ing the only defensible kernel. It is a number, not code.
-4. **Kill `osm_fetch`.** 16.7-21.2 s of a 20-24 s cell. `--osm-tile-dir` and
-   `--offline` already exist and Meld already has a .pbf bake pipeline. Fully
-   overlapping or eliminating the fetch is worth **~7x end-to-end** - roughly 6x
-   better than an infinite GPU applied to every compute phase combined.
+3. **Tune `max_workers` to the OSM regime.** Stored default is **4**
+   (`src/project.py:145`). The right number depends entirely on whether OSM is
+   cached, which nobody had separated: a cell costs ~16 CPU core-seconds either
+   way, but its wall clock is ~20 s uncached and ~4.5 s cached. So per-worker
+   demand is ~0.8 cores uncached (saturation ~30 workers) but **~3.6 cores
+   cached (saturation ~7)**. Raising workers is a big free win on the uncached
+   path and *oversubscribes* on the cached one. It is a number, not code - but it
+   has to follow the regime.
+4. **Keep `osm_fetch` cached.** Measured on one bbox: **13192 ms live Overpass
+   vs 1157 ms from the tile cache**, moving the cell from ~15.9 s to ~4.5 s -
+   **~3.5x end-to-end**, still more than an infinite GPU applied to every compute
+   phase combined. Meld already does this via its grid cache and prewarm, so the
+   work is making sure it is always used (and finishing the .pbf offline bake),
+   not building it.
 
 Also worth noting from the profile: `tile::DEFAULT_TILE_SIZE = 512` gives a cell
 of this size only **4 tiles**, so element placement runs 4-wide on a 24-core box.
@@ -208,6 +215,36 @@ outside the generated area:
 The same test shows the other half of the job: arnis's own region still contains a
 grass plane and bedrock (260,300 grass_block, 13,104 bedrock), because the base
 chunk pass and ground generation still run.
+
+### Singleplayer, and the exact preset to write
+
+Vanilla's own `the_void` preset, read out of the 1.21.10 client jar
+(`data/minecraft/worldgen/flat_level_generator_preset/the_void.json`):
+
+```json
+{ "biome": "minecraft:the_void", "features": true, "lakes": false,
+  "layers": [ { "block": "minecraft:air", "height": 1 } ],
+  "structure_overrides": [] }
+```
+
+**Write exactly that**, not an empty `layers` list: it is the form Minecraft ships,
+it avoids the empty-NBT-list serialisation risk, and `minecraft:the_void` is what
+stops mobs spawning in the emptiness and gives the right sky. Re-tested end to end
+in this exact form: 808 server chunks, **0 non-air blocks**, biome read back as
+`minecraft:the_void`.
+
+Singleplayer uses the same `minecraft:flat` codec and the same `level.dat`, so the
+mechanism carries over - but two things are singleplayer-specific:
+
+- **Spawn.** The template ships `SpawnY = -61`; in a void world the player spawns
+  in mid-air and falls out of the world. Spawn MUST be moved onto generated
+  content (`set_spawn_in_level_dat`, `world_utils.rs`).
+- **Versions.** `level.dat` is stamped 4189 (1.21.4) while chunks are stamped 4440.
+  That mismatch is deliberate and pre-existing, and the client's DataFixer handles
+  level.dat, but it is worth a load test on the actual client version.
+
+Verified on a server, not clicked through in the vanilla client (that needs a
+launcher session), so: **~90% confident** singleplayer behaves identically.
 
 ### What to build
 
