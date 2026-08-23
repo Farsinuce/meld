@@ -265,7 +265,42 @@ _EXTRA_SECTION_FILL = 2.11 / 6.0
 # An .mca cannot be smaller than its header plus one sector per chunk, whatever it holds:
 # 1024*4096 + 8192 bytes. 20.1% of the 2,396 real region files on this machine sit exactly here.
 _SECTOR_FLOOR_MB = (1024 * 4096 + 8192) / (1024 * 1024)
+# Mirrors elevation/postprocess.rs: MAX_Y 319, ABS_MAX_Y 2031, TERRAIN_HEIGHT_BUFFER 15. The fork
+# fits the terrain's relief into (effective_max_y - buffer - ground_level) blocks and COMPRESSES it
+# if it does not fit, which is what "if i dont use that i get flat mountains" is - a 3,700 m range
+# squeezed into ~360 blocks. Lifting the limit lets the same relief use ~2,072 instead.
+_ENGINE_MAX_Y = 319
+_ENGINE_ABS_MAX_Y = 2031
+_TERRAIN_HEIGHT_BUFFER = 15
+# Every column is filled from the world floor to its surface, so taller relief means each chunk
+# spans proportionally more sections. Those extra sections are mostly uniform fill and air, so they
+# cost about the same as any other extra section - the point is that there are a great many more of
+# them once the relief stops being compressed.
 _FMT_RATIO = {"none": 1.0, "zip": 1.85, "tarzst": 1.85, "linear": 4.8, "blinear": 4.3}
+
+
+def _terrain_relief_blocks(settings: dict, elevation: dict | None) -> float:
+    """Blocks of vertical relief the terrain will actually occupy, after the fork's compression.
+
+    This is the term that genuinely scales a world's size with build height, and it is NOT the
+    declared height: it is how much of the real elevation range survives the fit. Extending the
+    limit does not add air - it stops the mountains being flattened, and a mountain that is five
+    times taller is five times more terrain to store.
+    """
+    try:
+        ev = elevation or {}
+        span_m = float(ev.get("max_m") or 0) - float(ev.get("min_m") or 0)
+        if span_m <= 0:
+            return 0.0
+        scale = float(settings.get("scale", 1.0) or 1.0)
+        exag = max(0.1, float(settings.get("vertical_exaggeration", 1.0) or 1.0))
+        ideal = span_m * scale * exag
+        top = _ENGINE_ABS_MAX_Y if settings.get("disable_height_limit") else _ENGINE_MAX_Y
+        ground = float(settings.get("ground_level", -56) or -56)
+        available = float(top - _TERRAIN_HEIGHT_BUFFER - ground)
+        return max(0.0, min(ideal, available))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _world_floor_y(settings: dict, elevation: dict | None) -> int:
@@ -363,10 +398,19 @@ def _model_mb_per_region(s: dict, elevation: dict | None = None) -> float:
         mb *= _CAVES_SIZE_FACTOR
     if baked:
         mb *= _BAKE_SIZE_FACTOR
+    per = _MB_PER_EXTRA_SECTION_BAKED if baked else _MB_PER_EXTRA_SECTION_PLAIN
+    # Sections added by dropping the floor below vanilla.
     below = max(0, _VANILLA_MIN_Y - _world_floor_y(s, elevation)) / 16.0
     if below:
-        per = _MB_PER_EXTRA_SECTION_BAKED if baked else _MB_PER_EXTRA_SECTION_PLAIN
         mb += below * _EXTRA_SECTION_FILL * per
+    # Sections added because the terrain's relief is taller. The base figure was measured on
+    # worlds whose relief already fitted the vanilla range, so only the EXCESS over that counts.
+    relief = _terrain_relief_blocks(s, elevation)
+    vanilla_relief = float(_ENGINE_MAX_Y - _TERRAIN_HEIGHT_BUFFER
+                           - float(s.get("ground_level", -56) or -56))
+    excess = max(0.0, relief - vanilla_relief) / 16.0
+    if excess:
+        mb += excess * per
     return max(mb, _SECTOR_FLOOR_MB)
 
 
