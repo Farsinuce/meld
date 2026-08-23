@@ -281,8 +281,29 @@ class Tray:
                 proc.terminate()          # the HUD is ours; it goes when we go
             except Exception:
                 pass
+        # Quit runs HERE, synchronously, with the icon still on screen saying so.
+        #
+        # It used to be fired on a daemon thread and the icon torn down immediately, which read
+        # as "Meld quit" while the process was in fact still going: a .pbf bake holds the
+        # interpreter in ProcessPoolExecutor's exit handler for the whole remaining bake (346 s
+        # for one Romania file in the log), all of it with no window, no icon and gigabytes
+        # still resident. People reasonably concluded it had hung and ended the task - and THAT
+        # is what left the bake workers orphaned, because a hard kill runs none of our cleanup.
+        # Keeping the icon up until teardown really is done costs a few seconds of honesty and
+        # removes the reason to reach for Task Manager.
+        #
+        # It also de-duplicates the shutdown: meld_app calls it again once run() returns, which
+        # is why the log printed "[meld] shutting down…" twice. That call is now a no-op.
+        if self._icon is not None:
+            try:
+                self._icon.title = "Meld — stopping, please wait…"
+            except Exception:
+                pass
         if self._on_quit:
-            threading.Thread(target=self._on_quit, daemon=True).start()
+            try:
+                self._on_quit()
+            except Exception as ex:
+                print(f"[tray] shutdown raised: {ex}")
         if self._icon is not None:
             self._icon.stop()
 

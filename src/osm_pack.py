@@ -797,6 +797,60 @@ def _scan_pbf_into(pbf: str, target_list, out_dir: str, z: int, stop_path):
     return {"written": written, "elements": elems, "bytes": bts, "ok": True, "stopped": False}
 
 
+def _guard_bake_pool(ex, stop_path) -> None:
+    """Make the bake pool answerable to Meld's shutdown. Best-effort, never fatal.
+
+    Two holes, both measured. The workers are spawned by `multiprocessing`, which on Windows
+    calls CreateProcess directly instead of going through subprocess.Popen - so childproc's
+    process-wide policy never saw them and they sat outside the job object while holding the
+    largest allocations in the app (a country's node index, gigabytes each). And a quit while a
+    bake is running blocks in ProcessPoolExecutor's own exit handler for the whole remaining
+    bake - 346 s for one Romania .pbf in the log - during which the tray icon and window are
+    already gone. The app looks hung, the user ends the task, and only THEN are the workers
+    truly orphaned. So the hang is what manufactures the orphans, and both need closing.
+
+    Workers are created lazily, so poll briefly for them rather than assuming they exist yet.
+    """
+    from . import childproc
+
+    seen: set = set()
+
+    def _adopt_new() -> int:
+        try:
+            pids = [p.pid for p in list(ex._processes.values()) if p and p.pid]
+        except Exception:  # noqa: BLE001
+            return 0
+        for pid in pids:
+            if pid not in seen:
+                seen.add(pid)
+                childproc.adopt_pid(pid)
+        return len(pids)
+
+    def _poll() -> None:
+        for _ in range(40):          # ~4 s: workers appear as tasks are handed out
+            if _adopt_new() >= 1 and len(seen) >= getattr(ex, "_max_workers", 1):
+                return
+            time.sleep(0.1)
+
+    threading.Thread(target=_poll, daemon=True, name="bake-adopt").start()
+
+    def _on_shutdown() -> None:
+        # Sentinel first: the workers poll it and unwind on their own, which lets a
+        # half-written tile be discarded rather than left for the next run to trust.
+        try:
+            open(stop_path, "w").close()
+        except Exception:  # noqa: BLE001
+            pass
+        # Then stop waiting for them. Without this the interpreter blocks here on exit.
+        try:
+            ex.shutdown(wait=False, cancel_futures=True)
+        except Exception:  # noqa: BLE001
+            pass
+        _adopt_new()   # last chance for a worker that started since the poll gave up
+
+    childproc.register_shutdown_hook(_on_shutdown)
+
+
 def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None,
                         force=False, workers=None) -> dict:
     """Parallel front end to the bake: skip non-overlapping .pbf, bake each overlapping one in its OWN
@@ -864,6 +918,7 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
         with _cf.ProcessPoolExecutor(max_workers=cap, mp_context=ctx) as ex:
             futs = {ex.submit(_scan_pbf_into, pbf, target_list, str(tmp_root / f"p{i}"), z, stop_path):
                     (i, pbf) for i, pbf in enumerate(pbfs)}
+            _guard_bake_pool(ex, stop_path)
             done_p = 0
             done_tiles = 0
             done_bytes = 0
