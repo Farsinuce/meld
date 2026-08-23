@@ -71,6 +71,7 @@ from src import runreport
 from src.merge import (merge_cell_into_master, strip_buffer_regions,
                         MeldCoordinateDriftError, MeldCollisionError)
 from src.survey import survey_elevation
+from src.occupancy import OccupancyTracker, damped_step, suggest_workers
 from src.workers import WorkerPool
 from src import export as exportmod
 from src import appguard as appguard_mod
@@ -185,6 +186,29 @@ def _write_active_slug(slug: str) -> None:
 ACTIVE_SLUG = _read_active_slug()
 PROJECT = Project(PROJECTS_ROOT / ACTIVE_SLUG)
 POOL = WorkerPool(max_workers=PROJECT.settings().get("max_workers", 4))
+# How many cores a cell ACTUALLY keeps busy, measured per finished cell. Meld's thread
+# budget assumes a cell can use the threads it is handed; a 1:20 cell measures ~1.02
+# cores against ~5 allocated, so the box runs near 17% while the UI reads 90%. See
+# src/occupancy.py.
+OCCUPANCY = OccupancyTracker()
+
+
+def _peak_rss_mb_estimate() -> float | None:
+    """Roughly what one cell needs at its peak, for the RAM half of worker sizing.
+
+    Measured on a 24-core box, cached tiles, terrain + baked lighting: a ~1 region
+    cell at scale 0.05 peaks ~1.2 GB, and a 224-region 1:1 cell peaks ~4.15 GB under
+    eviction (~10.1 GB without it, which is why eviction exists). Scale is the thing
+    that separates them, so it is what this keys on. Returns None when the setting is
+    unreadable, which makes the RAM clamp a no-op rather than a wrong guess.
+    """
+    try:
+        scale = float(PROJECT.settings().get("scale", 1.0) or 1.0)
+    except Exception:  # noqa: BLE001
+        return None
+    # Between the two measured points; above 1:4 or so a cell is 1:1-shaped.
+    return 4150.0 if scale > 0.25 else 1200.0
+
 POOL.stagger_seconds = (float(PROJECT.settings().get("cpu_stagger_seconds", 2) or 0)
                         if PROJECT.settings().get("cpu_stagger_enabled", True) else 0.0)
 POOL.stagger_adaptive = bool(PROJECT.settings().get("cpu_stagger_adaptive", True))
@@ -2143,7 +2167,44 @@ def _runner(job: dict, state: dict) -> bool:
 
     # cwd = APP_DIR, not the bundled payload: arnis resolves cave-pack/ and tree-packs/ relative
     # to where it lives, and a temp _MEIPASS cwd would also strand any relative path it writes.
-    ok = run_arnis(cmd, cwd=str(APP_DIR), on_line=on_line, on_proc=on_proc, env=child_env)
+    def on_stats(cpu_seconds: float, wall_seconds: float) -> None:
+        """Record what this cell actually used, and say what the pool should be.
+
+        Advisory by default: `worker_autoscale` opts in to acting on it. The step is
+        damped because occupancy was measured UNDER the current worker count -- adding
+        workers adds contention -- so each move is re-measured before the next.
+        """
+        OCCUPANCY.record(cpu_seconds, wall_seconds)
+        per_cell = OCCUPANCY.cores_per_cell
+        if per_cell is None:
+            return
+        live = PROJECT.settings()
+        pct = float(live.get("cpu_target_pct", 90) or 90)
+        cores = os.cpu_count() or 4
+        try:
+            import psutil
+            avail_mb = psutil.virtual_memory().available / (1024 * 1024)
+        except Exception:  # noqa: BLE001
+            avail_mb = None
+        ram_per_cell = _peak_rss_mb_estimate()
+        target = suggest_workers(per_cell, cores, pct,
+                                 ram_available_mb=avail_mb,
+                                 ram_per_cell_mb=ram_per_cell)
+        if target == POOL.max_workers:
+            return
+        if live.get("worker_autoscale"):
+            stepped = damped_step(POOL.max_workers, target)
+            if stepped != POOL.max_workers:
+                log(f"  [Workers] {per_cell:.2f} cores/cell measured -> "
+                    f"{POOL.max_workers} to {stepped} workers (target {target})")
+                POOL.set_max_workers(stepped)
+        else:
+            log(f"  [Workers] {per_cell:.2f} cores/cell measured -> "
+                f"{target} workers would fit (currently {POOL.max_workers}; "
+                f"enable worker_autoscale to apply)")
+
+    ok = run_arnis(cmd, cwd=str(APP_DIR), on_line=on_line, on_proc=on_proc,
+                   env=child_env, on_stats=on_stats)
     if cell_log_fp is not None:
         try:
             cell_log_fp.write(f"\n=== arnis exit ok={ok} ===\n")
@@ -3444,6 +3505,8 @@ def api_settings():
         patch["map_item"] = bool(patch["map_item"])
     # Native region container. Only "blinear" turns it on; anything else means Anvil, so a
     # stale or malformed value can never silently produce a server-only world.
+    if patch.get("worker_autoscale") is not None:
+        patch["worker_autoscale"] = bool(patch["worker_autoscale"])
     if patch.get("native_region_format") is not None:
         nrf = str(patch["native_region_format"]).strip().lower()
         patch["native_region_format"] = "blinear" if nrf == "blinear" else "mca"

@@ -27,6 +27,8 @@ import math
 import os
 import re
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from .coords import recommended_elev_zoom, ELEV_ZOOM_MIN, ELEV_ZOOM_MAX
@@ -634,7 +636,7 @@ def parse_progress(line: str, current: int) -> int:
 
 
 def run_arnis(cmd: list[str], cwd: str, on_line=None, on_proc=None,
-              env: dict | None = None) -> bool:
+              env: dict | None = None, on_stats=None) -> bool:
     """Run Arnis, streaming stdout line-by-line to on_line(text). Returns ok.
 
     on_proc(proc) is called once with the Popen handle so the caller can publish
@@ -658,6 +660,31 @@ def run_arnis(cmd: list[str], cwd: str, on_line=None, on_proc=None,
         text=True, encoding="utf-8", errors="replace",
         bufsize=1, cwd=str(cwd), env=child_env,
     )
+    # Sample the child's CPU time so the worker governor can size the pool from what a
+    # cell ACTUALLY uses rather than from the threads it was handed. A thread is needed
+    # because cpu_times() has to be read while the process is alive, and this function
+    # is busy blocking on stdout. Entirely best-effort: if psutil is missing or the
+    # process exits between calls, no sample is recorded and nothing else changes.
+    _cpu = {"seconds": 0.0}
+    _stats_stop = threading.Event()
+    _stats_thread = None
+    if on_stats is not None:
+        def _sample_cpu() -> None:
+            try:
+                import psutil
+                p = psutil.Process(proc.pid)
+                while not _stats_stop.wait(0.5):
+                    try:
+                        t = p.cpu_times()
+                        _cpu["seconds"] = float(t.user + t.system)
+                    except Exception:  # noqa: BLE001 - process gone; keep the last read
+                        return
+            except Exception:  # noqa: BLE001 - psutil unavailable
+                return
+        _stats_thread = threading.Thread(target=_sample_cpu, daemon=True,
+                                         name="arnis-cpu-sample")
+        _stats_thread.start()
+    _started = time.time()
     if on_proc:
         on_proc(proc)
     try:
@@ -667,6 +694,14 @@ def run_arnis(cmd: list[str], cwd: str, on_line=None, on_proc=None,
             if on_line:
                 on_line(raw.rstrip())
         proc.wait()
+        _stats_stop.set()
+        if on_stats is not None:
+            if _stats_thread is not None:
+                _stats_thread.join(timeout=1.0)
+            try:
+                on_stats(_cpu["seconds"], max(0.0, time.time() - _started))
+            except Exception:  # noqa: BLE001 - telemetry must never fail a cell
+                pass
         if proc.returncode != 0 and on_line:
             # The exit code is the one fact every failure has. Without it a cell that clap
             # rejected, that panicked, and that was killed all looked identical downstream.

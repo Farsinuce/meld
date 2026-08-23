@@ -148,6 +148,12 @@ def default_settings() -> dict:
         # 95 (slider max) = use nearly the whole machine; lower leaves headroom for the OS +
         # disk-save phase. >100 (not reachable from the slider) oversubscribes. Default 90.
         "cpu_target_pct": 90,
+        # Resize the worker pool from MEASURED per-cell CPU occupancy instead of the
+        # stored max_workers. Off by default: it is advisory until switched on, and the
+        # log says what it would do. A 1:20 cell measures ~1.02 cores while being handed
+        # ~5 threads, so the honest worker count there is ~21, not 4 - but changing the
+        # pool mid-run is the user's call. See src/occupancy.py.
+        "worker_autoscale": False,
         # Threads each worker (cell) uses for its in-process tile parallelism. The actual count is
         # max(this, floor(cores*pct/100) / max_workers). Keep workers x this AT OR UNDER your cores;
         # over the core count slows the build. On 24 cores, 12 workers x 2 and 8 x 3 perform about
