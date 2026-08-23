@@ -1,0 +1,112 @@
+==============================================================
+ MELD + ARNIS GPU/VOID/NAMING MERGE RUN
+==============================================================
+The second merge of 2026-08-23. The triage agent merged first
+(MERGE-RUN-2026-08-23.log, fork 3.1.3 / meld 1.9.4); this run lands
+the feature branch `feat/gpu-void-naming` on top of it, in both
+repos, local commits only. The explicit brief: prove the merge does
+not overlay or remove the triage work, and prove the version does
+not jump back to 3.1.2 / 1.9.3.
+
+--- PRE-MERGE STATE ---
+fork  main=a4784cc0 (3.1.3)  branch=fcc72006 (+15 commits)
+meld  main=700adc2  (1.9.4)  branch=b564549  (+10 commits)
+Both remotes untouched throughout: origin/main is 12 (fork) and 24
+(meld) commits behind local main by design.
+
+--- CONFLICT PREDICTION (git merge-tree --write-tree, before touching anything) ---
+fork  conflicts: 0    merged-tree version: 3.1.3
+meld  conflicts: 0    merged-tree version: 1.9.4
+The version-regression question answered itself structurally: the
+merge base IS the 3.1.2/1.9.3 release, and the branch never edited a
+version line after it — so the merge could only keep main's newer
+numbers. Verified by reading Cargo.toml / tauri.conf.json /
+src/__init__.py out of the predicted merge trees before merging.
+
+--- PRE-MERGE TESTS (on the branch tips) ---
+fork:  425 passed; 0 failed; 6 ignored  (8.25s)
+meld:  248 passed                       (105.62s)
+
+--- MERGE: main INTO BRANCH ---
+fork: f0587bfa  7 files auto-merged (ort), 0 conflicts
+      overlap was real, not absent: main and the branch both edited
+      src/world_editor/java.rs (their block-light omission vs our
+      flush pool) and src/gui.rs — the hunks were disjoint.
+meld: 36d24f1   15 files auto-merged (ort), 0 conflicts
+      shared files: server.py, src/project.py, web/index.html.
+
+--- POST-MERGE TESTS ---
+fork:  426 passed; 0 failed; 6 ignored — the union of both suites,
+       none lost (main's merge had added one test).
+meld:  257 passed — 230 on their main + 27 the branch added.
+clippy --all-targets: 0 warnings.
+
+--- BOTH AGENTS' WORK PRESENT (symbol inventory on the merged tree) ---
+theirs: block-light omission (16 refs in world_editor/java.rs)
+        Overture release-pointer recovery (overture.rs)
+        Bake-lighting checkbox actually wired (gui.rs)
+        adopt_pid / no_adopt (childproc.py:176) / register_shutdown_hook
+        polygon .pbf selection (26 refs, geofabrik.py + osm_pack.py)
+        size model, RAM units, run-report version stamp
+ours:   caves/gpu.rs + gpu_carve.wgsl, --gpu/--void/--level-name
+        flush_thread_count pool (world_editor/mod.rs)
+        occupancy.suggest_workers + OccupancyTracker
+        server.py gpu_accel/worker_autoscale/ARNIS_FLUSH_THREADS (10 refs)
+        arnis_cmd.py --gpu pass-through + on_stats sampler (5 refs)
+
+--- RELEASE COMMITS ---
+fork: cb545879 release(3.1.4): the GPU cave path, void worlds, world
+      naming, and the flush pool
+meld: ec1f0a3  release(1.9.5): the GPU toggle, the worker governor,
+      and the flush-pool scaling
+Rode along in 1.9.5: _world_meta_dict() still stamped meld_version
+"1.7.0" — the 1.9.4 fix covered the run-report builder, not world
+meta. It reads src.__version__ now.
+
+--- VERSION CHECK (the explicit ask) ---
+fork main Cargo.toml:      3.1.4   tauri.conf.json: 3.1.4
+meld main src/__init__.py: 1.9.5
+Neither 3.1.2 nor 1.9.3 appears anywhere on main; the triage
+versions were never overwritten, only superseded.
+
+--- RENDER SMOKE: real Bucharest 1:1 bbox, 16 regions, cached tiles ---
+Four runs, sequential (the first attempt launched all four
+concurrently because PowerShell does not wait for a GUI-subsystem
+exe — Start-Process -Wait fixed it; concurrent runs also starved the
+old binary into producing nothing).
+
+  A 3.1.4 merged exe, caves, seed 11   block_hash=1cca84f4149678e4
+  B 3.1.4 merged exe, caves, seed 11   block_hash=1cca84f4149678e4
+  C 3.1.4 merged exe, no caves         block_hash=229fbe0efcc1076f  114,438,144 bytes
+  D 3.1.2 shipped exe, no caves        block_hash=229fbe0efcc1076f  121,425,920 bytes
+
+A==B: the FnvHashSet determinism fix holds in the merged binary.
+C==D: the merged binary places every block exactly where the shipped
+3.1.2 did on the non-cave path. Confirmed past the hash by decoding
+r.0.0.mca from both to per-position block names: 1024/1024 chunks
+identical, 0 differing blocks of 1,391,661. (Byte- or palette-level
+comparison is noise — the triage run's control already proved the
+parallel merge reorders palettes between identical runs; A and B
+differ by 32 KB on disk while hashing identical.)
+C is 5.75% smaller than D: the triage agent's block-light saving,
+alive and working inside our merged binary.
+Caves intentionally excluded from the cross-version pair: 3.1.4's
+reproducibility fix shifts cave layout once relative to 3.1.2, which
+is documented behaviour, not a regression.
+
+--- MERGE TO MAIN (ff, remotes untouched) ---
+fork main: a4784cc0 -> cb545879   branch == main: YES
+meld main: 700adc2  -> ec1f0a3 -> (this log)   branch == main: YES
+
+--- CONFIDENCE ---
+95%  triage work fully preserved: 0 predicted + 0 actual conflicts,
+     union test suite green, symbol inventory, and their disk saving
+     measured working in the merged binary.
+95%  no version regression: read out of the merge trees before the
+     merge and out of main after it.
+90%  merged binary block-correct: hash + full positional decode on
+     the non-cave path; cave path covered by determinism (A==B) and
+     the branch's own 425-test suite, not by cross-version diff.
+Untested here, carried over from both branches' own lists: the
+tray-app quit-during-bake path, real multi-country .pbf selection,
+and the Meld UI passes — all want a manual run of the real app.
