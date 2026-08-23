@@ -540,13 +540,15 @@
         <span><i class="dot" style="background:var(--ok)"></i>merged</span>
         <span><i class="dot" style="background:var(--bad)"></i>failed</span>
       </div>
+      <label class="stat" style="display:flex;align-items:center;gap:6px;margin-top:4px" title="Uncheck to hide the coloured cell squares so you can see the map underneath while picking a new area. The plan itself is not changed.">
+        <input id="showCells" type="checkbox" checked style="width:auto;margin:0">Show cells on the map</label>
       <button id="btnPrepBuild" title="Runs the whole job for the current stage: bakes your local .pbf if set, pre-warms buildings if on, then generates only the cells that aren't merged yet, so it also resumes safely after a stop or crash. One button for prepare, build, and resume.">Generate world</button>
       <button id="btnGen" class="sec" style="display:none" title="Generates only the cells that aren't merged yet, safe to re-run after a stop or crash. Set cell size + workers in Settings below.">Generate &amp; merge</button>
       <button id="btnResume" class="sec" style="display:none" title="Re-queue every cell that isn't merged (failed, drift, interrupted). Crash / overnight recovery.">Resume unfinished</button>
       <button id="btnPlan" class="sec" title="Split the selection into cells at the Settings cell size. Change cell size in Settings, then Plan.">Plan or re-split</button>
       <div class="row" style="margin-top:6px">
         <button class="sec" id="btnStop">Stop</button>
-        <button class="sec xbtn" id="btnClear" title="Clear plan" style="width:auto;flex:0 0 auto;padding:8px 12px">🗑️</button>
+        <button class="sec xbtn" id="btnClear" title="Clear the planned cells. Keeps the yellow selection box and every merged cell — to remove the box, use Clear selection in the Selection card." style="width:auto;flex:0 0 auto;padding:8px 12px">🗑️</button>
       </div>
       <button class="sec" id="btnNewWorld" style="display:none" title="Start a fresh world. The current one stays saved in your worlds folder; the map clears for a new selection.">✦ New world</button>
     </div>
@@ -1140,6 +1142,7 @@
       </div>
       <button class="sec" id="btnGrow" style="margin-top:6px" title="Add a ring of cells just OUTSIDE the current plan, following its shape. Great after a country/polygon search to extend tiles past the border. Click again to grow another ring.">➕ Grow edge (+1 ring)</button>
       <div class="stat" id="selVal" style="margin-top:6px">Draw a rectangle/polygon on the map, or search.</div>
+      <button class="sec" id="btnClearSel" style="margin-top:6px" title="Remove the yellow selection box so you can draw somewhere else. Planned and merged cells stay exactly as they are. Shortcut: Esc or Delete.">🗑️ Clear selection</button>
     </div>
 
     <div class="card">
@@ -1610,6 +1613,11 @@ function ensureCells(grid) {
   _lastGrid = grid;
   // Explore mode: no cell preview, just the world border (and stats). Clicks become teleport lookups.
   if (exploreMode) { drawCombinedBorder(grid); updateStats(grid); return; }
+  // Same escape hatch, user-controlled: with hundreds of cells drawn the map is a wall of
+  // squares and it is genuinely hard to see the ground you are trying to select. Hiding them
+  // is presentation only -- the plan is untouched, the border and the stats still show.
+  const showCells = $('showCells');
+  if (showCells && !showCells.checked) { drawCombinedBorder(grid); updateStats(grid); return; }
   // Cell positions depend on origin + scale. When either changes, every existing
   // rectangle/marker is at a STALE map position (we only ever drew them once), so
   // wipe and rebuild, this is what caused leftover/white cells after re-centering.
@@ -5827,6 +5835,60 @@ async function poll() {
 }
 // Run a poll RIGHT NOW (after an action that changes state), then resume the adaptive schedule.
 function kickPoll() { if (_pollTimer) { clearTimeout(_pollTimer); _pollTimer = null; } poll(); }
+
+// Remove the yellow selection box and forget it everywhere it is remembered.
+//
+// Asked on Discord as "how do i remove the yellow border", and the honest answer was that you
+// could not: the draw control is built with edit:false so there is no stock trash, the 🗑️ in
+// the Plan card clears planned CELLS and never touches the box, and the one code path that did
+// clear it sits behind #btnNewWorld -- which is display:none and whose handler reloads the page
+// before reaching it. The box outlived the project it belonged to.
+//
+// Three places remember a selection and all three have to forget together, or a refresh brings
+// it back: the Leaflet layer, localStorage, and project.json on the server (which already
+// accepts a null selection). Planned and merged cells are deliberately left alone -- this
+// clears the box you draw with, not the work you have done.
+function clearSelection() {
+  if (drawLayer) { try { drawnItems.removeLayer(drawLayer); } catch (_) {} drawLayer = null; }
+  if (polyLayer) { try { map.removeLayer(polyLayer); } catch (_) {} polyLayer = null; }
+  selection = null;
+  selectionPolygon = null;
+  _recenteredBbox = null;
+  _userDrew = false;   // let a future saved selection restore normally again
+  localStorage.removeItem('meld-selection');
+  api('/api/selection', { selection: null }).catch(() => {});
+  const v = $('selVal');
+  if (v) v.textContent = 'No area selected — drag a box on the map to start one.';
+}
+
+if ($('btnClearSel')) $('btnClearSel').onclick = () => clearSelection();
+
+// Hiding the cells has to remove the layers, not just skip the next draw, or the existing
+// squares sit there for ever. Same wipe setExplore does, then rebuild from the last grid.
+if ($('showCells')) $('showCells').onchange = () => {
+  for (const k of Object.keys(cellLayers)) { map.removeLayer(cellLayers[k]); delete cellLayers[k]; }
+  for (const k of Object.keys(cellMarkers)) { map.removeLayer(cellMarkers[k]); delete cellMarkers[k]; }
+  _cellStatus = {}; _drawQueue = []; _drawSet.clear();
+  if (_drawRaf) { cancelAnimationFrame(_drawRaf); _drawRaf = null; }
+  _overlaySig = '';   // force a full rebuild when they come back
+  ensureCells(_lastGrid);
+};
+
+// Esc unwinds one level at a time -- whichever painting mode is on first, then the box -- so it
+// never destroys something the user could not see was armed. Delete goes straight to the box.
+// Both bail inside a text field or a modal, where they already mean something else.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' && e.key !== 'Delete') return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+  if (document.querySelector('.modal-overlay')) return;   // the modal owns Escape while it is up
+  if (e.key === 'Escape') {
+    if (editCells) { setEditCells(false); return; }
+    if (retrySelect) { setRetrySelect(false); return; }
+  }
+  if (!selection && !drawLayer) return;
+  clearSelection();
+});
 
 // Persist + restore the selection rectangle across refresh.
 let _userDrew = false;   // user set a selection THIS session → a server restore must not clobber it
