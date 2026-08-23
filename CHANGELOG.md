@@ -4,6 +4,48 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.9.3] - 2026-08-21
+
+Worlds can now be generated straight into Leaf's B_Linear region format, skipping
+the conversion pass entirely. Off by default and marked experimental.
+
+### Added
+- **Region format, written during generation** (Settings, the drawer above Export
+  & compression). Anvil `.mca` stays the default and is what everything reads.
+  Choosing B_Linear has the fork write `r.X.Z.b_linear` itself, so there is no
+  `.mca` to convert afterwards and only one world is ever written to disk -
+  measured **3.7x smaller for a dense city** and 3.9x on terrain-with-caves
+  content, with peak disk for the whole flow dropping about 4.7x because the two
+  worlds never coexist. Needs **Arnis fork 3.1.2 or newer**.
+
+  The cost is stated on the control itself: the world opens only in **Leaf
+  1.21.11 (June 2026 builds) or newer, or 26.x**, never in Paper, older Leaf or
+  the vanilla client; the map item is unavailable, since its renderer reads Anvil
+  regions; and no `.mca` original is kept. Server setup already pins
+  `region-format: B_LINEAR` for such a world, so the world folder and the server
+  config still cannot disagree.
+
+### Changed
+- **The sidebar wordmark is the site's animated MELD title art.** The letters are
+  placed one at a time like blocks, ARNIS WORLDS rises under them, and the
+  finished composition takes over. Plain CSS keyframes, no animation library. It
+  links to meldmc.com as it did before.
+
+### Fixed
+- **Merging a cell into a world of the other region format is refused up front.**
+  The two containers use different file names, so a mismatch would never surface
+  as a collision - it would quietly leave half a world no server could open. The
+  same check rejects a world that somehow holds both.
+- **The final missing-region scan understands `.b_linear`.** A 142-byte file is
+  the chunkless equivalent of an 8192-byte `.mca`, so genuinely empty regions are
+  still detected as holes to retry rather than counted as present.
+- **Export and the map item are skipped for natively-generated B_Linear worlds**
+  instead of running against a world that has nothing left to convert, and the
+  export controls say so rather than sitting there enabled.
+- **Region format now appears above Export & compression**, where it belongs. The
+  Generate step is assembled at runtime and the drawer was being left behind by
+  that pass, so it rendered below Export no matter its position in the markup.
+
 ## [1.9.2] - 2026-08-19
 
 Windows bundling fix. The 1.8.5 through 1.9.1 Windows archives all carried
