@@ -336,7 +336,27 @@ def _mb_per_region(settings: dict | None = None, elevation: dict | None = None) 
     except (TypeError, ValueError):
         seen = 0.0
     if seen > 0:
+        # A measurement beats the model - but it was a measurement of ONE configuration. Returning
+        # it verbatim froze the estimate: once a project had built anything, turning caves or baked
+        # lighting on left the number exactly where it was, so the panel stopped responding to the
+        # settings and quietly went stale. Carry the observation across by the ratio the model
+        # says the change is worth. With no recorded baseline (projects calibrated before this
+        # existed) fall back to the old behaviour rather than inventing a ratio.
+        try:
+            then = float(s.get("mb_per_region_model_at_obs") or 0)
+        except (TypeError, ValueError):
+            then = 0.0
+        if then > 0:
+            now = _model_mb_per_region(s, elevation)
+            return max(_SECTOR_FLOOR_MB, seen * (now / then))
         return seen
+    return _model_mb_per_region(s, elevation)
+
+
+def _model_mb_per_region(s: dict, elevation: dict | None = None) -> float:
+    """The modelled cost, with no measurement folded in. Split out so a past measurement can be
+    scaled by how much the model thinks the current settings differ from the ones it was taken
+    under, rather than being returned unchanged for ever."""
     baked = bool(s.get("bake_lighting"))
     mb = _MB_PER_REGION
     if s.get("caves"):
@@ -365,7 +385,13 @@ def _record_size_calibration() -> None:
             except (IndexError, ValueError):
                 continue
         if mb and regions >= 4:      # a couple of cells is not a sample worth trusting
-            PROJECT.update_settings({"mb_per_region_observed": round(mb / regions, 3)})
+            # Record what the MODEL said for the settings in force when this was measured, so
+            # the observation can be carried across a settings change instead of freezing.
+            PROJECT.update_settings({
+                "mb_per_region_observed": round(mb / regions, 3),
+                "mb_per_region_model_at_obs": round(_model_mb_per_region(PROJECT.settings(),
+                                                                        PROJECT.elevation()), 4),
+            })
     except Exception:  # noqa: BLE001
         pass
 

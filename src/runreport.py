@@ -112,9 +112,18 @@ def build_report(*, world_name: str, meld_version: str, run: dict, timing: dict,
         (max((c["worker"] for c in cells if c.get("worker") is not None), default=-1) + 1)
     cpu_vals = [b["cpu"] for b in timeline if b.get("cpu") is not None]
     ram_vals = [b["ram"] for b in timeline if b.get("ram") is not None]
+    # Everything the size and time models key on has to be in here, or a finished run cannot be
+    # used to calibrate them later. Auditing the reports already on disk, none recorded caves,
+    # the height flags, land cover or the seam buffer -- so a pile of real runs could not answer
+    # "what does a region cost with caves on", and the constants stayed guesses for want of data
+    # that was thrown away at write time. Cheap to record, impossible to backfill.
     cfg_keys = ["scale", "job_size_regions", "buildings", "max_workers", "min_threads_per_worker",
                 "cpu_target_pct", "cpu_stagger_enabled", "cpu_stagger_seconds", "prefetch_enabled",
-                "elevation_zoom", "bake_lighting", "fill_ground"]
+                "elevation_zoom", "bake_lighting", "fill_ground",
+                "caves", "disable_height_limit", "world_min_y", "world_max_y",
+                "height_headroom", "height_underroom", "land_cover", "terrain",
+                "interior", "roof", "overture", "trees", "seam_buffer_chunks",
+                "vertical_exaggeration", "ground_level", "region_format"]
 
     return {
         "schema": SCHEMA, "world": world_name, "meld_version": meld_version,
