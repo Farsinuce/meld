@@ -39,6 +39,37 @@ directly by toggling it on the same bbox and seed:
 So caves are 32% of compute, and compute is ~10% of the cell. **A perfect,
 zero-cost GPU cave kernel buys about 3% of end-to-end wall clock.**
 
+### Correction: what `osm_fetch` actually is, and why the share depends on it
+
+`osm_fetch_ms` wraps a three-way branch (`main.rs:457-477`): `--osm-tile-dir` reads
+the cell's slippy tiles from a local cache, `--file` reads a pre-merged JSON, and
+with neither flag arnis makes a **live HTTP request to the Overpass API**.
+
+The runs above used no flag, so they went to the network. **Meld does not work that
+way** - it pre-caches tiles and passes `--osm-tile-dir`. Same bbox
+(`44.425,26.095,44.445,26.125`), both paths measured:
+
+| | cached tiles (Meld's path) | live Overpass |
+|---|---|---|
+| `osm_fetch_ms` | **1157** | **13192** |
+| `parse_osm_ms` | 720 | 44 |
+| `generation_time_ms` | 2658 | 2645 |
+| cell total | **~4.5 s** | ~15.9 s |
+| **CPU compute share** | **~75%** | ~17% |
+
+So the "compute is only ~10% of a cell" figure is a property of the *uncached*
+path. In the regime Meld actually runs, a cell is ~4.5 s of which only ~1.2 s is
+reading tiles off disk; **the rest really is CPU work.**
+
+This raises the GPU ceiling considerably - deleting all of `generation_time` in the
+cached regime would be ~2.4x on a cell, not 1.16x - and it is the strongest
+argument *for* the idea. It does not change the recommendation, because the
+decisive objections below were never about Amdahl: they are about one GPU shared
+by many processes on a platform with no MPS, per-cell context cost, and a
+reproducibility gate that GPU floating point cannot satisfy. It does, however,
+make the CPU fixes in this section considerably more valuable than the uncached
+numbers suggested, since they attack the ~75% that is genuinely compute.
+
 ### Why it gets worse, not better, in a real Meld run
 
 **Correction to an intuition worth stating, because it is the crux.** It is tempting
