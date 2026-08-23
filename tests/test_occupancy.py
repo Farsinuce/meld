@@ -136,3 +136,59 @@ def pytest_approx(value):
     import pytest
 
     return pytest.approx(value, rel=1e-6)
+
+
+class TestGpuBudget:
+    """The third budget: workers share ONE adapter, so per-worker busy fractions
+    stack. Numbers from the measured 1:1 cell: the 5080 was ~1% busy per worker,
+    so this clamp exists for weaker adapters and future heavier kernels, not for
+    today's hardware."""
+
+    def test_gpu_fraction_is_tracked_alongside_cpu(self):
+        t = OccupancyTracker()
+        # measured shape: 54.7 s wall, ~0.6 s of GPU dispatches
+        for _ in range(4):
+            t.record(cpu_seconds=623.0, wall_seconds=54.7, gpu_seconds=0.6)
+        assert t.gpu_fraction_per_cell == pytest_approx(0.6 / 54.7)
+
+    def test_gpu_off_reports_zero_not_none_confusion(self):
+        t = OccupancyTracker()
+        for _ in range(3):
+            t.record(cpu_seconds=623.0, wall_seconds=54.7)
+        assert t.gpu_fraction_per_cell == 0.0
+
+    def test_todays_hardware_is_not_gpu_limited(self):
+        # 1% busy per worker: the 95% budget fits 95 workers - CPU and RAM clamp
+        # long before the GPU does.
+        assert (
+            suggest_workers(
+                11.4, 24, 90.0,
+                gpu_fraction_per_cell=0.011, gpu_target_pct=95.0,
+            )
+            == 1
+        )  # CPU is the binding budget here, not the GPU
+
+    def test_a_saturating_kernel_clamps_workers(self):
+        # A hypothetical adapter kept 40% busy per worker: only 2 fit under 95%.
+        assert (
+            suggest_workers(
+                1.0, 24, 90.0,
+                gpu_fraction_per_cell=0.40, gpu_target_pct=95.0,
+            )
+            == 2
+        )
+
+    def test_zero_fraction_never_divides(self):
+        assert suggest_workers(1.02, 24, 90.0, gpu_fraction_per_cell=0.0) == 21
+        assert suggest_workers(1.02, 24, 90.0, gpu_fraction_per_cell=None) == 21
+
+    def test_tightest_budget_wins_across_all_three(self):
+        # CPU says 21, RAM says 5, GPU says 3 -> 3.
+        assert (
+            suggest_workers(
+                1.02, 24, 90.0,
+                ram_available_mb=6_000, ram_per_cell_mb=1_200,
+                gpu_fraction_per_cell=0.30, gpu_target_pct=95.0,
+            )
+            == 3
+        )

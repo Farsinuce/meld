@@ -35,17 +35,26 @@ WINDOW = 8
 
 @dataclass
 class OccupancyTracker:
-    """Rolling record of how many cores each finished cell actually used."""
+    """Rolling record of what each finished cell actually used: CPU cores, and the
+    fraction of its wall the shared GPU was busy on its behalf."""
 
     samples: list[float] = field(default_factory=list)
+    gpu_samples: list[float] = field(default_factory=list)
 
-    def record(self, cpu_seconds: float, wall_seconds: float) -> None:
+    def record(
+        self, cpu_seconds: float, wall_seconds: float, gpu_seconds: float = 0.0
+    ) -> None:
         """Record one finished cell. `cpu_seconds` is total processor time across all
-        of that process's threads, so `cpu/wall` is the mean number of busy cores."""
+        of that process's threads, so `cpu/wall` is the mean number of busy cores.
+        `gpu_seconds` is the wall the cell spent inside GPU dispatches (arnis reports
+        it; 0 when the GPU is off), so `gpu/wall` is that worker's share of the ONE
+        shared adapter."""
         if wall_seconds < MIN_SAMPLE_WALL_S or cpu_seconds <= 0:
             return
         self.samples.append(cpu_seconds / wall_seconds)
         del self.samples[:-WINDOW]
+        self.gpu_samples.append(max(0.0, gpu_seconds) / wall_seconds)
+        del self.gpu_samples[:-WINDOW]
 
     @property
     def cores_per_cell(self) -> float | None:
@@ -58,6 +67,13 @@ class OccupancyTracker:
             return None
         return statistics.median(self.samples)
 
+    @property
+    def gpu_fraction_per_cell(self) -> float | None:
+        """Median share of one worker's wall spent on the GPU, or None."""
+        if len(self.gpu_samples) < 2:
+            return None
+        return statistics.median(self.gpu_samples)
+
 
 def suggest_workers(
     cores_per_cell: float,
@@ -66,21 +82,32 @@ def suggest_workers(
     ram_available_mb: float | None = None,
     ram_per_cell_mb: float | None = None,
     hard_cap: int = DEFAULT_HARD_CAP,
+    gpu_fraction_per_cell: float | None = None,
+    gpu_target_pct: float = 95.0,
 ) -> int:
-    """How many cells to run at once, from measured occupancy and RAM headroom.
+    """How many cells to run at once, from measured occupancy and headroom.
 
-    Floors rather than rounds: going over the core budget oversubscribes, and the
-    penalty for one worker too many is larger than the gain from one too few.
+    Three independent budgets; the tightest wins:
+    - CPU:  cores_total * cpu_target_pct / cores_per_cell
+    - RAM:  a hard wall where CPU is only a slowdown, so it always clamps
+    - GPU:  workers share ONE adapter, so each worker's measured busy fraction
+            stacks; gpu_target_pct / fraction caps how many fit. Measured today a
+            1:1 cell keeps the 5080 ~1% busy, so this clamp is a safety valve for
+            weaker adapters, not a daily limiter.
+
+    Floors rather than rounds: going over a budget oversubscribes, and the penalty
+    for one worker too many is larger than the gain from one too few.
     """
     if cores_per_cell <= 0 or cores_total <= 0:
         return 1
     budget = cores_total * max(0.0, cpu_target_pct) / 100.0
-    by_cpu = int(budget // cores_per_cell)
+    limit = int(budget // cores_per_cell)
 
-    limit = by_cpu
     if ram_available_mb is not None and ram_per_cell_mb and ram_per_cell_mb > 0:
-        # RAM is a hard wall where CPU is only a slowdown, so it always wins.
         limit = min(limit, int(ram_available_mb // ram_per_cell_mb))
+
+    if gpu_fraction_per_cell is not None and gpu_fraction_per_cell > 0.0:
+        limit = min(limit, int((gpu_target_pct / 100.0) / gpu_fraction_per_cell))
 
     return max(1, min(limit, hard_cap))
 

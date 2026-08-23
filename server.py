@@ -2115,9 +2115,19 @@ def _runner(job: dict, state: dict) -> bool:
     verbose = bool(settings.get("arnis_log_verbose", False))
     _last_surfaced = {"line": None}
 
+    # arnis reports its own GPU dispatch time at end of generation ("[gpu]
+    # busy_ms=N"); nothing outside the process can observe the adapter, so the
+    # process says what it used and the worker governor budgets against it.
+    _gpu_ms = {"v": 0.0}
+
     def on_line(text: str):
         if not text:
             return
+        if text.startswith("[gpu] busy_ms="):
+            try:
+                _gpu_ms["v"] = float(text.split("=", 1)[1])
+            except (ValueError, IndexError):
+                pass
         state["message"] = text[:140]
         state["progress"] = parse_progress(text, state.get("progress", 0))
         # Unfiltered, into the console ring: this is the generator's own voice, which the
@@ -2174,7 +2184,7 @@ def _runner(job: dict, state: dict) -> bool:
         damped because occupancy was measured UNDER the current worker count -- adding
         workers adds contention -- so each move is re-measured before the next.
         """
-        OCCUPANCY.record(cpu_seconds, wall_seconds)
+        OCCUPANCY.record(cpu_seconds, wall_seconds, gpu_seconds=_gpu_ms["v"] / 1000.0)
         per_cell = OCCUPANCY.cores_per_cell
         if per_cell is None:
             return
@@ -2183,23 +2193,29 @@ def _runner(job: dict, state: dict) -> bool:
         cores = os.cpu_count() or 4
         try:
             import psutil
-            avail_mb = psutil.virtual_memory().available / (1024 * 1024)
+            # 95% of what is free right now: the last 5% is the OS's, and paging
+            # one worker costs more than the worker would have earned.
+            avail_mb = psutil.virtual_memory().available / (1024 * 1024) * 0.95
         except Exception:  # noqa: BLE001
             avail_mb = None
         ram_per_cell = _peak_rss_mb_estimate()
         target = suggest_workers(per_cell, cores, pct,
                                  ram_available_mb=avail_mb,
-                                 ram_per_cell_mb=ram_per_cell)
+                                 ram_per_cell_mb=ram_per_cell,
+                                 gpu_fraction_per_cell=OCCUPANCY.gpu_fraction_per_cell,
+                                 gpu_target_pct=95.0)
         if target == POOL.max_workers:
             return
+        gpu_frac = OCCUPANCY.gpu_fraction_per_cell or 0.0
+        gpu_note = f", GPU {gpu_frac * 100:.1f}%/worker" if gpu_frac > 0 else ""
         if live.get("worker_autoscale"):
             stepped = damped_step(POOL.max_workers, target)
             if stepped != POOL.max_workers:
-                log(f"  [Workers] {per_cell:.2f} cores/cell measured -> "
+                log(f"  [Workers] {per_cell:.2f} cores/cell measured{gpu_note} -> "
                     f"{POOL.max_workers} to {stepped} workers (target {target})")
                 POOL.set_max_workers(stepped)
         else:
-            log(f"  [Workers] {per_cell:.2f} cores/cell measured -> "
+            log(f"  [Workers] {per_cell:.2f} cores/cell measured{gpu_note} -> "
                 f"{target} workers would fit (currently {POOL.max_workers}; "
                 f"enable worker_autoscale to apply)")
 
