@@ -5125,7 +5125,7 @@ def api_status():
     mcstat["profile"] = {k: _st.get(k) for k in
                          ("server_version", "server_mode", "server_dir", "server_world_src",
                           "server_extras", "server_voxy", "server_auto_restart",
-                          "server_ram_gb", "server_cpu_pct", "server_backup_first",
+                          "server_ram_gb", "server_cpu_pct",
                           "server_staging")}
     mcstat["machine"] = _machine_specs()
     return jsonify({
@@ -6377,40 +6377,16 @@ def _mcs_launch() -> tuple[bool, str | None]:
 def api_mcs_start():
     """Launch the staged server (requires confirm:true). Runs downloaded code —
     only after the user explicitly confirmed both the install and this start.
-    The FIRST start also zips the staged world to backups/ before launching."""
+
+    No automatic backup: the first start used to zip the world to backups/
+    (opt-in since 1.7.0, and projects created before that carried the stored
+    True forever, so it still fired for them). The project's master world is
+    always the untouched source, so the zip mostly cost minutes and disk at
+    the exact moment the user asked to play; the 💾 Backup world button does
+    the same zip on demand."""
     d = request.get_json(silent=True) or {}
     if d.get("confirm") is not True:
         return jsonify({"ok": False, "error": "starting the server requires confirm:true"}), 403
-    with _MCSERVER_LOCK:
-        sdir, tw = _MCSERVER.get("server_dir"), _MCSERVER.get("target_world")
-    marker = Path(sdir) / ".meld-first-start-done" if sdir else None
-    backup_first = PROJECT.settings().get("server_backup_first", False)
-    if marker is not None and sdir and not marker.exists():
-        # first start happened — record it even when the backup is skipped, so
-        # enabling the toggle later never backs up an already-played world
-        if not backup_first:
-            try:
-                marker.write_text("backup: skipped (server_backup_first off)\n", encoding="utf-8")
-            except OSError:
-                pass
-    if (backup_first and marker is not None and sdir and not marker.exists()
-            and (Path(sdir) / (tw or "world")).is_dir()):
-        def _backup_then_launch():
-            try:
-                _mcs_set(phase="backing-up", message="first start — zipping a world backup…")
-                dest = mcs.backup_world(Path(sdir), tw or "world",
-                                        on_progress=lambda i, n: _mcs_set(
-                                            message=f"first start — backing up world ({i}/{n} files)…"))
-                marker.write_text("backup: " + dest.name + "\n", encoding="utf-8")
-                _mcs_set(message=f"backup done ({dest.name}) — starting…")
-            except Exception as e:  # noqa: BLE001
-                # the master world in the project is the true source; don't block on a failed zip
-                _mcs_set(message=f"backup failed ({e}) — starting anyway (master world is intact)")
-            ok, err = _mcs_launch()
-            if not ok:
-                _mcs_set(phase="error", running=False, message=f"start failed: {err}")
-        threading.Thread(target=_backup_then_launch, daemon=True, name="mcserver-start").start()
-        return jsonify({"ok": True, "backup": True})
     ok, err = _mcs_launch()
     if not ok:
         code = 403 if "EULA" in (err or "") else 400
@@ -6556,10 +6532,6 @@ def api_mcs_opts():
         _mcs_set(auto_restart=v)
         PROJECT.update_settings({"server_auto_restart": v})
         out["auto_restart"] = v
-    if "backup_first" in d:
-        v = d.get("backup_first") is True
-        PROJECT.update_settings({"server_backup_first": v})
-        out["backup_first"] = v
     if "staging" in d:
         v = "copy" if str(d.get("staging")) == "copy" else "in_place"
         PROJECT.update_settings({"server_staging": v})

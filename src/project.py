@@ -293,10 +293,11 @@ def default_settings() -> dict:
         # and Meld keep headroom. server_cpu_pct maps to -XX:ActiveProcessorCount.
         "server_ram_gb": 0,
         "server_cpu_pct": 100,
-        # Zip the world to backups/ before the FIRST start. Big worlds make big zips
-        # (a 1 GB world ≈ a 1 GB zip — region data barely recompresses), so this is
-        # optional; the project's master world is always the untouched source anyway.
-        "server_backup_first": True,
+        # There is deliberately no server_backup_first here any more. It defaulted True,
+        # which is why "default off since 1.7.0" never actually held: every project was
+        # born with the stored True and the first start zipped a 1 GB world into a 1 GB
+        # zip at the exact moment the user asked to play. Backups are the 💾 button now,
+        # on demand only; the project's master world is always the untouched source.
     }
 
 

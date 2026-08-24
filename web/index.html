@@ -979,8 +979,6 @@
           <span class="i" title="Installs the Voxy Server Side plugin: players with the Voxy client mod see the WHOLE map as far terrain the moment they join, streamed straight from the server's region files, no exploring needed. Version-strict: it only exists for some MC versions (1.21.11 / 26.1.x) and the CLIENT must run the same MC version. If your chosen version has no build, Plan will say so.">i</span></label>
         <label style="font-weight:normal;margin-top:4px"><input id="mcsAutoRestart" type="checkbox" checked> auto-restart if the server crashes
           <span class="i" title="Crash watchdog: if the java process dies WITHOUT you pressing Stop, Meld restarts it automatically, at most 3 times per 10 minutes (then it stops trying and tells you to check the console/logs).">i</span></label>
-        <label style="font-weight:normal;margin-top:4px"><input id="mcsBackupFirst" type="checkbox"> backup world before first start
-          <span class="i" title="Zip the server's world copy to backups/ before the FIRST launch. Big worlds make big zips (region data barely recompresses, a 1 GB world ≈ a 1 GB zip), so turn this off to save disk. Your project's master world always remains the untouched source either way; the 💾 button below still works on demand.">i</span></label>
         <label style="margin-top:8px">RAM <span id="mcsRamVal" style="float:right;color:#9aa"></span>
           <span class="i" title="Java heap for the server (-Xms = -Xmx, Aikar style). Auto (slider at 0) = a quarter of your machine's RAM (2–8 GB). Always capped 2 GB below your total so the OS and Meld keep headroom. Applies on the next Start.">i</span>
           <input id="mcsRam" type="range" min="0" max="30" step="1" value="0" style="width:100%"></label>
@@ -999,7 +997,7 @@
         <div id="mcsStatus" class="stat" style="margin-top:5px"></div>
         <div id="mcsPlanOut" class="stat" style="margin-top:3px;white-space:pre-wrap;max-height:140px;overflow-y:auto"></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-          <button class="sec" id="mcsBackup" type="button" style="width:auto;padding:5px 9px" title="Zip the server's world folder to backups/ inside the server dir. The server must be stopped (a running world zips inconsistent). The first Start can also do this automatically (toggle above). The server itself stays localhost:25565 only, anything beyond that you edit in server.properties yourself.">💾 Backup world</button>
+          <button class="sec" id="mcsBackup" type="button" style="width:auto;padding:5px 9px" title="Zip the server's world folder to backups/ inside the server dir, on demand — nothing backs up automatically. The server must be stopped (a running world zips inconsistent). Your project's master world is always the untouched source regardless. The server itself stays localhost:25565 only, anything beyond that you edit in server.properties yourself.">💾 Backup world</button>
         </div>
         <div id="mcsConsoleWrap" style="display:none;margin-top:5px">
           <div style="display:flex;align-items:center;justify-content:space-between">
@@ -4451,8 +4449,6 @@ if ($('mcsRam')) { $('mcsRam').oninput = mcsResReadout; $('mcsRam').onchange = m
 if ($('mcsCpu')) { $('mcsCpu').oninput = mcsResReadout; $('mcsCpu').onchange = mcsSaveResources; }
 if ($('mcsVoxy')) $('mcsVoxy').onchange = () => api('/api/mcserver/opts', { voxy: $('mcsVoxy').checked });
 if ($('mcsExtras')) $('mcsExtras').onchange = () => api('/api/mcserver/opts', { extras: $('mcsExtras').checked });
-if ($('mcsBackupFirst')) $('mcsBackupFirst').onchange = () =>
-  api('/api/mcserver/opts', { backup_first: $('mcsBackupFirst').checked });
 if ($('mcsStaging')) $('mcsStaging').onchange = () =>
   api('/api/mcserver/opts', { staging: $('mcsStaging').value });
 if ($('mcsPopConsole')) $('mcsPopConsole').onclick = () =>
@@ -4481,7 +4477,6 @@ function mcsApplyProfile(prof){
   if ($('mcsExtras')) $('mcsExtras').checked = !!prof.server_extras;
   if ($('mcsVoxy')) $('mcsVoxy').checked = !!prof.server_voxy;
   if ($('mcsAutoRestart')) $('mcsAutoRestart').checked = prof.server_auto_restart !== false;
-  if ($('mcsBackupFirst')) $('mcsBackupFirst').checked = prof.server_backup_first === true;
   if ($('mcsRam')) $('mcsRam').value = prof.server_ram_gb > 0 ? prof.server_ram_gb : 0;
   if ($('mcsCpu')) $('mcsCpu').value = prof.server_cpu_pct || 100;
   mcsResReadout();
