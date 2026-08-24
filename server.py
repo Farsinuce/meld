@@ -1629,16 +1629,31 @@ def api_osmpack_plan():
     refusal would be worse than no preview.
     """
     s = PROJECT.settings()
+    scope = ((request.json or {}).get("scope") or "missing").strip()
     bbox, _rings, _name = _datapack_selection()
     folder = _osmpack_folder()
-    if not bbox:
+    if scope != "file" and not bbox:
         return jsonify({"ok": False, "error": "select an area first"}), 400
     scan = op.scan_pbf_folder(folder)
     if not scan.get("ok") or not scan.get("files"):
         return jsonify({"ok": False, "error": scan.get("error") or "no .pbf files"}), 400
-    gbb = _osm_gen_bbox(bbox)
-    cov = op.coverage_osm(gbb)
-    tiles = [(t["x"], t["y"]) for t in cov["missing"]]
+    if scope == "file":
+        # Same tile derivation as the bake route's whole-file scope, so preview and refusal
+        # can never disagree with the run.
+        gbb = None
+        _ts: set = set()
+        for _f in scan["files"]:
+            _fb = _f.get("bbox")
+            if _fb:
+                _ts.update([(t["x"], t["y"]) for t in op.coverage_osm(_fb)["missing"]])
+        tiles = sorted(_ts)
+    elif scope == "all":
+        gbb = _osm_gen_bbox(bbox)
+        tiles = osm_grid.grid_tiles_for_bbox(gbb)
+    else:
+        gbb = _osm_gen_bbox(bbox)
+        cov = op.coverage_osm(gbb)
+        tiles = [(t["x"], t["y"]) for t in cov["missing"]]
     plan = op.plan_bake(scan["files"], tiles,
                         workers_requested=int(s.get("osm_bake_workers", 0) or 0),
                         region_bbox=gbb, cache_dir=_cache_root_for_plan())
@@ -1662,7 +1677,8 @@ def api_osmpack_bake():
         if _OSMPACK["active"]:
             return jsonify({"ok": False, "error": "an OSM bake is already running"}), 409
         _OSMPACK.update(active=True, done=False, note="preparing OSM bake…",
-                        total=0, done_n=0, ok=0, absent=0, fail=0, region=None, projection={})
+                        total=0, done_n=0, ok=0, absent=0, fail=0, region=None, projection={},
+                        scan={})
         _OSMPACK_STOP["flag"] = False
 
     def _release(err, code):
@@ -1671,17 +1687,33 @@ def api_osmpack_bake():
         return jsonify({"ok": False, "error": err}), code
 
     bbox, rings, name = _datapack_selection()
-    if not bbox:
+    scope = ((request.json or {}).get("scope") or "missing").strip()
+    if scope != "file" and not bbox:
         return _release("bbox or polygon required", 400)
     folder = _osmpack_folder()
     scan = op.scan_pbf_folder(folder)
     if not scan.get("ok") or not scan.get("files"):
         return _release(scan.get("error") or "no .pbf files in folder", 400)
-    force = bool((request.json or {}).get("force"))
-    gbb = _osm_gen_bbox(bbox)                     # seam-expanded → bake the ring generation will need
-    cov = op.coverage_osm(gbb)
-    tiles = (osm_grid.grid_tiles_for_bbox(gbb) if force
-             else [(t["x"], t["y"]) for t in cov["missing"]])
+    force = bool((request.json or {}).get("force")) or scope == "all"
+    if scope == "file":
+        # Bake everything the folder's .pbf files cover, not just the selection. The scan cost is
+        # identical either way - the bake reads each whole file regardless - so a user who wants
+        # the country local pays the read once instead of once per future selection. A file with
+        # no readable header bbox cannot define "its coverage" and is skipped for this scope.
+        gbb = None
+        _ts: set = set()
+        for _f in scan["files"]:
+            _fb = _f.get("bbox")
+            if not _fb:
+                continue
+            _ts.update(osm_grid.grid_tiles_for_bbox(_fb) if force
+                       else [(t["x"], t["y"]) for t in op.coverage_osm(_fb)["missing"]])
+        tiles = sorted(_ts)
+    else:
+        gbb = _osm_gen_bbox(bbox)                 # seam-expanded → bake the ring generation will need
+        cov = op.coverage_osm(gbb)
+        tiles = (osm_grid.grid_tiles_for_bbox(gbb) if force
+                 else [(t["x"], t["y"]) for t in cov["missing"]])
     # Plan before reading a byte. Two things this prevents, both reported from the wild: reading
     # every .pbf in the folder regardless of where the region is (eight continent extracts, 75 GB,
     # to render one US state), and starting a bake that cannot fit in memory - which does not fail,
@@ -1699,7 +1731,7 @@ def api_osmpack_bake():
     log(f"[OSM pack] plan: {plan['workers']} worker(s), ~{plan['ram_peak_gb']} GB RAM, "
         f"~{plan['disk_final_gb']} GB of tiles (~{plan['disk_peak_gb']} GB peak), "
         f"~{plan['eta_min']} min")
-    rid = dp.region_id(bbox, name)
+    rid = dp.region_id(bbox, name) if bbox else "pbf-coverage"
     with _OSMPACK_LOCK:
         _OSMPACK.update(total=len(tiles), region=name or rid,
                         note=f"baking {len(tiles)} OSM tile(s) from {len(pbf_paths)} .pbf…")
@@ -1720,6 +1752,16 @@ def api_osmpack_bake():
             _logged[0] = done_n
             log(f"[OSM pack] {done_n}/{total} tiles · {ok} baked, {skip} cached, {fail} failed")
 
+    def _scan_prog(fname, phase, seen, est_total):
+        # Live source-read progress. Both .pbf passes happen BEFORE any tile resolves, so without
+        # this the bar sits on "0/N tiles" for the entire read and looks hung. Phase 0 (relations)
+        # maps to 0-5% of the bar, phase 1 (main pass) to 5-95%; the last 5% is tile writing,
+        # which the tile counter takes over. seen/est_total is exact/estimated elements.
+        frac = min(1.0, seen / max(1, est_total))
+        pct = round(5 * frac) if phase == 0 else round(5 + 90 * frac)
+        with _OSMPACK_LOCK:
+            _OSMPACK["scan"] = {"file": fname, "phase": int(phase), "seen": int(seen), "pct": pct}
+
     def _worker():
         _t0 = time.time()
         try:
@@ -1736,19 +1778,28 @@ def api_osmpack_bake():
             _bake = op.bake_tiles_parallel if (_bw > 1 and _s.get("osm_bake_parallel", True)) else op.bake_tiles
             _kw = {"workers": _bw} if _bake is op.bake_tiles_parallel else {}
             res = _bake(pbf_paths, tiles, on_progress=_prog,
-                        should_stop=lambda: _OSMPACK_STOP["flag"], log=log, force=force, **_kw)
-            cov2 = op.coverage_osm(gbb)
-            try:
-                el = dp.coverage_elevation(bbox, zoom=_pack_zoom(bbox))
-                dp.write_manifest(rid, name=name, bbox=bbox, cov=el, polygons=rings, osm=cov2)
-            except Exception:  # noqa: BLE001
-                pass
+                        should_stop=lambda: _OSMPACK_STOP["flag"], log=log, force=force,
+                        on_scan=_scan_prog, **_kw)
             _el = time.time() - _t0
+            if gbb is not None:
+                cov2 = op.coverage_osm(gbb)
+                try:
+                    el = dp.coverage_elevation(bbox, zoom=_pack_zoom(bbox))
+                    dp.write_manifest(rid, name=name, bbox=bbox, cov=el, polygons=rings, osm=cov2)
+                except Exception:  # noqa: BLE001
+                    pass
+                _note = f"done in {_el:.0f}s: {cov2['cached']}/{cov2['total']} OSM tiles cached ({cov2['pct']}%)"
+                _covline = f"-> {cov2['pct']}% covered"
+            else:
+                # Whole-file scope has no selection to measure coverage against; the counts are
+                # the whole story.
+                _note = f"done in {_el:.0f}s: {res['baked']} baked, {res['skip']} already cached"
+                _covline = ""
             with _OSMPACK_LOCK:
                 _OSMPACK.update(active=False, done=True, elapsed=round(_el, 1),
-                                note=f"done in {_el:.0f}s: {cov2['cached']}/{cov2['total']} OSM tiles cached ({cov2['pct']}%)")
+                                scan={}, note=_note)
             log(f"[OSM pack] {name or rid}: {res['baked']} baked, {res['skip']} cached, "
-                f"{res['elements']} elements -> {cov2['pct']}% covered in {_el:.0f}s")
+                f"{res['elements']} elements {_covline} in {_el:.0f}s")
         except Exception as ex:  # noqa: BLE001
             with _OSMPACK_LOCK:
                 _OSMPACK.update(active=False, done=True, note=f"error: {ex}")

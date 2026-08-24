@@ -225,6 +225,16 @@ BAKED_PER_PBF = 29.0
 # Elements per second, single worker. Measured: 125.7M elements in ~147 s.
 PBF_MB_PER_SEC = 6.0
 
+# The bake reads each .pbf TWICE (a relations-only pre-pass, then the main pass with the node
+# index), so wall time charges the file at two passes. The old estimate charged one and quoted
+# "~0.9 min" for a 20-tile Romania bake that could not finish under 2 - the fixed full-file scan
+# dominates a small bake, and it was billed at half price.
+BAKE_PASSES = 2
+
+# Elements per MB of .pbf, for the live scan progress bar: 125.7M elements / 871 MB (ukraine).
+# Only used to place the moving bar - the phase and element count printed beside it are exact.
+ELEMS_PER_PBF_MB = 144_000
+
 
 def _bbox_overlaps(a: dict, b: dict) -> bool:
     """Do two lat/lon boxes intersect at all? Touching edges count - a way can sit exactly on one."""
@@ -366,7 +376,7 @@ def plan_bake(files: list[dict], tiles: list, workers_requested: int = 0,
         "disk_final_gb": round(final_gb, 1), "disk_peak_gb": round(peak_gb, 1),
         "disk_free_gb": round(free_gb, 1),
         "tiles": len(tiles),
-        "eta_min": round(total_gb * 1000 / PBF_MB_PER_SEC / max(1, workers) / 60, 1),
+        "eta_min": round(total_gb * 1000 * BAKE_PASSES / PBF_MB_PER_SEC / max(1, workers) / 60, 1),
     }
 
 
@@ -461,7 +471,7 @@ def _writers_bytes(writers: dict) -> int:
 
 
 def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None,
-               node_storage: str | None = None, force: bool = False) -> dict:
+               node_storage: str | None = None, force: bool = False, on_scan=None) -> dict:
     """Slice the given .pbf file(s) into Overpass-shaped JSON for exactly the `tiles` (a list of
     (x,y) at OSM_GRID_Z) and publish them into the shared OSM cache.
 
@@ -532,6 +542,13 @@ def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None
                      f"({pi + 1}/{len(pbf_paths)}) — outside the needed tile(s)")
                 continue
             _log(f"  [OSM bake] reading {Path(pbf).name} ({pi + 1}/{len(pbf_paths)})…")
+            # For the live scan bar: exact element counts against an estimated total, so the UI
+            # can show the read moving instead of sitting on "0/N tiles" until the passes end.
+            _scan_name = Path(pbf).name
+            try:
+                _scan_est = max(1, int(os.path.getsize(pbf) / 1e6 * ELEMS_PER_PBF_MB))
+            except OSError:
+                _scan_est = 1
             # A single corrupt/truncated/unreadable .pbf (e.g. a half-copied file or a flaky drive
             # dropping mid-read → 'failed to uncompress data: buffer error') must NOT kill the whole
             # bake. Skip just that file and keep the others' tiles; only _Stopped (cancel) unwinds.
@@ -544,9 +561,12 @@ def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None
                 for o in osmium.FileProcessor(pbf, osmium.osm.RELATION):   # relations only
                     rel_seen += 1
                     # Minutes on a country .pbf, so Stop is honoured here too.
-                    if (rel_seen & 0xFFFF) == 0 and should_stop and should_stop():
-                        _log("  [OSM bake] stopped during the relation pass")
-                        raise _Stopped()
+                    if (rel_seen & 0xFFFF) == 0:
+                        if should_stop and should_stop():
+                            _log("  [OSM bake] stopped during the relation pass")
+                            raise _Stopped()
+                        if on_scan:
+                            on_scan(_scan_name, 0, rel_seen, _scan_est)
                     for m in o.members:
                         if m.type == "w":
                             rel_ways.add(m.ref)
@@ -566,6 +586,8 @@ def bake_tiles(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None
                         if should_stop and should_stop():
                             _log("  [OSM bake] stopped mid-file")
                             raise _Stopped()
+                        if on_scan:
+                            on_scan(_scan_name, 1, seen, _scan_est)
                         if (seen & 0x1FFFFF) == 0:  # ~ every 2M elements: progress line
                             _log(f"  [OSM bake] {Path(pbf).name}: {seen // 1_000_000}M elements…")
 
@@ -904,7 +926,7 @@ def _guard_bake_pool(ex, stop_path) -> None:
 
 
 def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None, log=None,
-                        force=False, workers=None) -> dict:
+                        force=False, workers=None, on_scan=None) -> dict:
     """Parallel front end to the bake: skip non-overlapping .pbf, bake each overlapping one in its OWN
     process into a private temp dir, then MERGE per tile into the shared cache (border tiles deduped by
     osm_grid.merge_tiles) + empty sentinels for the rest. ~3-5x vs sequential on a multi-core box.
@@ -946,7 +968,7 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
 
     if len(pbfs) < 2:   # nothing to parallelize → the proven sequential path
         return bake_tiles(pbfs or [str(p) for p in pbf_paths], tiles, on_progress=on_progress,
-                          should_stop=should_stop, log=log, force=force)
+                          should_stop=should_stop, log=log, force=force, on_scan=on_scan)
 
     target_list = [[x, y] for (x, y) in todo]
     tmp_root = cache_dir / ".bake_parallel"
@@ -1025,7 +1047,7 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
         except Exception:                                          # noqa: BLE001
             pass
         return bake_tiles(pbfs, tiles, on_progress=on_progress, should_stop=should_stop,
-                          log=log, force=force)
+                          log=log, force=force, on_scan=on_scan)
 
     if should_stop and should_stop():
         shutil.rmtree(tmp_root, ignore_errors=True)
