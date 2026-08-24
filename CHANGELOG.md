@@ -4,6 +4,24 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.9.7] - 2026-08-24
+
+Bundles arnis fork 3.1.7. No Meld-side changes; everything here comes from the
+generator.
+
+### Fixed
+- **Riverbeds and underwater slopes are deeper and properly shaped.** The depth
+  curve was rounded down at every column, which shallowed every bed and widened
+  each terrace: a 20-block-wide river came out as a flat shelf and two steps
+  rather than a channel.
+- **A cell no longer treats its own edge as a coastline**, which used to carve
+  one bank of a channel crossing between cells shallower than the other.
+
+### Changed
+- **Land cover in multi-cell worlds is sampled in one shared frame**, so
+  neighbouring cells cannot disagree about which block a boundary belongs to,
+  and land cover no longer drifts slightly against the features sitting on it.
+
 ## [1.9.6] - 2026-08-24
 
 Bundles arnis fork 3.1.6 with the building and shoreline upgrades: per type
