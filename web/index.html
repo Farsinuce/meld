@@ -540,8 +540,6 @@
         <span><i class="dot" style="background:var(--ok)"></i>merged</span>
         <span><i class="dot" style="background:var(--bad)"></i>failed</span>
       </div>
-      <label class="stat" style="display:flex;align-items:center;gap:6px;margin-top:4px" title="Uncheck to hide the coloured cell squares so you can see the map underneath while picking a new area. The plan itself is not changed.">
-        <input id="showCells" type="checkbox" checked style="width:auto;margin:0">Show cells on the map</label>
       <button id="btnPrepBuild" title="Runs the whole job for the current stage: bakes your local .pbf if set, pre-warms buildings if on, then generates only the cells that aren't merged yet, so it also resumes safely after a stop or crash. One button for prepare, build, and resume.">Generate world</button>
       <button id="btnGen" class="sec" style="display:none" title="Generates only the cells that aren't merged yet, safe to re-run after a stop or crash. Set cell size + workers in Settings below.">Generate &amp; merge</button>
       <button id="btnResume" class="sec" style="display:none" title="Re-queue every cell that isn't merged (failed, drift, interrupted). Crash / overnight recovery.">Resume unfinished</button>
@@ -551,6 +549,8 @@
         <button class="sec xbtn" id="btnClear" title="Clear the planned cells. Keeps the yellow selection box and every merged cell — to remove the box, use Clear selection in the Selection card." style="width:auto;flex:0 0 auto;padding:8px 12px">🗑️</button>
       </div>
       <button class="sec" id="btnNewWorld" style="display:none" title="Start a fresh world. The current one stays saved in your worlds folder; the map clears for a new selection.">✦ New world</button>
+      <label class="stat" style="display:flex;align-items:center;gap:6px;margin-top:6px" title="Uncheck to hide the coloured cell squares so you can see the map underneath while picking a new area. The plan itself is not changed.">
+        <input id="showCells" type="checkbox" checked style="width:auto;margin:0">Show cells on the map</label>
     </div>
 
     <div class="card">
@@ -1252,8 +1252,15 @@
         <span class="i" title="Live map data comes from Overpass, a free shared service with per-IP limits. A big or repeated fetch can come back rate limited (429) or server overloaded (403); Meld rotates mirrors and retries, and everything fetched is cached on the shared grid so a re-run costs nothing. If your network blocks Overpass, or you fetch the same region often, bake a local .pbf below instead.">i</span></div>
       <div class="row">
         <button class="sec" id="btnOsmCoverage" title="Check how much of the selection's OSM is baked/cached on the stable grid. Any red tiles are edge/sea tiles outside your .pbf (the seam ring + the Black Sea), not errors; generation fetches each live once and caches it.">Check OSM coverage</button>
-        <button class="sec" id="btnOsmBake" title="Slice the .pbf folder below into the selection's missing OSM tiles. Offline, uses your CPU/RAM/disk, no Overpass calls.">⤓ Bake from .pbf</button>
+        <button class="sec" id="btnOsmBake" title="Slice the .pbf folder below into baked OSM tiles. Offline, uses your CPU/RAM/disk, no Overpass calls. What gets baked is the Bake scope below.">⤓ Bake from .pbf</button>
       </div>
+      <label style="margin-top:6px">Bake scope
+        <span class="i" title="The bake reads each whole .pbf file no matter how few tiles it writes (that read is what guarantees complete ways at tile edges). So: 'selection' writes only your area's tiles but still reads the whole file; 'entire .pbf coverage' pays the SAME read once and bakes every tile the file covers, so every future selection in that country is already local. Pick entire coverage if you'll render this country more than once; disk cost is roughly 29x the .pbf size for full coverage.">i</span></label>
+      <select id="osmBakeScope" style="width:100%">
+        <option value="missing" selected>Selection — missing tiles only</option>
+        <option value="all">Selection — re-bake all tiles</option>
+        <option value="file">Entire .pbf coverage (whole country)</option>
+      </select>
       <div class="bar" id="osmBarWrap" style="display:none;margin-top:6px"><i id="osmBar" style="width:0%"></i></div>
       <div class="stat" id="osmProg" style="display:none;margin-top:2px"></div>
       <button class="sec" id="btnOsmStop" style="display:none;margin-top:4px" title="Stop the running bake (already-written tiles are kept).">Stop bake</button>
@@ -6363,12 +6370,14 @@ async function osmCoverage() {
 }
 let _osmPoll = null;
 async function osmBake() {
+  const scope = ($('osmBakeScope') && $('osmBakeScope').value) || 'missing';
   const sel = _dpSelection();
-  if (!sel) { $('osmCov').textContent = 'Draw or search an area first.'; return; }
+  // Whole-file coverage doesn't need a selection: the tiles come from the .pbf header bboxes.
+  if (!sel && scope !== 'file') { $('osmCov').textContent = 'Draw or search an area first.'; return; }
   const folder = ($('osmPbfPath').value || '').trim();
   if (!folder) { $('osmCov').textContent = 'Enter the folder holding your .pbf file(s) first.'; return; }
   $('osmCov').textContent = 'Starting OSM bake…';
-  const r = await _dpApi('/api/osmpack/bake', Object.assign({ folder }, sel));
+  const r = await _dpApi('/api/osmpack/bake', Object.assign({ folder, scope }, sel || {}));
   if (!r || !r.ok) { $('osmCov').textContent = (r && r.error) || 'bake failed'; return; }
   $('osmBarWrap').style.display = ''; $('osmProg').style.display = ''; $('btnOsmStop').style.display = '';
   if (_osmPoll) clearInterval(_osmPoll);
@@ -6381,9 +6390,19 @@ async function osmPollStatus() {
     $('osmProg').textContent = (s && s.error) || 'status unreachable';
     return;
   }
-  const pct = s.total ? Math.round(100 * s.done_n / s.total) : (s.done ? 100 : 0);
+  const sc = s.scan || {};
+  let pct, line;
+  if (s.active && !s.done_n && sc.file) {
+    // Both .pbf passes run BEFORE any tile resolves; show the read moving instead of a bar
+    // frozen at 0/N. Element count is exact, the percent is placed by an elements-per-MB model.
+    pct = sc.pct || 0;
+    line = `${s.note || ''} · reading ${sc.file}: ${(sc.seen / 1e6).toFixed(1)}M elements `
+         + `(pass ${(sc.phase || 0) + 1}/2, ~${pct}%)`;
+  } else {
+    pct = s.total ? Math.round(100 * s.done_n / s.total) : (s.done ? 100 : 0);
+    line = `${s.note || ''} · ${s.done_n}/${s.total} (${s.ok} baked, ${s.fail} failed)`;
+  }
   $('osmBar').style.width = pct + '%';
-  let line = `${s.note || ''} · ${s.done_n}/${s.total} (${s.ok} baked, ${s.fail} failed)`;
   // Once ≥5 real tiles exist their measured sizes replace the sampled constant server-side;
   // quote that projection so the progress line stops being a guess.
   const pj = s.projection || {};
@@ -6420,7 +6439,9 @@ async function osmScan() {
   try {
     // The plan needs the selection, same as the bake: the estimate is region-dependent and
     // the whole point of it is skipping .pbf files that fall outside.
-    const p = await _dpApi('/api/osmpack/plan', Object.assign({ folder }, _dpSelection() || {}));
+    const p = await _dpApi('/api/osmpack/plan', Object.assign(
+      { folder, scope: ($('osmBakeScope') && $('osmBakeScope').value) || 'missing' },
+      _dpSelection() || {}));
     if (p && p.ok) {
       const warn = !p.fits;
       const skipped = p.pbf_skipped
