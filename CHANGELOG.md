@@ -4,6 +4,35 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.9.6] - 2026-08-24
+
+Bundles arnis fork 3.1.6 with the building and shoreline upgrades: per type
+height inference, Overture measured heights, era styled walls and windows,
+straightened coasts, and the shore band land override that keeps quays and
+promenades above water. Details in the arnis release notes.
+
+### Added
+- **Bake scope choice** in the OSM data pack card: bake only the selection's
+  missing tiles (the old behaviour), re-bake all selection tiles, or bake the
+  entire .pbf coverage. The whole file is read either way, so baking the whole
+  country costs the same read as one selection and every later selection is
+  already local. Whole file scope needs no drawn selection.
+
+### Changed
+- **The bake progress bar shows the source read.** Both .pbf passes run before
+  any tile resolves, so the bar used to sit at 0/N looking hung for the whole
+  read. It now reports the file, the pass, and the exact element count.
+- **The bake time estimate charges both read passes.** A 20 tile Romania bake
+  used to quote under a minute and take several; the fixed full file read
+  dominates small bakes and is billed properly now.
+- **No automatic world backup before the first server start.** The setting
+  defaulted on for every project regardless of the toggle, so a 1 GB world
+  zipped a 1 GB archive right when you pressed Start. Backups are the Backup
+  world button now, on demand only. The project master world is always the
+  untouched source either way.
+- **Show cells on the map** moved to the bottom of the Generate card and
+  collapses with it.
+
 ## [1.9.5] - 2026-08-23
 
 The GPU/void/naming feature branch, merged on top of the triage release. The
