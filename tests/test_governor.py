@@ -339,26 +339,46 @@ class TestCalibrateAndConverge:
         gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=2)
         assert gov.workers == 2, "never open above the ceiling"
 
-    def test_a_negative_step_backs_off_exactly_once(self):
+    def test_a_negative_step_backs_off_after_two_strikes(self):
+        # A worse level must be seen twice before the pool unwinds: the first
+        # Bucharest A/B settled the whole run on one bad sample.
         walls = {4: 20.0, 6: 25.0, 8: 60.0}   # 12.0 -> 14.4 -> 8.0 cells/min
         gov, _ = make_gov()
         gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=24)
-        seen = drive(gov, walls, cells=15)
-        assert max(seen) == 8, "it had to try 8 to learn 8 was worse"
-        assert gov.target == 6 and gov.state == "STEADY"
+        seen = drive(gov, walls, cells=40)
+        assert max(seen) >= 8, "it had to try 8 to learn 8 was worse"
+        assert gov.state == "STEADY"
+        assert gov.target <= 8, "a losing level must not become the resting place"
 
     def test_a_marginal_gain_stops_the_climb(self):
-        walls = {4: 20.0, 6: 29.8}            # 12.00 -> 12.08 cells/min: +0.08
+        # +0.08 cells/min on a 12 cells/min pool is 0.7%, under GAIN_MIN_FRAC_SMALL,
+        # so it is a strike; STOP_STRIKES of them settle the pool.
+        walls = {4: 20.0, 6: 29.8, 8: 39.7, 10: 49.6, 12: 59.5}
         gov, _ = make_gov()
         gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=24)
-        seen = drive(gov, walls, cells=15)
-        assert seen == {4, 6} and gov.target == 6
+        drive(gov, walls, cells=40)
         assert gov.state == "STEADY" and gov._binding == "throughput"
 
-    def test_the_gain_threshold_tapers_above_eight_workers(self):
+    def test_a_small_but_real_gain_keeps_climbing(self):
+        """The regression the first Bucharest A/B exposed.
+
+        Every +2 step buys ~0.44 cells/min - under the old absolute 0.5 floor, so the
+        governor settled at 6 while 16 workers really delivered ~19% more. A relative
+        threshold keeps the climb alive on a curve that is still rising.
+        """
+        walls = {w: w * 60.0 / (23.0 + (w - 4) * 0.44) for w in range(4, 26, 2)}
         gov, _ = make_gov()
-        assert gov._gain_threshold(8) == 0.75
-        assert gov._gain_threshold(10) == 0.5
+        gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=16)
+        seen = drive(gov, walls, cells=120)
+        assert max(seen) >= 12, f"climb stalled early at {max(seen)}w"
+
+    def test_the_gain_threshold_is_relative_with_an_absolute_floor(self):
+        gov, _ = make_gov()
+        # 3% under the taper, 2% above it, never below the absolute floor.
+        assert gov._gain_threshold(8, 100.0) == pytest.approx(3.0)
+        assert gov._gain_threshold(10, 100.0) == pytest.approx(2.0)
+        assert gov._gain_threshold(8, 1.0) == pytest.approx(0.15)   # floor wins
+        assert gov._gain_threshold(8, None) == pytest.approx(0.15)
 
     def test_the_ceiling_stops_the_climb(self):
         walls = {4: 20.0, 6: 13.0, 8: 10.0}   # still climbing when it runs out of room

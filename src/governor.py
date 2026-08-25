@@ -88,12 +88,27 @@ SMALL_GRID_CELLS = 32
 #: Hill-climb step. Matches occupancy.damped_step's default: measure, then move.
 CLIMB_STEP = 2
 
-#: Marginal cells/min a +2 step must buy to justify the next one. Lower above 8
-#: workers because past the 8 P-cores the added workers land on E-cores and the
-#: honest gain per step gets smaller (the measured taper), not because we care less.
-GAIN_MIN_SMALL = 0.75
-GAIN_MIN_LARGE = 0.5
+#: Fraction of current throughput a +2 step must buy to justify the next one.
+#: RELATIVE, not absolute: the first Bucharest A/B settled at 6 workers because each
+#: step bought ~0.44 cells/min - under the old absolute 0.5 floor - while the climb
+#: from 6 to 16 was still worth +19% in total. A percentage cannot mistake "small
+#: steps on a curve that is still rising" for a plateau the way a flat number does.
+GAIN_MIN_FRAC_SMALL = 0.03
+GAIN_MIN_FRAC_LARGE = 0.02
 GAIN_TAPER_WORKERS = 8
+
+#: An absolute floor under the relative test, so a near-zero-throughput start cannot
+#: make every step look significant.
+GAIN_MIN_ABS = 0.15
+
+#: Consecutive non-paying steps required before the climb stops. One sample is noise:
+#: the same A/B stepped 4 -> 6 -> 8 and unwound to 6 on a single bad measurement.
+STOP_STRIKES = 2
+
+#: While the CPU budget is this far from spent, a step that merely fails to pay is a
+#: strike, never an immediate stop. At 71% CPU and 51% RAM nothing should have settled
+#: at 6 of 24 cores - there was budget left and the stop rules did not know it.
+BUDGET_SPENT_CPU_PCT = 88.0
 
 #: Contention signature: if a step drops measured cores-per-cell below this fraction
 #: of the previous step's, the new workers are mostly waiting on each other.
@@ -368,6 +383,7 @@ class Governor:
         self._prev_tp: float | None = None
         self._prev_workers = 0
         self._prev_cpc: float | None = None
+        self._strikes = 0
         self._steady_tp: float | None = None
         self._drift_run = 0
         self._recheck_left = 0
@@ -661,8 +677,30 @@ class Governor:
         with self._lock:
             return self._tp(list(self._walls))
 
-    def _gain_threshold(self, workers: int) -> float:
-        return GAIN_MIN_SMALL if workers <= GAIN_TAPER_WORKERS else GAIN_MIN_LARGE
+    def _gain_threshold(self, workers: int, tp: float | None = None) -> float:
+        """Relative to what the pool already delivers, with an absolute floor."""
+        frac = (GAIN_MIN_FRAC_SMALL if workers <= GAIN_TAPER_WORKERS
+                else GAIN_MIN_FRAC_LARGE)
+        return max(GAIN_MIN_ABS, frac * (tp or 0.0))
+
+    def _budget_spent(self) -> bool:
+        """True when the machine is genuinely busy, so a weak step really is the knee.
+
+        With CPU headroom left, a step that does not pay is far more likely to be a
+        noisy sample than a wall, so it costs a strike instead of ending the climb."""
+        pct = self._cpu_pct_now()
+        return pct is not None and pct >= BUDGET_SPENT_CPU_PCT
+
+    @staticmethod
+    def _cpu_pct_now() -> float | None:
+        try:
+            import psutil
+        except Exception:  # noqa: BLE001 - psutil is optional everywhere else too
+            return None
+        try:
+            return float(psutil.cpu_percent(interval=None))
+        except Exception:  # noqa: BLE001
+            return None
 
     def on_cell_complete(
         self,
@@ -760,6 +798,9 @@ class Governor:
         self._drift_run = 0
         self._log(f"  [Governor] steady at {self.workers} workers ({note})")
 
+    def _reset_strikes(self) -> None:
+        self._strikes = 0
+
     def _on_calibrate(self) -> int | None:
         """Measure the opening level, then hand over to the hill climb."""
         if len(self._step_walls) < STEP_SAMPLES:
@@ -793,25 +834,48 @@ class Governor:
             self._remember_step(tp)
             return None
         gain = tp - prev
-        threshold = self._gain_threshold(self._prev_workers or self.workers)
+        threshold = self._gain_threshold(self._prev_workers or self.workers, prev)
 
-        if gain < 0:
-            # Negative step: unwind exactly one step and stop. Whatever the last move
-            # bought, it cost more.
-            back = damped_step(self.workers, self._prev_workers or self.workers, CLIMB_STEP)
-            self._settle(
-                "throughput",
-                f"{gain:+.1f} cells/min at {self.workers}w -> back to {back}w",
-                prev,
-            )
-            return self._apply(back)
+        # A step that fails to pay costs a strike; only STOP_STRIKES of them in a row
+        # end the climb. A single weak sample used to settle the pool for the whole run.
         if gain < threshold:
-            self._settle(
-                "throughput",
-                f"+{gain:.2f} cells/min < {threshold} - knee at {self.workers}w",
-                tp,
-            )
-            return None
+            self._strikes += 1
+            spent = self._budget_spent()
+            last = self._strikes >= STOP_STRIKES or (gain < 0 and spent)
+            if last:
+                if gain < 0:
+                    # Genuinely worse: unwind exactly one step. Whatever the last move
+                    # bought, it cost more.
+                    back = damped_step(self.workers, self._prev_workers or self.workers,
+                                       CLIMB_STEP)
+                    self._settle(
+                        "throughput",
+                        f"{gain:+.1f} cells/min at {self.workers}w after "
+                        f"{self._strikes} strikes -> back to {back}w",
+                        prev,
+                    )
+                    return self._apply(back)
+                self._settle(
+                    "throughput",
+                    f"+{gain:.2f} < {threshold:.2f} cells/min for {self._strikes} "
+                    f"steps - knee at {self.workers}w",
+                    tp,
+                )
+                return None
+            self._binding = "throughput"
+            self._note = (f"strike {self._strikes}/{STOP_STRIKES} "
+                          f"({gain:+.2f} cells/min, cpu spent={spent})")
+            if gain < 0:
+                # Worse, but only once. Re-measure THIS level rather than climbing
+                # further into territory that just looked bad - keep the old baseline
+                # so the retry is judged against the same number.
+                self._step_walls = []
+                return None
+            # Flat-but-not-worse with CPU budget still free: far more likely noise than
+            # the knee, so take one more step and let the next sample decide.
+            self._remember_step(max(tp, prev))
+        else:
+            self._strikes = 0
 
         cpc, prev_cpc = self.cores_per_cell, self._prev_cpc
         if cpc and prev_cpc and cpc < CONTENTION_RATIO * prev_cpc:
@@ -845,6 +909,7 @@ class Governor:
             self._drift_run = 0
             self._recheck_left = 0
             self._prev_tp = None
+            self._strikes = 0
             self._binding = "throughput"
             self._note = f"throughput drifted {drift * 100:.0f}% - recalibrating"
             self._log(f"  [Governor] throughput drifted {drift * 100:.0f}%, recalibrating")
@@ -882,6 +947,7 @@ class Governor:
             self._prev_tp = None
             self._prev_workers = 0
             self._prev_cpc = None
+            self._strikes = 0
             self._steady_tp = None
             self._drift_run = 0
             self._recheck_left = 0
