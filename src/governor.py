@@ -375,6 +375,8 @@ class Governor:
         self._occ = OccupancyTracker()
         self._walls: list[float] = []        # rolling, for cells_per_min + drift
         self._step_walls: list[float] = []   # since the current worker level began
+        self._step_stamps: list[float] = []  # completion times, for the wall-clock rate
+        self._scale: float = 1.0
         self._rss: list[float] = []
         self._samples = 0
         self._stale_samples = 0     # completions dropped as belonging to an old level
@@ -402,6 +404,7 @@ class Governor:
         self._reset_run()
         self.mode = self._resolve_mode(cfg)
         self.bucket = bucket_key(float(scale or 1.0), int(cell_size or 1))
+        self._scale = float(scale or 1.0)
         self._total_cells = max(0, int(total_cells or 0))
 
         explicit = self._governor_max_workers(cfg)
@@ -435,11 +438,21 @@ class Governor:
 
         if self._total_cells < SMALL_GRID_CELLS:
             # Too short to pay for a ramp: a 4-cell grid would still be calibrating
-            # when it finished. Run the stored count and stay out of the way.
+            # when it finished. Run the stored count and stay out of the way - but the
+            # RAM envelope still applies. Skipping it put 20 workers x 8x8 cells on a
+            # 31.4 GB box and drove RAM to 98% while delivering less than 16 workers.
             self.state = "STEADY"
             self._static = True
-            self.workers = self.target = _clamp(base, 1, self.ceiling)
-            self._note = f"small grid ({self._total_cells} cells): static {self.workers}w"
+            want = _clamp(base, 1, self.ceiling)
+            self.workers = self.target = self._ram_envelope(want, cfg)
+            if self.workers < want:
+                self._binding = "ram"
+                self._note = (f"small grid ({self._total_cells} cells): {want}w "
+                              f"trimmed to {self.workers}w by RAM headroom")
+                self._log(f"  [Governor] small grid: {want}w exceeds RAM headroom, "
+                          f"using {self.workers}w")
+            else:
+                self._note = f"small grid ({self._total_cells} cells): static {self.workers}w"
             return
 
         self.state = "CALIBRATE"
@@ -573,6 +586,7 @@ class Governor:
         self._occ = OccupancyTracker()
         self._walls = []
         self._step_walls = []
+        self._step_stamps = []
         self._drift_run = 0
 
     # ------------------------------------------------------------- admission --
@@ -659,11 +673,15 @@ class Governor:
             return _p95(list(self._rss))
 
     def _tp(self, walls: list[float]) -> float | None:
-        """Delivered cells/min at the CURRENT worker count.
+        """Delivered cells/min at the CURRENT worker count, from median cell wall.
 
-        Derived from the median cell wall rather than counted off the clock so it is
-        immune to how long the caller sat between cells, and so a stall in one worker
-        cannot masquerade as a throughput collapse in all of them.
+        Kept for the STEADY drift check, where the comparison is against the same
+        worker level and the median is the more stable of the two estimators.
+
+        NOT used for step decisions - see _rate_tp. workers * 60 / median silently
+        assumes every level renders comparable cells, and a spiral-ordered Bucharest
+        run does the dense centre first: the median at 8 workers is drawn from harder
+        cells than the median at 6, so the step reads as a loss that never happened.
         """
         if not walls:
             return None
@@ -671,6 +689,22 @@ class Governor:
         if median <= 0:
             return None
         return self.workers * 60.0 / median
+
+    def _rate_tp(self) -> float | None:
+        """Cells actually finished per minute of wall clock, at this worker level.
+
+        The honest metric for a step decision: it counts delivery instead of modelling
+        it, so cell-to-cell difficulty cancels out over the window and the number can
+        be compared across levels. Needs two completions to have an interval at all.
+        """
+        stamps = self._step_stamps
+        if len(stamps) < 2:
+            return None
+        span = stamps[-1] - stamps[0]
+        if span <= 0:
+            return None
+        # n-1 intervals between n completions.
+        return (len(stamps) - 1) * 60.0 / span
 
     @property
     def cells_per_min(self) -> float | None:
@@ -753,6 +787,7 @@ class Governor:
             self._walls.append(wall + gate)
             del self._walls[:-WINDOW_CELLS]
             self._step_walls.append(wall + gate)
+            self._step_stamps.append(self._now())
             self._samples += 1
 
             if self.mode != "auto" or self.state in ("OFF", "FROZEN") or self._static:
@@ -766,12 +801,30 @@ class Governor:
     # -------------------------------------------------------- state machine ---
 
     def _step_tp(self) -> float | None:
-        return self._tp(self._step_walls)
+        return self._rate_tp()
 
     def _remember_step(self, tp: float | None) -> None:
         self._prev_tp = tp
         self._prev_workers = self.workers
         self._prev_cpc = self.cores_per_cell
+
+    def _ram_envelope(self, want: int, cfg: dict | None = None) -> int:
+        """Largest worker count free RAM can hold, using the per-cell estimate for the
+        current scale when no measurement exists yet (a small grid never gets one)."""
+        avail = self._available_mb_probe()
+        rss = self.rss_p95_mb or self._rss_estimate_mb()
+        if avail is None or not rss:
+            return want
+        headroom = self._ram_headroom_mb(cfg if cfg is not None else self._cfg())
+        w = want
+        while w > 1 and avail < (w * rss + headroom):
+            w -= 1
+        return w
+
+    def _rss_estimate_mb(self) -> float:
+        """Static per-cell RAM estimate, mirroring server.py's scale threshold: a 1:1
+        cell peaks around 4.15 GB with eviction on, a small-scale cell around 1.2 GB."""
+        return 4150.0 if self._scale >= 0.25 else 1200.0
 
     def _ram_fits(self, target: int) -> bool:
         """Room for the workers this step ADDS, on top of what is already resident."""
@@ -786,6 +839,7 @@ class Governor:
         target = _clamp(target, 1, self.ceiling)
         self.target = target
         self._step_walls = []
+        self._step_stamps = []
         if target == self.workers:
             return None
         return target
@@ -870,6 +924,7 @@ class Governor:
                 # further into territory that just looked bad - keep the old baseline
                 # so the retry is judged against the same number.
                 self._step_walls = []
+                self._step_stamps = []
                 return None
             # Flat-but-not-worse with CPU budget still free: far more likely noise than
             # the knee, so take one more step and let the next sample decide.
@@ -906,6 +961,7 @@ class Governor:
         if self._drift_run >= DRIFT_CELLS:
             self.state = "RECAL"
             self._step_walls = []
+            self._step_stamps = []
             self._drift_run = 0
             self._recheck_left = 0
             self._prev_tp = None
@@ -944,6 +1000,7 @@ class Governor:
                 return
             self.state = "RECAL"
             self._step_walls = []
+            self._step_stamps = []
             self._prev_tp = None
             self._prev_workers = 0
             self._prev_cpc = None

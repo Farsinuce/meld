@@ -53,7 +53,28 @@ def make_gov(cores: int = CORES, avail_mb: float | None = 20_000.0,
     cfg.update(over)
     gov = Governor(cores=cores, get_settings=lambda: cfg)
     gov._available_mb_probe = lambda: avail_mb
+    # Step decisions are now a wall-clock rate, so every driver needs a clock it can
+    # advance. Real time would make the numbers depend on how fast the test machine is.
+    gov._clock = VirtualClock()
+    gov._now = gov._clock.now
+    # admit() polls against a deadline, so the clock must also move when it sleeps -
+    # otherwise a closed gate spins forever instead of timing out.
+    gov._sleep = gov._clock.advance
     return gov, cfg
+
+
+class VirtualClock:
+    """A clock the drivers advance by hand, so a simulated pool delivers cells at a
+    simulated rate. Deterministic: the same script always yields the same throughput."""
+
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def now(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += max(0.0, seconds)
 
 
 class FakeClock:
@@ -90,6 +111,8 @@ def drive(gov: Governor, walls: dict[int, float], cells: int,
         gov.threads_for_next_cell(workers=gov.target)   # the pool applies the target
         w = gov.workers
         wall = walls[w]
+        # W workers x `wall` seconds each => one completion every wall/W seconds.
+        gov._clock.advance(wall / max(1, w))
         gov.on_cell_complete(wall_s=wall, cpu_s=wall * _cpc_at(w, cpc),
                              peak_rss_mb=rss_mb, gpu_s=0.0, ok=True,
                              launched_workers=w)
@@ -119,6 +142,7 @@ def drive_pipelined(gov: Governor, walls: dict[int, float], cells: int,
         if len(inflight) > lag:
             done = inflight.popleft()
             wall = walls[done]
+            gov._clock.advance(wall / max(1, gov.workers))
             gov.on_cell_complete(wall_s=wall, cpu_s=wall * _cpc_at(done, cpc),
                                  peak_rss_mb=rss_mb, gpu_s=0.0, ok=True,
                                  launched_workers=done)
@@ -289,8 +313,12 @@ class TestThreadClamps:
 
 
 class TestSmallGrid:
+    # 16 x 4.15 GB + 2 GB headroom = ~68 GB, so the envelope has to be given room
+    # before "skips the ramp" can be tested independently of "fits in RAM".
+    ROOMY = 70_000.0
+
     def test_a_short_grid_skips_the_ramp_entirely(self):
-        gov, _ = make_gov()
+        gov, _ = make_gov(avail_mb=self.ROOMY)
         gov.begin_run(total_cells=10, scale=1.0, cell_size=4, ceiling=16)
         assert gov.state == "STEADY" and gov.workers == 16
         seen = drive(gov, {16: 30.0}, cells=20)
@@ -298,10 +326,29 @@ class TestSmallGrid:
         assert gov.target == 16
 
     def test_a_short_grid_persists_nothing(self):
-        gov, _ = make_gov()
+        gov, _ = make_gov(avail_mb=self.ROOMY)
         gov.begin_run(total_cells=10, scale=1.0, cell_size=4, ceiling=16)
         drive(gov, {16: 30.0}, cells=10)
         assert gov.end_run() is None, "a static run is not a converged answer"
+
+    def test_a_short_grid_still_obeys_the_ram_envelope(self):
+        """Skipping calibration must not skip the RAM check.
+
+        Measured: a 25-cell 8x8 run took the small-grid path, ran at the ceiling of
+        20 with no calibration and drove RAM to 98% while delivering LESS than the
+        16-worker baseline. 20 GB free at 1:1 holds (20000 - 2048) / 4150 = 4 cells.
+        """
+        gov, _ = make_gov(avail_mb=20_000.0)
+        gov.begin_run(total_cells=25, scale=1.0, cell_size=8, ceiling=20)
+        assert gov.state == "STEADY"
+        assert gov.workers == 4, f"ceiling 20 should trim to 4, got {gov.workers}"
+        assert gov._binding == "ram"
+
+    def test_a_small_scale_short_grid_is_barely_trimmed(self):
+        # 1:20 cells are ~1.2 GB, so the same 20 GB holds far more of them.
+        gov, _ = make_gov(avail_mb=20_000.0)
+        gov.begin_run(total_cells=10, scale=0.05, cell_size=4, ceiling=16)
+        assert gov.workers == 14
 
 
 class TestWarmStart:
