@@ -88,6 +88,13 @@ SMALL_GRID_CELLS = 32
 #: Hill-climb step. Matches occupancy.damped_step's default: measure, then move.
 CLIMB_STEP = 2
 
+#: While a step is paying HANDSOMELY (this many times the stop threshold), the next one
+#: doubles instead of adding CLIMB_STEP. Measured: an 81-cell Bucharest run spent 90 of
+#: its 190 seconds crawling 4 -> 6 -> 8 -> 10 -> 12 at +2, so the ramp cost more than the
+#: converged level could repay. Doubling reaches the same place in two moves, and the
+#: ordinary +2 still does the fine approach once the gains flatten near the knee.
+CLIMB_FAST_FACTOR = 3.0
+
 #: Fraction of current throughput a +2 step must buy to justify the next one.
 #: RELATIVE, not absolute: the first Bucharest A/B settled at 6 workers because each
 #: step bought ~0.44 cells/min - under the old absolute 0.5 floor - while the climb
@@ -386,6 +393,7 @@ class Governor:
         self._prev_workers = 0
         self._prev_cpc: float | None = None
         self._strikes = 0
+        self._last_jump = 0
         self._steady_tp: float | None = None
         self._drift_run = 0
         self._recheck_left = 0
@@ -892,6 +900,24 @@ class Governor:
 
         # A step that fails to pay costs a strike; only STOP_STRIKES of them in a row
         # end the climb. A single weak sample used to settle the pool for the whole run.
+        if gain < threshold and self._last_jump > CLIMB_STEP and self._prev_workers:
+            # The jump overshot: the knee lies between the last good level and here, so
+            # bisect instead of settling. Without this, doubling past a flat knee parks
+            # the pool at the top of the plateau - same throughput, triple the per-cell
+            # latency and RAM, which is exactly what the knee test exists to prevent.
+            mid = (self._prev_workers + self.workers) // 2
+            mid = _clamp(mid - (mid % 2), self._prev_workers, self.workers)
+            if mid > self._prev_workers and mid < self.workers:
+                self._last_jump = 0
+                self._strikes = 0
+                self._binding = "throughput"
+                self._note = (f"{gain:+.2f} cells/min after a jump to {self.workers}w "
+                              f"- bisecting to {mid}w")
+                self._prev_tp = prev
+                return self._apply(mid)
+            # No room to bisect: fall through and treat it as an ordinary weak step.
+            self._last_jump = 0
+
         if gain < threshold:
             self._strikes += 1
             spent = self._budget_spent()
@@ -939,7 +965,16 @@ class Governor:
         if self.workers >= self.ceiling:
             self._settle("ceiling", f"at ceiling {self.ceiling}", tp)
             return None
-        nxt = _clamp(damped_step(self.workers, self.workers + CLIMB_STEP, CLIMB_STEP), 1, self.ceiling)
+        # Far from the knee the crawl IS the cost: double while the evidence is strong,
+        # then fall back to +2 for the fine approach.
+        if gain >= CLIMB_FAST_FACTOR * threshold:
+            want = self.workers * 2
+            step = max(CLIMB_STEP, want - self.workers)
+        else:
+            want = self.workers + CLIMB_STEP
+            step = CLIMB_STEP
+        nxt = _clamp(damped_step(self.workers, want, step), 1, self.ceiling)
+        self._last_jump = max(0, nxt - self.workers)
         if not self._ram_fits(nxt):
             self._settle("ram", "RAM headroom blocks the ramp", tp)
             return None

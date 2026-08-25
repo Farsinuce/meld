@@ -389,7 +389,9 @@ class TestCalibrateAndConverge:
     def test_a_negative_step_backs_off_after_two_strikes(self):
         # A worse level must be seen twice before the pool unwinds: the first
         # Bucharest A/B settled the whole run on one bad sample.
-        walls = {4: 20.0, 6: 25.0, 8: 60.0}   # 12.0 -> 14.4 -> 8.0 cells/min
+        # Past 6 everything is worse, and the fast ramp can jump straight to 8 or
+        # bisect through 10/12, so every reachable level has to be priced.
+        walls = {4: 20.0, 6: 25.0, 8: 60.0, 10: 80.0, 12: 100.0, 14: 120.0, 16: 140.0}
         gov, _ = make_gov()
         gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=24)
         seen = drive(gov, walls, cells=40)
