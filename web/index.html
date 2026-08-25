@@ -307,6 +307,29 @@
   .bar { height:10px; background:#1c1916; border:1px solid var(--line); border-radius:2px; overflow:hidden; margin-top:4px; }
   .bar > i { display:block; height:100%; background:var(--run); width:0; transition:width .3s ease; }
   .bar > i.ok { background:var(--ok); } .bar > i.bad { background:var(--bad); }
+  /* ---- Generation performance (manual knobs + governor readout) ----
+     A row the governor has taken over is DIMMED, never hidden: the whole point of the
+     section is that you can always read what the machine decided, and switching Mode
+     back to Off hands the same row straight back to you. */
+  .govhead { display:flex; align-items:center; gap:6px; color:var(--acc2); font-weight:600;
+    font-size:12px; letter-spacing:.03em; margin:0 0 4px; font-family:var(--pixel);
+    text-transform:uppercase; }
+  .govrow.dim { opacity:.42; }
+  .govrow.dim input, .govrow.dim select { pointer-events:none; }
+  .goveff { font-size:11px; color:var(--mut); margin:-3px 0 7px; overflow-wrap:anywhere; }
+  .goveff b { color:var(--fg); font-weight:600; font-variant-numeric:tabular-nums; }
+  #govLive { border:1px solid var(--hair2); border-radius:var(--rsm); background:rgba(0,0,0,.22);
+    padding:7px 8px; margin:9px 0 2px; }
+  .govline { display:flex; justify-content:space-between; align-items:baseline; gap:8px;
+    font-size:11.5px; color:var(--mut); margin:2px 0; }
+  .govline b { color:var(--fg); font-weight:600; font-variant-numeric:tabular-nums; }
+  #govState { color:var(--acc2); border-color:#5a4a1e; }
+  #govState.gs-steady { color:var(--ok); border-color:#3f5a2a; }
+  #govState.gs-frozen, #govState.gs-off { color:var(--mut); }
+  #govCeilPrompt { border:1px solid var(--acc); border-radius:var(--rsm); background:rgba(227,164,23,.10);
+    padding:8px; margin:8px 0; font-size:11.5px; color:var(--fg); line-height:1.5; }
+  #govCeilPrompt b { color:var(--acc2); }
+  #govCeilPrompt button { font-size:11px; padding:5px 8px; }
   /* live per-worker rows (Workers card, near the log) */
   .wjob { display:flex; gap:8px; align-items:flex-start; padding:6px 0; border-bottom:1px solid var(--line); }
   .wjob:last-child { border-bottom:0; }
@@ -581,10 +604,6 @@
           <span id="snowPctWrap" style="display:none"><input id="snowPct" type="number" step="1" min="0" max="100" title="peaks: top N% of the world height gets snow" style="width:54px"> %</span>
           <span id="snowYWrap" style="display:none"><input id="snowY" type="number" step="1" title="manual: snow at/above this Y" style="width:62px"> Y</span>
         </span></label>
-      <label>Workers
-        <span class="i" title="Parallel Arnis runs. Generation is mostly CPU bound: keep workers x threads at or under your CPU cores, going over slows it down. Recommend tunes it to your machine; RAM and save-disk speed are secondary caps. Auto-clamped to 2 below scale 0.5.">i</span>
-        <input id="workers" type="number" min="1" max="64" step="1" list="workerpresets"></label>
-      <datalist id="workerpresets"><option value="4"></option><option value="8"></option><option value="16"></option><option value="32"></option><option value="64"></option></datalist>
       <!-- Both of these were already plumbed all the way to the generator from a project key that
            no control ever wrote, so the only way to use them was hand-editing project.json. -->
       <details class="drawer">
@@ -599,21 +618,85 @@
             <input id="cellTimeout" type="number" min="60" max="7200" step="60" placeholder="600" style="width:110px"></label>
         </div>
       </details>
-      <label>CPU budget <span id="cpuPctVal" style="float:right;color:var(--acc2)">90%</span>
-        <span class="i" title="Share of CPU cores Meld hands to Arnis across all workers. Lower = quieter machine + headroom; higher = faster. Capped at 95% for safety so the OS + disk save phase never starve. Each worker still gets at least the min-threads floor.">i</span>
-        <input id="cpuPct" type="range" min="10" max="95" step="5" style="width:100%"></label>
-      <label>Threads / task <span id="minThrVal" style="float:right;color:var(--acc2)">4</span>
-        <span class="i" title="Threads each Arnis task (cell) gets for its in-process tile build. Keep workers x threads at or under your CPU cores; over it oversubscribes the cores and slows the build.">i</span>
-        <input id="minThr" type="range" min="1" max="8" step="1" value="4" style="width:100%"></label>
-      <div class="stat" style="margin-top:4px">Keep <b style="color:var(--fg)">workers &times; threads</b> at or under your CPU cores. Over it is slower. On 24 cores, 12&times;2 and 8&times;3 are about the same.</div>
-      <label>Stagger starts
-        <span class="i" title="Delay each worker's first cell so they don't all hit the network / CPU / disk at the same instant (smoother CPU, less spiky). Off = all start at once. The slider is the per-worker step in seconds.">i</span>
-        <input id="staggerOn" type="checkbox"></label>
-      <label id="staggerStepRow">Stagger step <span id="staggerSecVal" style="float:right;color:var(--acc2)">2s</span>
-        <input id="staggerSec" type="range" min="1" max="4" step="1" style="width:100%"></label>
-      <label id="staggerAdaptiveRow">Adaptive pacing
-        <span class="i" title="Pace worker starts from the measured average cell time so each worker hits the CPU as the previous one frees (keeps cores full, smoother). Off = fixed step from the slider. The slider is the floor either way.">i</span>
-        <input id="staggerAdaptive" type="checkbox"></label>
+
+      <!-- == Generation performance ==============================================
+           Every speed knob in ONE place, manual first. The mode picker on top only
+           decides WHO turns them; the numbers stay visible and readable in all three
+           modes, because "the app is doing something to my PC and I cannot see what"
+           was the actual complaint. Old servers without the governor keys never set
+           _govSupported, so the mode row, the buttons and the live block hide
+           themselves and this collapses back to exactly today's controls. -->
+      <div id="genPerf" style="border-top:1px solid var(--line);margin-top:9px;padding-top:7px">
+        <div class="govhead">Generation performance
+          <span class="i" title="How hard Meld is allowed to drive this PC while it builds: how many cells run at the same time, how many CPU threads each cell gets, and how much CPU and free RAM it must leave alone. With Mode on Off, the numbers here are used exactly as you type them.">i</span></div>
+        <label class="govrow" id="govModeRow">Mode
+          <span class="i" title="Off: manual. Meld uses your numbers below, unchanged, for the whole run. Advise: it times the run and logs what it would have changed, while running the job exactly as Off does, same workers, same threads, same start pacing. Auto: it starts low, times every cell, and moves the worker count to whatever is actually fastest on this machine, never going past the limits you set below. You can switch back to Off mid-run.">i</span>
+          <select id="govMode">
+            <option value="off">Off, I set them</option>
+            <option value="advise">Advise, suggest only</option>
+            <option value="auto">Auto, Meld tunes it</option>
+          </select></label>
+        <div class="goveff" id="govModeHint"></div>
+        <!-- One-time inline ask, never a silent write: Auto cannot use more workers than
+             the ceiling, so a ceiling left at 4 makes Auto look broken. -->
+        <div id="govCeilPrompt" style="display:none">
+          <div id="govCeilText"></div>
+          <div class="row" style="margin-top:7px">
+            <button class="sec" id="btnGovCeilRaise" type="button">Raise it</button>
+            <button class="sec" id="btnGovCeilKeep" type="button">Keep mine</button>
+          </div>
+        </div>
+        <label class="govrow" id="workersRow"><span id="workersLabelText">Workers</span>
+          <span class="i" id="workersTip" title="How many cells are generated at the same time, each one its own Arnis process. Raise it and more of the CPU is used at once, up to the point where the workers fight over the same cores and every cell simply takes longer for the same total speed. Lower it for a quieter, cooler machine. In Auto this number is the ceiling: Meld may use fewer, never more.">i</span>
+          <input id="workers" type="number" min="1" max="64" step="1" list="workerpresets"></label>
+      <datalist id="workerpresets"><option value="4"></option><option value="8"></option><option value="16"></option><option value="32"></option><option value="64"></option></datalist>
+        <div class="goveff" id="workersEff"></div>
+        <label class="govrow" id="minThrRow">Threads / task <span id="minThrVal" style="float:right;color:var(--acc2)">4</span>
+          <span class="i" title="CPU threads handed to each single cell for its own tile build. Workers times threads is the real load on your cores: raise this and each cell finishes sooner on its own, but fewer cells fit side by side before you oversubscribe the CPU and everything slows down together. In Auto, Meld picks this per cell and the row is greyed out.">i</span>
+          <input id="minThr" type="range" min="1" max="8" step="1" value="4" style="width:100%"></label>
+        <div class="goveff" id="minThrEff"></div>
+        <div class="stat" style="margin-top:4px">Keep <b style="color:var(--fg)">workers &times; threads</b> at or under your CPU cores. Over it is slower. On 24 cores, 12&times;2 and 8&times;3 are about the same.</div>
+        <label class="govrow" id="cpuPctRow">CPU limit <span id="cpuPctVal" style="float:right;color:var(--acc2)">90%</span>
+          <span class="i" title="The share of your CPU cores Meld may spend on generation, across all workers together. Lower it and the machine stays usable for other work while the build takes longer; raise it and the build gets the machine. It stops at 95 percent on purpose so Windows and the disk-writing step never starve. Each cell still gets at least the threads-per-task floor above.">i</span>
+          <input id="cpuPct" type="range" min="10" max="95" step="5" style="width:100%"></label>
+        <div class="goveff" id="cpuPctEff"></div>
+        <label class="govrow" id="ramHeadRow">RAM headroom <span id="ramHeadVal" style="float:right;color:var(--acc2)">2048 MB</span>
+          <span class="i" title="Free memory Meld refuses to eat into. Before starting another cell it checks that this much RAM would still be free afterwards, and waits instead of starting if it would not. Raise it if the machine starts swapping or workers die mid-save; lower it to squeeze one or two more workers out of a small-RAM PC, at the risk of a failed cell.">i</span>
+          <input id="ramHead" type="range" min="512" max="8192" step="256" style="width:100%"></label>
+        <div class="goveff" id="ramHeadEff"></div>
+        <label class="govrow" id="flushCapRow">Flush threads <span id="flushCapVal" style="float:right;color:var(--acc2)">12</span>
+          <span class="i" title="The most threads allowed to write finished regions to disk at once. Raise it on an NVMe drive to clear the save step faster; lower it on a slow or external drive, where too many parallel writes make every save slower and spike RAM. It is a limit, not a target: a run uses fewer when it has less to write.">i</span>
+          <input id="flushCap" type="range" min="1" max="24" step="1" style="width:100%"></label>
+        <div class="goveff" id="flushCapEff"></div>
+        <!-- Stagger paces the first cell of each worker. Auto replaces it with admission
+             control, so these rows hide there; Advise changes nothing, so they stay. -->
+        <label class="govrow" id="staggerOnRow">Stagger starts
+          <span class="i" title="Delays the FIRST cell of each worker at the start of a run, so they do not all hit the network, CPU and disk in the same instant. It applies once per worker per run and only in manual mode: it does nothing to later cells, and it does not make the run longer overall. Off means every worker starts at once.">i</span>
+          <input id="staggerOn" type="checkbox"></label>
+        <label id="staggerStepRow">Stagger step <span id="staggerSecVal" style="float:right;color:var(--acc2)">2s</span>
+          <input id="staggerSec" type="range" min="1" max="4" step="1" style="width:100%"></label>
+        <label id="staggerAdaptiveRow">Adaptive pacing
+          <span class="i" title="Space those first starts by the measured average cell time instead of a fixed step, so each worker begins as the previous one frees the CPU. The slider above stays the minimum gap either way. Manual mode only.">i</span>
+          <input id="staggerAdaptive" type="checkbox"></label>
+        <!-- Live readout: what the run is ACTUALLY doing right now, not what was asked for. -->
+        <div id="govLive" style="display:none">
+          <div class="govline"><span><span id="govState" class="chip">OFF</span></span><span>limited by <b id="govBinding">&mdash;</b></span></div>
+          <div class="govline"><span>Workers now &rarr; target</span><b><span id="govWorkers">&mdash;</span> &rarr; <span id="govTarget">&mdash;</span></b></div>
+          <div class="govline"><span>Threads / cell &middot; flush</span><b><span id="govThreads">&mdash;</span> &middot; <span id="govFlush">&mdash;</span></b></div>
+          <div class="bar" title="workers x threads against your CPU cores"><i id="govMeterBar" style="width:0"></i></div>
+          <div class="goveff" id="govMeterTxt" style="margin:3px 0 5px"></div>
+          <div class="govline"><span>Measured cores / cell</span><b id="govCoresCell">&mdash;</b></div>
+          <div class="govline"><span>Cells / min</span><b id="govCellsMin">&mdash;</b></div>
+          <div class="govline"><span>RAM p95 / worker</span><b id="govRss">&mdash;</b></div>
+          <div class="govline"><span>Cells measured</span><b id="govSamples">&mdash;</b></div>
+          <div class="goveff" id="govNote" style="margin:5px 0 0"></div>
+        </div>
+        <div class="goveff" id="govAdvice" style="display:none"></div>
+        <div class="row" id="govBtnRow" style="margin-top:7px">
+          <button class="sec" id="btnGovRecal" type="button" title="Throw away what Meld learned about this machine at this cell size and measure it again from scratch. Use it after you change something big: the cell size, the save drive, or what else is running on the PC.">Recalibrate</button>
+          <button class="sec" id="btnGovFreeze" type="button" title="Stop changing anything and hold the current worker count and thread counts for the rest of the run. They stay put until you recalibrate or switch modes.">Freeze</button>
+        </div>
+      </div>
 
       <label>Seed
         <span class="i" title="Tile-invariant building seed. Same value for the whole project keeps buildings identical across seams.">i</span>
@@ -1356,6 +1439,17 @@ let selectMode = 'replace';    // how a drawn/searched shape applies: replace | 
 let editCells = false;         // when on, drag the map to add/remove individual cells
 let retrySelect = false;       // when on, drag to mark cells for retry (a separate clump)
 let RAM_GB = null;             // detected RAM, drives the worker-count warning threshold
+// Generation-performance state. These live UP HERE with the other globals on purpose:
+// refreshState() reads them and it can run before the governor block further down has been
+// evaluated. `let` at the bottom of the file would still be in its temporal dead zone then
+// and throw, which is exactly the trap the range-painter comment further down describes.
+let _govSupported = false;     // server actually has the governor keys (old servers: stays false)
+let _govMode = 'off';          // 'off' | 'advise' | 'auto', mirrors settings.governor_mode
+let _govSnap = null;           // last /api/status .governor block
+let _govAdvice = null;         // last /api/governor .advice
+let _govHistory = null;        // last /api/governor .history (learned buckets)
+let _govCeiling = null;        // last /api/governor TOP-LEVEL .ceiling (advice has no such key)
+let _govFetchN = 0;            // throttles the /api/governor poll
 let projOrigin = null;         // {lat,lon} for recomputing cell geometry on refresh
 let projScale = 0.3;
 let projMbPerRegion = 4;   // refreshed from /api/state (measured or modelled per project)
@@ -2301,6 +2395,22 @@ async function refreshState() {
   }
   if ($('staggerOn')) $('staggerOn').checked = st.cpu_stagger_enabled !== false;
   if ($('staggerAdaptive')) $('staggerAdaptive').checked = st.cpu_stagger_adaptive !== false;
+  // Generation performance: mode + the two new budgets. A server that has never heard of the
+  // governor sends none of these keys, _govSupported stays false, and applyGovMode() collapses
+  // the section back to today's manual controls instead of showing dead automation UI.
+  if (st.governor_mode !== undefined || st.ram_headroom_mb !== undefined
+      || st.flush_threads_cap !== undefined || st.governor_max_workers !== undefined) _govSupported = true;
+  _govMode = ['off', 'advise', 'auto'].includes(st.governor_mode) ? st.governor_mode
+           : (st.worker_autoscale ? 'auto' : 'off');   // legacy autoscale reads as Auto
+  if ($('ramHead') && document.activeElement !== $('ramHead')) {
+    const rh = Math.max(512, Math.min(8192, parseInt(st.ram_headroom_mb) || 2048));
+    $('ramHead').value = rh;
+  }
+  if ($('flushCap') && document.activeElement !== $('flushCap')) {
+    const fc = Math.max(1, Math.min(24, parseInt(st.flush_threads_cap) || 12));
+    $('flushCap').value = fc;
+  }
+  if (typeof applyGovMode === 'function') applyGovMode();
   if (typeof syncStaggerStep === 'function') syncStaggerStep();
   if ($('tileKm') && document.activeElement !== $('tileKm')) {
     const km2 = parseInt(st.prefetch_tile_km2) || 0;                 // stored as area; slider is edge km
@@ -5029,10 +5139,313 @@ function _collapseCard(card, collapsed) {
 })();
 
 // Stagger step + adaptive pacing only make sense when stagger is on, hide them otherwise.
+// The whole stagger group disappears in AUTO only: there admission control decides when a
+// worker may start, so a "stagger starts" slider would be a lie. Advise changes nothing about
+// how a run is paced, so these rows stay live and honest in Off and Advise alike.
 function syncStaggerStep() {
-  const on = $('staggerOn') && $('staggerOn').checked;
+  const manual = !_govSupported || _govMode !== 'auto';
+  const grp = $('staggerOnRow'); if (grp) grp.style.display = manual ? '' : 'none';
+  const on = manual && $('staggerOn') && $('staggerOn').checked;
   for (const id of ['staggerStepRow', 'staggerAdaptiveRow']) { const r = $(id); if (r) r.style.display = on ? '' : 'none'; }
 }
+
+// ══ Generation performance ═══════════════════════════════════════════════════════════════
+// The manual knobs and the governor are ONE section, not two competing ones. Rules:
+//   - every number stays on screen in every mode, so the machine can never quietly own a
+//     knob you cannot see;
+//   - a knob the governor is actually driving is dimmed and says who has it;
+//   - nothing here writes a setting you did not ask for. The one place Meld wants to change
+//     a number of yours (the worker ceiling, which Auto cannot exceed) asks inline first.
+// Every block is guarded: on a server without the governor routes this degrades to the old UI.
+const GOV_MODE_HINT = {
+  off:    'Manual. Your numbers below are used exactly as typed, all run long.',
+  advise: 'Measure only. Meld times the run and logs what it would have changed. Nothing moves: '
+        + 'same workers, same threads per cell, same start pacing as Off.',
+  auto:   'Meld starts low, times every cell, and moves the worker count to whatever is fastest '
+        + 'on this PC. It never goes past the limits you set below.',
+};
+const GOV_BINDING_TXT = { cpu: 'CPU', ram: 'RAM', gpu: 'GPU', ceiling: 'your ceiling',
+                          disk: 'disk', none: 'nothing yet' };
+const GOV_STATE_TXT = {
+  WARMSTART: 'Starting from what it learned on this machine last time.',
+  CALIBRATE: 'Measuring this machine at this cell size.',
+  CONVERGE:  'Climbing while it is still getting faster.',
+  STEADY:    'Settled. It stays here unless something changes.',
+  RECAL:     'Re-measuring from scratch.',
+  FROZEN:    'Held by you. Nothing will move until you recalibrate.',
+  OFF:       'Not running.',
+};
+
+// Logical cores of THIS machine. The Leaf-server card already learned them from the server;
+// otherwise the browser's own count, which on the desktop app is the same PC.
+function govCores() {
+  if (typeof _mcsMachine === 'object' && _mcsMachine && _mcsMachine.cores) return _mcsMachine.cores;
+  return navigator.hardwareConcurrency || 8;
+}
+// Worker ceiling this PC could safely carry: cores, capped by the RAM rule the workers box
+// already warns with. The server's own ceiling wins whenever it sends one, and it arrives at
+// the TOP level of /api/governor as `ceiling` - never inside `advice`, which carries only
+// {workers, reason, cores_per_cell, rss_p95_mb, cells_per_min}.
+function govAdvisedCeiling() {
+  const srv = parseInt(_govCeiling);
+  if (srv > 0) return Math.min(64, srv);
+  return Math.max(1, Math.min(64, Math.min(govCores(), ramWorkerMax())));
+}
+const _govSet = (id, html) => { const e = $(id); if (e) e.innerHTML = html; };
+const _govTxt = (id, t) => { const e = $(id); if (e) e.textContent = t; };
+const _govNum = (v, d) => (v == null || isNaN(v)) ? null : Number(v).toFixed(d == null ? 2 : d);
+
+// Show/hide/dim by mode. Safe to call at any time, including before the first poll.
+function applyGovMode() {
+  const supported = !!_govSupported;
+  const m = supported ? _govMode : 'off';
+  const auto = m === 'auto';
+  if ($('govMode') && document.activeElement !== $('govMode')) $('govMode').value = m;
+  const showAuto = supported ? '' : 'none';
+  for (const id of ['govModeRow', 'govBtnRow']) { const e = $(id); if (e) e.style.display = showAuto; }
+  // RAM headroom and Flush threads are budgets only the new server reads. On an older one
+  // they would be two sliders that silently do nothing, so they hide with the rest of it and
+  // the section collapses to exactly the controls that shipped before.
+  for (const id of ['ramHeadRow', 'ramHeadEff', 'flushCapRow', 'flushCapEff']) {
+    const e = $(id); if (e) e.style.display = showAuto;
+  }
+  // ...and with Mode on Off the new server does not read them either: admission never runs,
+  // and the flush count comes from the legacy thread formula, not from this cap. Dim and
+  // disable rather than hide, so the number you set stays readable; govEff() writes the
+  // one-line reason under each row.
+  const governed = supported && m !== 'off';
+  for (const id of ['ramHeadRow', 'flushCapRow']) { const r = $(id); if (r) r.classList.toggle('dim', !governed); }
+  if ($('ramHead')) $('ramHead').disabled = !governed;
+  if ($('flushCap')) $('flushCap').disabled = !governed;
+  const mh = $('govModeHint');
+  if (mh) { mh.textContent = supported ? (GOV_MODE_HINT[m] || '') : ''; mh.style.display = supported ? '' : 'none'; }
+  // Workers reads as a hard count in manual mode and as a CEILING once Auto may move it.
+  _govTxt('workersLabelText', auto ? 'Worker ceiling' : 'Workers');
+  // Threads per cell is the one knob Auto takes over outright; the budgets below stay yours,
+  // Auto only has to obey them.
+  const mt = $('minThrRow'); if (mt) mt.classList.toggle('dim', auto);
+  if ($('minThr')) $('minThr').disabled = auto;
+  for (const id of ['btnGovRecal', 'btnGovFreeze']) { const b = $(id); if (b) b.disabled = !(supported && m !== 'off'); }
+  const live = $('govLive');
+  if (live) live.style.display = (supported && m !== 'off' && _govSnap) ? '' : 'none';
+  const adv = $('govAdvice');
+  if (adv) {
+    const t = (supported && m !== 'off') ? govAdviceText(_govAdvice) : '';
+    adv.textContent = t; adv.style.display = t ? '' : 'none';
+  }
+  if (!auto) { const cp = $('govCeilPrompt'); if (cp) cp.style.display = 'none'; }
+  syncStaggerStep();
+  govEff();
+}
+
+// The "what does this number actually mean right now" line under every knob. Anything the
+// server measured is preferred over anything we can only predict.
+function govEff() {
+  const auto = _govSupported && _govMode === 'auto';
+  // "right now" numbers only count while the governor is actually driving: in Off mode a stale
+  // snapshot would put a second, different number next to every knob you just set by hand.
+  const s = (_govSupported && _govMode !== 'off' && _govSnap
+             && String(_govSnap.state || '').toUpperCase() !== 'OFF') ? _govSnap : {};
+  const cores = govCores();
+  const w = parseInt($('workers') && $('workers').value) || 0;
+  const thr = parseInt($('minThr') && $('minThr').value) || 4;
+  const cpu = parseInt($('cpuPct') && $('cpuPct').value) || 90;
+  const ram = parseInt($('ramHead') && $('ramHead').value) || 2048;
+  const fl = parseInt($('flushCap') && $('flushCap').value) || 12;
+  // the two new sliders own their own value chips (nothing else writes them)
+  _govTxt('ramHeadVal', ram >= 1024 ? (ram / 1024).toFixed(1).replace(/\.0$/, '') + ' GB' : ram + ' MB');
+  _govTxt('flushCapVal', String(fl));
+  const nowW = (s.workers != null) ? s.workers : null;
+  _govSet('workersEff', auto
+    ? `Right now <b>${nowW != null ? nowW : '&mdash;'}</b> of at most <b>${w}</b>. Auto never goes above your ceiling.`
+    : `<b>${w}</b> cell${w === 1 ? '' : 's'} at a time &middot; ${w}&times;${thr} = <b>${w * thr}</b> of your ${cores} cores.`
+      + (w * thr > cores ? ' Over your cores: the cells share what is there, so each one takes longer.' : ''));
+  const nowThr = (s.threads != null) ? s.threads : thr;
+  _govSet('minThrEff', auto
+    ? `Auto is setting this. Right now <b>${nowThr}</b> thread${nowThr === 1 ? '' : 's'} per cell. Switch Mode to Off to set it yourself.`
+    : `Each cell gets <b>${thr}</b> thread${thr === 1 ? '' : 's'}.`);
+  const budget = Math.max(1, Math.round(cores * cpu / 100));
+  _govSet('cpuPctEff', `<b>${cpu}%</b> is about <b>${budget}</b> of your ${cores} cores for generation. `
+    + `The rest stays free for Windows and the save step.`);
+  const rssTxt = (s.rss_p95_mb != null)
+    ? ` Measured <b>${Math.round(s.rss_p95_mb)} MB</b> per worker so far.` : '';
+  // In Off mode neither budget is read by anything, so say that instead of describing an
+  // effect it does not have. applyGovMode() dims and disables the same two rows.
+  const governed = _govSupported && _govMode !== 'off';
+  const ramTxt = (ram / 1024).toFixed(1);
+  _govSet('ramHeadEff', governed
+    ? `Keeps <b>${ramTxt} GB</b> free at all times: a cell waits `
+      + `instead of starting if it would eat into that.${rssTxt}`
+    : `Not used while Mode is Off: no cell ever waits on free RAM. `
+      + `Your <b>${ramTxt} GB</b> is kept for Auto, which is the only mode that gates on it.`);
+  const nowFl = (s.flush != null) ? s.flush : null;
+  _govSet('flushCapEff', !governed
+    ? `Not used while Mode is Off: each cell's flush count follows its own thread count. `
+      + `Your <b>${fl}</b> is kept for Auto.`
+    : (nowFl != null
+       ? `At most <b>${fl}</b> region writes at once &middot; using <b>${nowFl}</b> right now.`
+       : `At most <b>${fl}</b> region write${fl === 1 ? '' : 's'} at once.`));
+}
+
+// The advisory line. /api/governor sends advice = {workers, reason, cores_per_cell,
+// rss_p95_mb, cells_per_min} and nothing else: no threads, no flush, no cell size. Its
+// `workers` is the conservative occupancy ENVELOPE, not a recommendation - the server's own
+// docstring notes it says 2 where 8 really deliver more at 1:1 - so it is worded as a floor
+// and always carries its reason. Rendered with textContent, so plain text, no markup.
+function govAdviceText(a) {
+  if (!a || typeof a !== 'object') return '';
+  if (typeof a.text === 'string' && a.text) return a.text;
+  if (typeof a.note === 'string' && a.note) return a.note;
+  const reason = (typeof a.reason === 'string' && a.reason) ? a.reason : '';
+  const meas = [];
+  const num = (v) => (v == null || v === '' || isNaN(v)) ? null : Number(v);
+  const cpc = num(a.cores_per_cell), rss = num(a.rss_p95_mb), cpm = num(a.cells_per_min);
+  if (cpc != null) meas.push(`${cpc.toFixed(2)} cores per cell`);
+  if (rss != null) meas.push(`${Math.round(rss)} MB per worker`);
+  if (cpm != null) meas.push(`${cpm.toFixed(1)} cells per minute`);
+  const measTxt = meas.length ? (' Measured so far: ' + meas.join(', ') + '.') : '';
+  const w = num(a.workers);
+  if (w == null) return reason ? ('Safe envelope: ' + reason + '.' + measTxt) : measTxt.trim();
+  return `Safe envelope: room for ${w} cell${w === 1 ? '' : 's'} at a time`
+    + (reason ? ` (${reason})` : '')
+    + '. That is a floor, not a recommendation: more workers are usually faster, '
+    + 'and finding how many is what Auto measures.' + measTxt;
+}
+
+// Live block, fed by the normal /api/status poll. `g` is absent on old servers and while the
+// governor is off, and every field inside it is allowed to be null.
+function renderGovernor(g) {
+  if (g && typeof g === 'object') { _govSupported = true; _govSnap = g; }
+  else if (g === null || g === undefined) { _govSnap = null; }
+  const live = $('govLive');
+  if (!live) return;
+  const show = _govSupported && _govMode !== 'off' && _govSnap;
+  live.style.display = show ? '' : 'none';
+  if (!show) { govEff(); return; }
+  const s = _govSnap;
+  const st = String(s.state || 'OFF').toUpperCase();
+  const stEl = $('govState');
+  if (stEl) {
+    stEl.textContent = st;
+    stEl.className = 'chip gs-' + st.toLowerCase();
+    stEl.title = GOV_STATE_TXT[st] || '';
+  }
+  _govTxt('govBinding', GOV_BINDING_TXT[String(s.binding || 'none').toLowerCase()] || String(s.binding || '\u2014'));
+  _govTxt('govWorkers', s.workers != null ? String(s.workers) : '\u2014');
+  _govTxt('govTarget', s.target != null ? String(s.target) : '\u2014');
+  _govTxt('govThreads', s.threads != null ? String(s.threads) : '\u2014');
+  _govTxt('govFlush', s.flush != null ? String(s.flush) : '\u2014');
+  _govTxt('govCoresCell', s.cores_per_cell != null ? _govNum(s.cores_per_cell, 2) : '\u2014');
+  _govTxt('govCellsMin', s.cells_per_min != null ? _govNum(s.cells_per_min, 1) : '\u2014');
+  _govTxt('govRss', s.rss_p95_mb != null ? (Math.round(s.rss_p95_mb) + ' MB') : '\u2014');
+  _govTxt('govSamples', s.samples != null ? String(s.samples) : '\u2014');
+  const noteEl = $('govNote');
+  if (noteEl) {
+    const n = (s.note || '') || (GOV_STATE_TXT[st] || '');
+    noteEl.textContent = n; noteEl.style.display = n ? '' : 'none';
+  }
+  // workers x threads against the cores you own: the one number that decides whether adding a
+  // worker makes the build faster or just makes every cell slower for the same throughput.
+  const cores = govCores();
+  const used = (s.workers || 0) * (s.threads || 0);
+  const bar = $('govMeterBar');
+  if (bar) {
+    bar.style.width = Math.max(0, Math.min(100, cores ? used / cores * 100 : 0)) + '%';
+    bar.className = used > cores ? 'bad' : (used >= cores * 0.85 ? '' : 'ok');
+  }
+  _govSet('govMeterTxt', `<b>${used}</b> of ${cores} cores in use (${s.workers != null ? s.workers : '?'} workers `
+    + `&times; ${s.threads != null ? s.threads : '?'} threads)` + (used > cores
+      ? ' &middot; over your cores, cells will take longer for the same total speed' : ''));
+  govEff();
+}
+
+// GET /api/governor: history + advice. Old servers 404 (or answer with HTML), which rejects in
+// api()'s .json() - hence the catch, and hence no state change on failure.
+async function govFetch() {
+  if (!_govSupported) return;
+  try {
+    const r = await api('/api/governor');
+    if (!r || typeof r !== 'object' || r.error) return;
+    if (r.advice !== undefined) _govAdvice = r.advice;
+    if (r.history !== undefined) _govHistory = r.history;
+    if (r.ceiling !== undefined) _govCeiling = r.ceiling;
+    if (r.state !== undefined) _govSnap = r;
+    applyGovMode();
+  } catch (e) { /* no governor on this server: stay on the manual UI */ }
+}
+
+// One-time inline ask, ONLY on the switch to Auto, and only when the stored ceiling is the
+// thing that would hold Auto back. Answering either way is remembered per advised ceiling, so
+// it never nags twice for the same machine.
+function govCeilPrompt() {
+  const el = $('govCeilPrompt'); if (!el) return;
+  const cur = parseInt($('workers') && $('workers').value) || 0;
+  const adv = govAdvisedCeiling();
+  let seen = '';
+  try { seen = localStorage.getItem('meld.govCeilAsked') || ''; } catch (e) {}
+  if (!(cur > 0 && adv > cur) || seen === String(adv)) { el.style.display = 'none'; return; }
+  const ramTxt = RAM_GB ? `${Math.round(RAM_GB)} GB RAM` : 'your RAM';
+  _govSet('govCeilText',
+    `Auto can never use more workers than your ceiling, and yours is <b>${cur}</b>. `
+    + `This PC (${govCores()} cores, ${ramTxt}) can safely go up to <b>${adv}</b>. `
+    + `Raise the ceiling so Auto has room to speed the build up? It still starts low and only `
+    + `climbs while the run is actually getting faster. Nothing changes unless you press Raise it.`);
+  el.style.display = '';
+}
+function _govCeilDone(raise) {
+  const adv = govAdvisedCeiling();
+  try { localStorage.setItem('meld.govCeilAsked', String(adv)); } catch (e) {}
+  const el = $('govCeilPrompt'); if (el) el.style.display = 'none';
+  if (raise && $('workers')) {
+    $('workers').value = adv;
+    api('/api/settings', { max_workers: adv, governor_max_workers: 0 });
+    govEff();
+  }
+}
+if ($('btnGovCeilRaise')) $('btnGovCeilRaise').addEventListener('click', () => _govCeilDone(true));
+if ($('btnGovCeilKeep')) $('btnGovCeilKeep').addEventListener('click', () => _govCeilDone(false));
+
+if ($('govMode')) $('govMode').addEventListener('change', async () => {
+  const m = $('govMode').value;
+  _govMode = ['off', 'advise', 'auto'].includes(m) ? m : 'off';
+  _govSupported = true;
+  await api('/api/settings', { governor_mode: _govMode }).catch(() => {});
+  applyGovMode();
+  if (_govMode === 'auto') govCeilPrompt();
+  govFetch();
+});
+if ($('ramHead')) {
+  $('ramHead').addEventListener('input', govEff);
+  $('ramHead').addEventListener('change', () =>
+    api('/api/settings', { ram_headroom_mb: parseInt($('ramHead').value) || 2048 }));
+}
+if ($('flushCap')) {
+  $('flushCap').addEventListener('input', govEff);
+  $('flushCap').addEventListener('change', () =>
+    api('/api/settings', { flush_threads_cap: parseInt($('flushCap').value) || 12 }));
+}
+// Both governor buttons are no-ops without the routes; the catch keeps an old server silent.
+async function _govAction(url, btn) {
+  const b = $(btn); const old = b ? b.textContent : '';
+  if (b) { b.disabled = true; b.textContent = '\u2026'; }
+  try {
+    const r = await api(url, {});
+    if (r && r.state) { _govSnap = Object.assign({}, _govSnap || {}, { state: r.state }); renderGovernor(_govSnap); }
+  } catch (e) { /* ignore: nothing to show if the route is not there */ }
+  if (b) { b.textContent = old; b.disabled = false; }
+  applyGovMode();
+  if (typeof kickPoll === 'function') kickPoll();
+}
+if ($('btnGovRecal')) $('btnGovRecal').addEventListener('click', () => _govAction('/api/governor/recalibrate', 'btnGovRecal'));
+if ($('btnGovFreeze')) $('btnGovFreeze').addEventListener('click', () => _govAction('/api/governor/freeze', 'btnGovFreeze'));
+// Keep the effective-value lines honest while the OTHER sliders move (they have their own
+// persist handlers further up; this only repaints the explanations).
+for (const id of ['workers', 'cpuPct', 'minThr']) {
+  const e = $(id); if (!e) continue;
+  e.addEventListener('input', govEff);
+  e.addEventListener('change', govEff);
+}
+applyGovMode();
 if ($('staggerOn'))
   $('staggerOn').addEventListener('change', () => { api('/api/settings', { cpu_stagger_enabled: $('staggerOn').checked }); syncStaggerStep(); });
 if ($('staggerAdaptive'))
@@ -5798,6 +6211,10 @@ async function poll() {
     ensureCells(s.grid || {});   // redraw + recolor + stage emoji (survives refresh)
     setRun(s.run);               // elapsed timer + final report
     renderStats(s.stats);        // live CPU / RAM / disk gauges (left rail)
+    renderGovernor(s.governor);  // generation-performance readout (absent on old servers)
+    // History + advice change far more slowly than the status block, so they get their own
+    // slow poll rather than riding every 1.5s tick.
+    if (_govSupported && _govMode !== 'off' && (_govFetchN++ % 6 === 0)) govFetch();
     { const br = $('btnReport2'); if (br) br.style.display = s.report_ready ? '' : 'none'; }
     renderExport(s.export);      // compression/export progress line (post-pass)
     renderUpdate(s.update);      // left-rail update banner (hidden unless there is one)

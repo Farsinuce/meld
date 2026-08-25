@@ -1,0 +1,163 @@
+{
+  "label": "bucharest-governor",
+  "_comment": [
+    "Default sweep: legacy scheduler (fixed workers, governor off) vs governor (auto, ceiling),",
+    "on identical Bucharest areas. Only scheduling knobs differ inside a group; every",
+    "world-shaping setting lives in `world_settings` and is applied to every run.",
+    "Groups are compared independently - a 1:1 world and a 1:10 world are different worlds.",
+    "Edit `site.bbox` to bench your own city; keep the group bboxes in step with it."
+  ],
+  "seed": 1,
+
+  "site": {
+    "name": "Bucharest",
+    "origin": { "lat": 44.5072, "lon": 25.96 },
+    "bbox": { "south": 44.36, "west": 25.96, "north": 44.5072, "east": 26.1662 }
+  },
+
+  "world_settings": {
+    "buildings": true,
+    "terrain": true,
+    "overture": true,
+    "trees": true,
+    "roof": true,
+    "interior": true,
+    "caves": false,
+    "fill_ground": true,
+    "bake_lighting": false,
+    "land_cover": true,
+    "elevation_mode": "global",
+    "seam_buffer_chunks": 8,
+    "region_format": "anvil"
+  },
+
+  "prep": {
+    "enabled": true,
+    "survey": true,
+    "survey_zoom": 10,
+    "bake_elevation": true,
+    "prewarm_overture": true,
+    "elevation": { "min_m": 55, "max_m": 105 }
+  },
+
+  "watchdog": {
+    "ram_abort_pct": 95,
+    "swap_growth_mb": 4096,
+    "run_timeout_s": 7200,
+    "stall_timeout_s": 1800
+  },
+
+  "runs": [
+    {
+      "name": "smoke-legacy",
+      "group": "smoke",
+      "arm": "legacy",
+      "baseline": true,
+      "_comment": "4x4 = 16 cells of ONE region each at 1:1 (a ~2 km square of central Bucharest). The development config: it exercises every step of the harness - prep, both arms, the report read, the block_hash gate - in a couple of minutes.",
+      "workers": 4,
+      "governor_mode": "off",
+      "cpu_target_pct": 90,
+      "flush_threads_cap": 12,
+      "cell_size": 1,
+      "scale": 1.0,
+      "repeats": 1,
+      "bbox": { "south": 44.5084, "west": 25.9592, "north": 44.5259, "east": 25.9837 }
+    },
+    {
+      "name": "smoke-governor",
+      "group": "smoke",
+      "arm": "governor",
+      "workers": 4,
+      "governor_mode": "auto",
+      "governor_max_workers": 6,
+      "cpu_target_pct": 90,
+      "flush_threads_cap": 12,
+      "cell_size": 1,
+      "scale": 1.0,
+      "repeats": 1,
+      "bbox": { "south": 44.5084, "west": 25.9592, "north": 44.5259, "east": 25.9837 }
+    },
+
+    {
+      "name": "legacy-w4",
+      "group": "1to1-cs4",
+      "arm": "legacy",
+      "baseline": true,
+      "workers": 4,
+      "governor_mode": "off",
+      "cpu_target_pct": 90,
+      "flush_threads_cap": 12,
+      "cell_size": 4,
+      "scale": 1.0,
+      "repeats": 1
+    },
+    {
+      "name": "legacy-w12",
+      "group": "1to1-cs4",
+      "arm": "legacy",
+      "workers": 12,
+      "governor_mode": "off",
+      "cpu_target_pct": 90,
+      "flush_threads_cap": 12,
+      "cell_size": 4,
+      "scale": 1.0,
+      "repeats": 1
+    },
+    {
+      "name": "legacy-w16",
+      "group": "1to1-cs4",
+      "arm": "legacy",
+      "workers": 16,
+      "governor_mode": "off",
+      "cpu_target_pct": 90,
+      "flush_threads_cap": 12,
+      "cell_size": 4,
+      "scale": 1.0,
+      "repeats": 1
+    },
+    {
+      "name": "governor-auto20",
+      "group": "1to1-cs4",
+      "arm": "governor",
+      "workers": 16,
+      "governor_mode": "auto",
+      "governor_max_workers": 20,
+      "cpu_target_pct": 90,
+      "flush_threads_cap": 12,
+      "ram_headroom_mb": 2048,
+      "cell_size": 4,
+      "scale": 1.0,
+      "repeats": 1
+    },
+
+    {
+      "name": "legacy-w16-1to10",
+      "group": "1to10-cs4",
+      "arm": "legacy",
+      "baseline": true,
+      "workers": 16,
+      "governor_mode": "off",
+      "cpu_target_pct": 90,
+      "flush_threads_cap": 12,
+      "cell_size": 4,
+      "scale": 0.1,
+      "repeats": 1,
+      "bbox": { "south": 44.05, "west": 25.6, "north": 44.786, "east": 26.63 }
+    },
+    {
+      "name": "governor-auto20-1to10",
+      "group": "1to10-cs4",
+      "arm": "governor",
+      "workers": 16,
+      "governor_mode": "auto",
+      "governor_max_workers": 20,
+      "cpu_target_pct": 90,
+      "flush_threads_cap": 12,
+      "ram_headroom_mb": 2048,
+      "cell_size": 4,
+      "scale": 0.1,
+      "repeats": 1,
+      "bbox": { "south": 44.05, "west": 25.6, "north": 44.786, "east": 26.63 }
+    }
+  ]
+}

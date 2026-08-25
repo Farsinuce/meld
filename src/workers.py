@@ -51,6 +51,11 @@ class WorkerPool:
         self._runner: JobRunner | None = None
         self._on_complete: JobCompleteCb | None = None
         self._avg_cell_s = 0.0          # EWMA of recent cell wall-times (0 = no history yet)
+        self._run_epoch = 0             # bumped once per run; re-arms every worker's stagger
+        # Optional admission gate (governor). Called as admit_cb(worker_id, active_count) on the
+        # worker thread right before it runs a job; it may block while it decides. When set, the
+        # first-job stagger is skipped - admission IS the pacing. None = exactly today's behavior.
+        self.admit_cb: Callable[[int, int], str] | None = None
 
     def record_completion(self, duration_s: float) -> None:
         """Feed a finished cell's wall-time into the EWMA used to pace adaptive stagger.
@@ -80,10 +85,72 @@ class WorkerPool:
             self._on_complete = on_complete
 
     def submit(self, job: dict) -> None:
+        """Queue one job. Deliberately does NOT clear the stop flag.
+
+        A Stop lands asynchronously: the caller checks the gate, then submits. If submit()
+        un-stopped the pool, a Stop arriving in that window was ERASED - the cells ran (or
+        were killed mid-flight) with the pool looking un-stopped, so _on_complete labelled
+        them "generation failed", a retryable reason, and re-queued the run Stop had just
+        killed. The flag is cleared in exactly two places, both explicit and both at the
+        START of work: new_run_epoch() (a new run) and resume(). A job queued while stopped
+        simply waits in the queue for one of those - or for clear()."""
         with self._cv:
             self._queue.append(job)
+            if self._stopped:
+                return          # no point waking workers: they would see the flag and exit
             self._ensure_workers_locked()
             self._cv.notify_all()
+
+    # ── stop flag ────────────────────────────────────────────────────────────────
+    def stop(self) -> None:
+        """Stop workers from picking up any MORE queued jobs, and make that readable
+        (is_stopped / the legacy `_stopped` attribute server.py greps for its retry guard).
+        Deliberately narrow: jobs already running are left to finish - terminate_all() kills
+        their arnis processes - and the queue is left alone - clear() drains it. Idle worker
+        threads exit; new_run_epoch()/resume() clear the flag and respawn them. submit() does
+        NOT: queueing more work must never erase a Stop that raced it."""
+        with self._cv:
+            self._stopped = True
+            self._cv.notify_all()
+
+    def resume(self) -> None:
+        """Clear the stop flag and bring the worker threads back, without queueing anything."""
+        with self._cv:
+            self._stopped = False
+            self._ensure_workers_locked()
+            self._cv.notify_all()
+
+    @property
+    def is_stopped(self) -> bool:
+        with self._lock:
+            return self._stopped
+
+    # ── run epoch ──────────────────────────────────────────────────────────────
+    def new_run_epoch(self) -> int:
+        """Call at the START of a run. Worker threads are long-lived and get reused, so the
+        first-job stagger used to fire only on a thread's first job EVER - runs 2..N started
+        every worker in lockstep, the exact sawtooth the stagger exists to prevent. Workers
+        re-arm the stagger once per epoch instead. Also drops the cell-time EWMA (it must not
+        pace a new run/project/scale with the last one's cells) and clears any leftover stop
+        flag. Returns the new epoch."""
+        with self._cv:
+            self._run_epoch += 1
+            self._avg_cell_s = 0.0
+            self._stopped = False
+            self._ensure_workers_locked()
+            self._cv.notify_all()
+            return self._run_epoch
+
+    @property
+    def run_epoch(self) -> int:
+        with self._lock:
+            return self._run_epoch
+
+    @property
+    def avg_cell_s(self) -> float:
+        """Current EWMA of cell wall-times (0 = no history in this run yet)."""
+        with self._lock:
+            return self._avg_cell_s
 
     def queue_size(self) -> int:
         with self._lock:
@@ -158,7 +225,7 @@ class WorkerPool:
             t.start()
 
     def _worker_loop(self, worker_id: int):
-        first_job = True
+        seen_epoch = -1   # last run-epoch this worker staggered for (-1 = no job yet)
         try:
             while True:
                 with self._cv:
@@ -173,12 +240,28 @@ class WorkerPool:
                     state.update(running=True, progress=0, message="Starting…",
                                  cell_key=job.get("cell_key", ""), success=None)
                     runner, on_complete = self._runner, self._on_complete
+                    admit_cb = self.admit_cb
+                    epoch = self._run_epoch
+                    first_of_run = epoch != seen_epoch
+                    # Peers already running a job. This slot was just flagged running above,
+                    # so discount it: the caller is asking to BECOME active, it isn't yet.
+                    active = max(0, sum(1 for s in self._states if s.get("running")) - 1)
+                seen_epoch = epoch
 
-                # Desync the very first job per worker (see stagger_seconds). Done OUTSIDE
-                # the lock so it never blocks other workers or the queue. First job only —
-                # after that, natural per-cell variance keeps the phases spread out.
-                if first_job:
-                    first_job = False
+                if admit_cb is not None:
+                    # Governor admission REPLACES the stagger: it decides when this worker may
+                    # start (RAM headroom, core budget, ramp state) and may block while it does.
+                    # Outside the lock, and never fatal - a raising callback must not wedge a run.
+                    state["message"] = "waiting for admission"
+                    try:
+                        admit_cb(worker_id, active)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    state["message"] = "Starting…"
+                elif first_of_run:
+                    # Desync this worker's first job OF THIS RUN (see stagger_seconds). Done
+                    # OUTSIDE the lock so it never blocks other workers or the queue. Once per
+                    # worker per run — after that, per-cell variance keeps the phases spread.
                     delay = self._first_job_delay(worker_id)
                     if delay > 0 and not self._stopped:
                         state["message"] = f"Staggered start (+{int(delay)}s)…"

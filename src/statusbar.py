@@ -45,12 +45,133 @@ STAGE_COLOURS = {
     "save":    "#86b45a",   # writing regions: green
     "merge":   "#b7d17a",   # folding the cell into the master world
     "failed":  "#cf5a3e",
+    # Governor-era stages. Both are kinds of waiting, and both are coloured as the neighbour they
+    # wait on: admission is queued-but-alive (a worker the governor is holding back), and the
+    # merge drain is the tail of merge, one shade paler.
+    "waiting for admission": "#7b6f52",
+    "finishing merges":      "#cfe3a0",
 }
 STAGE_ORDER = ("fetch", "prepare", "build", "save", "merge")
+
+#: Shorter spellings a server might use for the same thing. Kept separate from STAGE_COLOURS so
+#: the palette stays one colour per stage rather than one per synonym.
+STAGE_ALIASES = {
+    "admit":            "waiting for admission",
+    "admission":        "waiting for admission",
+    "waiting":          "waiting for admission",
+    "finishing":        "finishing merges",
+    "finishing merge":  "finishing merges",
+    "draining":         "finishing merges",
+    "drain":            "finishing merges",
+}
+
+#: Any stage this build has never heard of. Deliberately NOT the idle colour: a stage we cannot
+#: name is not the same as an empty slot, and painting it as one would hide a whole phase of a
+#: newer server behind "nothing is happening".
+STAGE_UNKNOWN = "#6b6354"
+
+#: Governor state -> colour. Moving states wear the working gold, a settled one goes green, and
+#: anything held or unknown stays in the muted grey so it does not pull the eye.
+GOV_COLOURS = {
+    "WARMSTART": ACC2,
+    "CALIBRATE": ACC2,
+    "CONVERGE":  ACC2,
+    "RECAL":     ACC2,
+    "STEADY":    "#86b45a",
+    "FROZEN":    "#3fa9a0",
+}
 
 POLL_MS = 1000
 CONSOLE_LINES = 8
 SITE = "meldmc.com"
+
+
+def truncate_label(text: str, limit: int = 16) -> str:
+    """Collapse whitespace and cut to `limit` characters, ellipsis included in the count.
+
+    Used for text this build did not choose - a stage name invented by a newer server - so the
+    only guarantee that matters is that it cannot run past the space budgeted for it.
+    """
+    text = " ".join(str(text or "").split())
+    if len(text) <= limit:
+        return text
+    return text[:max(0, limit - 1)].rstrip() + "…"
+
+
+def stage_style(stage) -> tuple[str, str]:
+    """(colour, label) for one worker's stage.
+
+    `label` is "" for every stage this build knows how to colour: the block says it all, and the
+    bar stays wordless. For an unrecognised stage the block goes neutral and the raw name comes
+    back truncated, so a newer server's vocabulary shows up as words rather than as a slot that
+    silently looks idle. Never raises and never returns an empty colour - this runs once per
+    worker per second inside the paint loop.
+    """
+    raw = " ".join(str(stage or "").split())
+    # Separators are not vocabulary: "waiting_for_admission" and "waiting for admission" are the
+    # same stage, and a build that painted one of them neutral-with-a-caption would be reporting
+    # on punctuation. Normalised for lookup only - an unknown stage still shows its raw spelling.
+    key = raw.lower().replace("_", " ").replace("-", " ")
+    key = " ".join(key.split())
+    if not key:
+        return STAGE_COLOURS["idle"], ""
+    if key in STAGE_COLOURS:
+        return STAGE_COLOURS[key], ""
+    alias = STAGE_ALIASES.get(key)
+    if alias:
+        return STAGE_COLOURS[alias], ""
+    return STAGE_UNKNOWN, truncate_label(raw)
+
+
+def gov_segment(mini: dict):
+    """'gov 8→12' and the colour to draw it in, or None when there is nothing to say.
+
+    None on three counts, all of which must paint exactly the bar that shipped before the
+    governor existed: an older server that never sends the key, a malformed block, and
+    governor_mode="off". A worker count identical to the target drops the arrow - "gov 8" - so
+    the segment only shows a direction while the pool is actually moving towards one.
+    """
+    gov = (mini or {}).get("gov")
+    if not isinstance(gov, dict):
+        return None
+    state = str(gov.get("state") or "").strip().upper()
+    if state == "OFF":
+        return None
+    raw_w = gov.get("w", gov.get("workers"))
+    try:
+        workers = int(raw_w)
+    except (TypeError, ValueError):
+        return None
+    try:
+        target = int(gov.get("target"))
+    except (TypeError, ValueError):
+        target = workers
+    text = f"gov {workers}" if target == workers else f"gov {workers}→{target}"
+    return text, GOV_COLOURS.get(state, MUT)
+
+
+def place_segments(segments, right_x: float, floor_x: float, measure, gap: int = 8):
+    """Lay annotations out right-to-left from `right_x`, dropping any that would cross `floor_x`.
+
+    Returns (placements, left_edge), where each placement is (text, colour, x) for an anchor="e"
+    draw. The floor is what keeps this decorative: the segments annotate the worker blocks, so
+    when a newer server sends a stage name long enough to reach the title, the RIGHT answer is
+    that the segment goes away, not that it paints over the line telling you which cell is
+    rendering. Right-to-left order also means the governor - always first in the list - is the
+    last thing to be dropped.
+    """
+    placed = []
+    x = float(right_x)
+    for text, colour in segments:
+        try:
+            width = float(measure(text))
+        except Exception:
+            width = len(str(text)) * 6.0
+        if x - width < floor_x:
+            break
+        placed.append((text, colour, x))
+        x -= width + gap
+    return placed, (x + gap if placed else float(right_x))
 
 
 def _settings_path() -> Path:
@@ -81,6 +202,9 @@ class StatusBar:
     BAR_H = 78          # rows at 18 / 38 / 60, with matching space above and below
     GRAPH_H = 78
     CONSOLE_H = 130
+    # Left limit for the annotation segments: the title and the cell detail both start at x=50,
+    # and they outrank anything the segments have to say.
+    SEG_FLOOR_X = 56
 
     def __init__(self, url: str, token: str = "") -> None:
         self.url = url.rstrip("/")
@@ -434,6 +558,18 @@ class StatusBar:
             pass
 
     # ── painting ─────────────────────────────────────────────────────────────
+    def _text_w(self, text: str, font) -> int:
+        """Pixel width of `text`, falling back to a per-character estimate.
+
+        The fallback exists because a font object cannot be built before Tk has a root, and a
+        paint that raised there would take the whole bar down over a label nobody asked for.
+        """
+        try:
+            from tkinter import font as tkfont
+            return int(tkfont.Font(font=font).measure(text))
+        except Exception:
+            return int(len(text) * 6)
+
     def paint(self, d: dict):
         c = self.canvas
         c.delete("all")
@@ -518,8 +654,11 @@ class StatusBar:
         total_w = max(0, row_len * (bw + gap) - gap)
         bx = w - 14 - total_w
         top = 31 - (rows - 1) * 5          # two rows of eight straddle the same middle band
+        unknown: list[str] = []
         for i, wk in enumerate(blocks):
-            colour = STAGE_COLOURS.get(wk.get("stage") or "idle", STAGE_COLOURS["idle"])
+            colour, label = stage_style(wk.get("stage"))
+            if label and label not in unknown:
+                unknown.append(label)
             col, row = i % per_row, i // per_row
             x0 = bx + col * (bw + gap)
             y0 = top + row * (bw + 5)
@@ -531,12 +670,33 @@ class StatusBar:
                 c.create_rectangle(x0, y0 + bw + 1, x0 + bw * pct_w / 100, y0 + bw + 2,
                                    fill=colour, outline="")
 
+        # Between the cell detail and the blocks: the segments that annotate the pool. Drawn
+        # right-to-left from the cluster so they stay attached to what they describe, and
+        # measured, so whatever is left over is what the detail gets - the same bargain the
+        # detail already made with the blocks. Nothing here draws when the server sends neither
+        # a governor block nor an unfamiliar stage, which is every build before this one.
+        seg_font = ("Consolas", 7)
+        band_y = top + (rows * (bw + 5) - 5) / 2
+        segments = []
+        gov = gov_segment(d)
+        if gov:
+            segments.append(gov)
+        if unknown:
+            # Two at most: past that the bar would be reporting on the server's vocabulary rather
+            # than on the render, and the detail has a better claim on the space.
+            segments.append((" ".join(unknown[:2]), STAGE_UNKNOWN))
+        placed, edge = place_segments(segments, bx - 8, self.SEG_FLOOR_X,
+                                      lambda t: self._text_w(t, seg_font))
+        for text, colour, x in placed:
+            c.create_text(x, band_y, text=text, anchor="e", fill=colour, font=seg_font)
+        left_edge = edge if placed else bx
+
         # Truncated to the space actually left, measured rather than guessed at a character
         # count: "42,-17,2 · 43,-17,2" and "romania-north" are wildly different widths.
         detail = task.get("detail") or ""
         if detail:
             font = ("Consolas", 8)
-            avail = bx - 12 - 50
+            avail = left_edge - 12 - 50
             try:
                 from tkinter import font as tkfont
                 measure = tkfont.Font(font=font).measure

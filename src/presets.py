@@ -68,6 +68,18 @@ _MACHINE_KEYS = frozenset({
     "cpu_stagger_seconds", "cpu_stagger_enabled", "cpu_stagger_adaptive",
     "osm_bake_workers", "export_compression_workers",
     "datapack_tile_concurrency", "prefetch_concurrency",
+    # The governor: a scheduling policy for THIS box plus the numbers it measured on it.
+    # governor_history is the worst offender — it carries another machine's cores-per-cell,
+    # RSS p95 and cells-per-minute, which would warm-start a laptop straight at a 24-core
+    # desktop's knee. worker_autoscale is its retired predecessor (same story, and it leaked
+    # until now). ram_headroom_mb / flush_threads_cap / governor_max_workers are this box's
+    # RAM and core budget, exactly like max_workers next to them.
+    "governor_mode", "governor_history", "ram_headroom_mb",
+    "flush_threads_cap", "governor_max_workers", "worker_autoscale",
+    # GPU cave evaluation: names hardware the recipient may not have (dgpu/igpu), and its own
+    # tooltip says it never travels — it just was not on this list. Falls back to CPU when no
+    # adapter matches, so importing it was never fatal, only wrong.
+    "gpu_accel",
     # RAM/disk shape: cell size is a per-worker memory budget, stream-to-disk is its escape
     # hatch, and the per-cell timeout is a statement about how fast this machine renders.
     "job_size_regions", "stream_to_disk", "timeout",

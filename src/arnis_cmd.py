@@ -23,6 +23,7 @@ emits nothing. Wire it to a real flag once the fork gains the upstream feature
 
 from __future__ import annotations
 
+import inspect
 import math
 import os
 import re
@@ -174,6 +175,13 @@ def arnis_supports(arnis_exe: str, flag: str) -> bool:
     return flag in _HELP_CACHE[key]
 
 
+# NOTE: there is deliberately NO capability probe for the phase-marker protocol.
+# ARNIS_PHASE_MARKERS is an ENV VAR, not a CLI flag: clap prints neither it nor a
+# `--phase-markers` in --help, so any --help grep for it answers False forever and the
+# env var never gets set. A binary that predates the protocol simply IGNORES an unknown
+# env var and prints no marker lines, which run_arnis() already handles by falling back
+# to the psutil sampler ("source": "sampler"). So the caller sets the var unconditionally
+# and lets the presence of a `phase=done` line be the answer.
 _VER_CACHE: dict[str, tuple] = {}
 
 
@@ -641,8 +649,101 @@ def parse_progress(line: str, current: int) -> int:
     return new
 
 
+# --- Arnis stdout protocol v1 -------------------------------------------------------
+# The generator prints, ONLY when ARNIS_PHASE_MARKERS=1 is in its environment:
+#
+#   [meld] v=1 phase=<name> t=<ms_since_process_start>
+#   [meld] v=1 phase=done wall_s=<f.3> cpu_s=<f.3> peak_mb=<f.1> gpu_ms=<u64>
+#
+# phase names: fetch parse overture elevation ground place post merge save (whichever the
+# real pipeline has), then exactly one `done` line. These are MACHINE lines: run_arnis
+# consumes them, so they never reach on_line() and can never disturb the keyword scraping
+# in parse_progress() or the user-visible cell log.
+_MARKER_RE = re.compile(r"^\s*\[meld\]\s+v=(\d+)(?:\s+(.*))?$")
+_DONE_FLOAT_KEYS = ("wall_s", "cpu_s", "peak_mb")
+
+
+def is_marker_line(line: str) -> bool:
+    """Is this a `[meld] v=N ...` protocol line (any version)?
+
+    Version-agnostic on purpose: a future v=2 generator paired with today's Meld must still
+    have its machine lines swallowed rather than dumped into the user's log. Meld's own
+    diagnostics ("[meld] arnis exited with code ...") carry no `v=` and are unaffected.
+    """
+    return _MARKER_RE.match(line or "") is not None
+
+
+def parse_phase_marker(line: str) -> dict | None:
+    """Parse one protocol v1 line into a dict, or None if it is not one we understand.
+
+    Returns {"phase": name, "t_ms": int} for a phase line and
+    {"phase": "done", "wall_s": float, "cpu_s": float, "peak_mb": float, "gpu_ms": int}
+    for the terminal line - keys whose values are missing or unparseable are simply absent,
+    so a generator that cannot measure (say) peak RSS just omits it and the caller falls
+    back. Unknown extra key=value tokens are ignored, which is what lets the protocol grow
+    without a version bump.
+    """
+    m = _MARKER_RE.match(line or "")
+    if not m or m.group(1) != "1":
+        return None
+    fields: dict[str, str] = {}
+    for tok in (m.group(2) or "").split():
+        if "=" in tok:
+            k, _, v = tok.partition("=")
+            if k:
+                fields[k] = v
+    phase = fields.get("phase")
+    if not phase:
+        return None
+    out: dict = {"phase": phase}
+    if phase == "done":
+        for key in _DONE_FLOAT_KEYS:
+            if key in fields:
+                try:
+                    val = float(fields[key])
+                except ValueError:
+                    continue
+                if math.isfinite(val):
+                    out[key] = val
+        if "gpu_ms" in fields:
+            try:
+                out["gpu_ms"] = int(float(fields["gpu_ms"]))
+            except ValueError:
+                pass
+        return out
+    try:
+        out["t_ms"] = int(float(fields.get("t", "")))
+    except ValueError:
+        out["t_ms"] = 0
+    return out
+
+
+def _emit_stats(on_stats, cpu_seconds: float, wall_seconds: float, extras: dict) -> None:
+    """Call on_stats(cpu, wall) with as much of `extras` as it will accept.
+
+    server.py's current callback is `def on_stats(cpu_seconds, wall_seconds)`. Passing it
+    peak_rss_mb= would be a TypeError, and catching that TypeError is not safe (the callback
+    body raises TypeErrors of its own, and a retry would run half of it twice), so the
+    signature is inspected instead: **kwargs takes everything, otherwise only the extra
+    parameters the callback actually names are passed. Old callers keep working untouched.
+    """
+    kwargs = {}
+    try:
+        params = inspect.signature(on_stats).parameters
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            kwargs = dict(extras)
+        else:
+            named = {n for n, p in params.items()
+                     if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                   inspect.Parameter.KEYWORD_ONLY)}
+            kwargs = {k: v for k, v in extras.items() if k in named}
+    except (TypeError, ValueError):  # builtins / C callables have no signature
+        kwargs = {}
+    on_stats(cpu_seconds, wall_seconds, **kwargs)
+
+
 def run_arnis(cmd: list[str], cwd: str, on_line=None, on_proc=None,
-              env: dict | None = None, on_stats=None) -> bool:
+              env: dict | None = None, on_stats=None, on_phase=None) -> bool:
     """Run Arnis, streaming stdout line-by-line to on_line(text). Returns ok.
 
     on_proc(proc) is called once with the Popen handle so the caller can publish
@@ -652,7 +753,18 @@ def run_arnis(cmd: list[str], cwd: str, on_line=None, on_proc=None,
     env (optional) is overlaid on the inherited environment for THIS child only
     (used to pin RAYON_NUM_THREADS so N parallel cells don't oversubscribe cores,
     and ARNIS_STREAM_TO_DISK=1 for big cells). The post-merge Arnis reads both;
-    an older binary harmlessly ignores them."""
+    an older binary harmlessly ignores them.
+
+    on_phase(name, t_ms) (optional) fires for every `[meld] v=1 phase=<name> t=<ms>`
+    line the generator prints under ARNIS_PHASE_MARKERS=1. Those lines are CONSUMED
+    whether or not a callback is given: they are machine output, so they never reach
+    on_line() and can never move parse_progress()'s keyword scraping.
+
+    on_stats(cpu_seconds, wall_seconds, **extras) is called once at exit. `extras` is
+    peak_rss_mb (float|None), source ("arnis" when the numbers came from the generator's
+    own `phase=done` line, "sampler" when they came from the psutil poller) and gpu_ms
+    (int, only when the generator reported it). A callback that names none of them - like
+    server.py's two-argument one - is still called with two arguments, so nothing breaks."""
     child_env = {**os.environ, **(env or {})}
     # encoding is PINNED to UTF-8: Arnis writes UTF-8 (the startup banner alone is
     # solid-block characters), while `text=True` with no encoding decodes using the
@@ -671,7 +783,14 @@ def run_arnis(cmd: list[str], cwd: str, on_line=None, on_proc=None,
     # because cpu_times() has to be read while the process is alive, and this function
     # is busy blocking on stdout. Entirely best-effort: if psutil is missing or the
     # process exits between calls, no sample is recorded and nothing else changes.
+    #
+    # KNOWN UNDERCOUNT (unchanged, and now measurable): the poll runs every 0.5 s, so
+    # whatever the child burns after its last successful read - up to ~0.5 s of CPU, plus
+    # any late memory spike - is missed. That is why the generator's own `phase=done` line
+    # is preferred when it is there: it is measured inside the process at exit. The sampler
+    # is the fallback for old binaries and for runs with ARNIS_PHASE_MARKERS unset.
     _cpu = {"seconds": 0.0}
+    _rss = {"peak_mb": 0.0}
     _stats_stop = threading.Event()
     _stats_thread = None
     if on_stats is not None:
@@ -683,6 +802,13 @@ def run_arnis(cmd: list[str], cwd: str, on_line=None, on_proc=None,
                     try:
                         t = p.cpu_times()
                         _cpu["seconds"] = float(t.user + t.system)
+                        mi = p.memory_info()
+                        # peak_wset is Windows' own high-water mark, so it survives the
+                        # gaps between polls; elsewhere the running max of rss is the
+                        # best available and undercounts a spike between two reads.
+                        mb = float(getattr(mi, "peak_wset", 0) or mi.rss) / (1024 * 1024)
+                        if mb > _rss["peak_mb"]:
+                            _rss["peak_mb"] = mb
                     except Exception:  # noqa: BLE001 - process gone; keep the last read
                         return
             except Exception:  # noqa: BLE001 - psutil unavailable
@@ -695,17 +821,45 @@ def run_arnis(cmd: list[str], cwd: str, on_line=None, on_proc=None,
         on_proc(proc)
     try:
         lines = 0
+        done: dict = {}
         for raw in proc.stdout:                       # type: ignore[union-attr]
             lines += 1
+            text = raw.rstrip()
+            if is_marker_line(text):
+                # Machine line: consumed here, never forwarded to on_line().
+                marker = parse_phase_marker(text)
+                if marker is not None:
+                    if marker["phase"] == "done":
+                        done = marker
+                    elif on_phase is not None:
+                        try:
+                            on_phase(marker["phase"], marker["t_ms"])
+                        except Exception:  # noqa: BLE001 - telemetry never fails a cell
+                            pass
+                continue
             if on_line:
-                on_line(raw.rstrip())
+                on_line(text)
         proc.wait()
         _stats_stop.set()
         if on_stats is not None:
             if _stats_thread is not None:
                 _stats_thread.join(timeout=1.0)
             try:
-                on_stats(_cpu["seconds"], max(0.0, time.time() - _started))
+                # The generator's own numbers win when it reported both of them; the
+                # sampler's are a poll away from the truth (see the note above).
+                if "cpu_s" in done and "wall_s" in done:
+                    cpu_s, wall_s, source = done["cpu_s"], done["wall_s"], "arnis"
+                else:
+                    cpu_s = _cpu["seconds"]
+                    wall_s = max(0.0, time.time() - _started)
+                    source = "sampler"
+                peak_mb = done.get("peak_mb")
+                if peak_mb is None:
+                    peak_mb = _rss["peak_mb"] or None
+                extras = {"peak_rss_mb": peak_mb, "source": source}
+                if "gpu_ms" in done:
+                    extras["gpu_ms"] = done["gpu_ms"]
+                _emit_stats(on_stats, cpu_s, wall_s, extras)
             except Exception:  # noqa: BLE001 - telemetry must never fail a cell
                 pass
         if proc.returncode != 0 and on_line:

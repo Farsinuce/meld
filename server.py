@@ -53,7 +53,7 @@ APP_DIR = exe_dir()
 import src
 from src import update
 from src import updater
-from src.project import Project, default_settings
+from src.project import Project, default_settings, migrate_governor_settings
 from src.grid import cells_for_bbox, cells_for_polygons, _point_in_poly, TooManyCells
 from src.coords import expand_bbox_for_seam, cell_bbox, snap_to_region_grid
 from src.arnis_cmd import (build_arnis_cmd, run_arnis, find_world_dir, clean_output_dir,
@@ -72,7 +72,8 @@ from src import runreport
 from src.merge import (merge_cell_into_master, strip_buffer_regions,
                         MeldCoordinateDriftError, MeldCollisionError)
 from src.survey import survey_elevation
-from src.occupancy import OccupancyTracker, damped_step, suggest_workers
+from src.occupancy import OccupancyTracker, damped_step, suggest_workers  # noqa: F401
+from src.governor import Governor
 from src.workers import WorkerPool
 from src import export as exportmod
 from src import appguard as appguard_mod
@@ -192,6 +193,55 @@ POOL = WorkerPool(max_workers=PROJECT.settings().get("max_workers", 4))
 # cores against ~5 allocated, so the box runs near 17% while the UI reads 90%. See
 # src/occupancy.py.
 OCCUPANCY = OccupancyTracker()
+
+# The throughput governor: one instance for the whole process, because there is one pool and
+# one machine. It reads settings LIVE (PROJECT.settings is passed, not a snapshot) so a mid-run
+# knob change reaches it the same way the per-cell thread budget already does. Its `log` is a
+# lambda rather than the function itself because log() is defined further down this file and
+# the name has to resolve at CALL time, not at construction.
+#
+# Default is governor_mode="off", which returns the legacy scheduling formulas byte-for-byte
+# and never gates or resizes anything — so an unconfigured install schedules exactly as it did
+# before the governor existed. MELD_GOVERNOR=off in the environment forces that regardless of
+# what a project's settings say (resolved inside Governor._resolve_mode).
+GOVERNOR = Governor(cores=os.cpu_count() or 4,
+                    get_settings=lambda: PROJECT.settings(),
+                    log=lambda m: log(m))
+
+
+def _governor_mode() -> str:
+    """The mode that WOULD be resolved right now, env override included.
+
+    Delegates to the governor's own resolver rather than re-implementing the
+    settings/env precedence here: two copies of that rule would drift, and a server that
+    disagreed with the governor about whether it is running would set an admission callback
+    the governor then refuses to use (or leave the legacy stagger off in legacy mode).
+    """
+    try:
+        return GOVERNOR._resolve_mode(PROJECT.settings())
+    except Exception:  # noqa: BLE001 - an unreadable setting means legacy, never a crash
+        return "off"
+
+
+def _apply_governor_migration() -> None:
+    """Carry a pre-governor `worker_autoscale=True` project onto governor_mode="auto".
+
+    Runs at boot and on every project switch. The helper is idempotent (it consumes the legacy
+    flag), and returns an empty patch for everyone else, so this is a no-op for a project that
+    never opted in — which is nearly all of them.
+    """
+    try:
+        patch = migrate_governor_settings(PROJECT.settings())
+    except Exception:  # noqa: BLE001
+        return
+    if not patch:
+        return
+    try:
+        PROJECT.update_settings(patch)
+        if patch.get("governor_mode"):
+            log(f"[Governor] migrated worker_autoscale → governor_mode={patch['governor_mode']}")
+    except Exception as ex:  # noqa: BLE001
+        log(f"[Governor] settings migration skipped: {ex}")
 
 
 def _peak_rss_mb_estimate() -> float | None:
@@ -2092,6 +2142,12 @@ WORLD_META_NAME = "meld-world.json"
 _META_SKIP_SETTINGS = {
     "gpu_accel", "master_world_dir", "max_workers", "prefetch_enabled", "prefetch_margin_m",
     "timeout", "overpass_url", "prune_cell_after_merge",
+    # Scheduling policy and the numbers measured on ONE box. governor_history is the sharp
+    # one: it carries a machine's cores-per-cell, RAM p95 and cells/min, so importing a world
+    # built on a 24-core desktop would warm-start a laptop at that desktop's knee and swap.
+    # The rest decide how hard this machine works, which is never a property of the world.
+    "governor_mode", "governor_history", "ram_headroom_mb", "flush_threads_cap",
+    "governor_max_workers", "worker_autoscale",
 }
 
 
@@ -2256,9 +2312,279 @@ def _arnis_supports(flag: str) -> bool:
     return flag in _ARNIS_HELP_CACHE[key]
 
 
+# ── stop + governor helpers ────────────────────────────────────────────────
+
+def _run_stop_requested() -> bool:
+    """Has the CURRENT run been stopped by a person?
+
+    One source, deliberately: the pool's own flag, which /api/stop and the render queue's
+    KILL both set (via POOL.stop()) before they terminate anything. POOL.new_run_epoch()
+    clears it at the start of every run, so a fresh run is never born stopped, and a
+    still-set flag between runs can only be read by code that a submit would have cleared.
+
+    _RQ["stop"] is deliberately NOT consulted. The render queue has two different buttons:
+    Kill aborts the running project (and does call POOL.stop()), while Stop means "finish
+    this project, then stop" and explicitly leaves the current render alone. Treating that
+    soft flag as a stop would abort the prefetch it promised to let finish and would label
+    an unrelated failure in the still-running project "stopped by user".
+    """
+    return POOL.is_stopped
+
+
+#: The reason stamped on a cell whose generator was killed by Stop. It must never share a
+#: substring with _RETRYABLE_FAIL, or the retry path would resurrect the run the user just
+#: stopped — which is exactly what happened while "Arnis generation failed" was the label
+#: ("generation failed" is retryable). Enforced by _NEVER_RETRY_FAIL below, not just by
+#: the wording, so a later edit to either tuple cannot quietly re-open the hole.
+_STOPPED_FAIL_REASON = "stopped by user"
+
+
+def _governor_cell_done(stats: dict, *, ok: bool, gate_s: float = 0.0,
+                        launched_workers: int = 0) -> None:
+    """Hand one finished cell to the governor and apply any worker target it returns.
+
+    Called after run_arnis returns, so `ok` is the real outcome. Never raises: a governor
+    that cannot decide must not be able to fail a cell that already generated.
+
+    `gate_s` is what this cell cost before it started — the seconds its worker sat in
+    admit(). It is part of the cell's price, not free time, so it is reported rather than
+    dropped. `launched_workers` is the pool size this cell STARTED under: a resize applies
+    to the cells launched after it, so a completion sampled at the old level must not be
+    scored against the new one.
+    """
+    if not stats:
+        return
+    try:
+        target = GOVERNOR.on_cell_complete(
+            wall_s=float(stats.get("wall_s") or 0.0),
+            cpu_s=float(stats.get("cpu_s") or 0.0),
+            peak_rss_mb=stats.get("rss_mb"),
+            gpu_s=float(stats.get("gpu_s") or 0.0),
+            ok=bool(ok),
+            gate_s=float(gate_s or 0.0),
+            launched_workers=int(launched_workers or 0),
+        )
+    except Exception as ex:  # noqa: BLE001
+        log(f"[Governor] sample skipped: {ex}")
+        return
+    if not target or target == POOL.max_workers:
+        return
+    # A stop in flight must not be undone by a resize: growing the pool respawns worker
+    # threads, and the run is over.
+    if _run_stop_requested():
+        return
+    snap = GOVERNOR.snapshot()
+    log(f"  [Governor] {POOL.max_workers} → {target} workers "
+        f"({snap.state.lower()}, {snap.binding}"
+        + (f", {snap.cores_per_cell:.2f} cores/cell" if snap.cores_per_cell else "")
+        + (f", {snap.cells_per_min:.1f} cells/min" if snap.cells_per_min else "") + ")")
+    POOL.set_max_workers(int(target))
+
+
+#: Seconds the CURRENT worker thread last spent parked at the admission gate, waiting for
+#: the cell it is about to run. Thread-local because the gate runs on the very thread that
+#: then runs the cell, and it is consumed exactly once — at the top of _runner.
+#:
+#: Why it is measured at all: the pool calls admit_cb BEFORE runner(), so a cell's own wall
+#: clock cannot see the wait. Left uncharged, a gate that costs a worker seconds is invisible
+#: to cells_per_min — the metric the governor optimises — so the governor keeps climbing on a
+#: throughput number its own gate is quietly subsidising. Charging it into that cell's sample
+#: is what makes the optimised metric pay for its own scheduling decisions.
+_GATE_WAIT = threading.local()
+
+
+def _take_gate_wait_s() -> float:
+    """Seconds this thread waited at the gate for the cell it is starting; consumed on read.
+
+    Consumed (reset to 0) so a cell that never went through the gate — admission disarmed
+    mid-run, or an early return before the previous cell reached its completion — cannot
+    inherit the previous cell's wait and be charged for it twice.
+    """
+    waited = float(getattr(_GATE_WAIT, "seconds", 0.0) or 0.0)
+    _GATE_WAIT.seconds = 0.0
+    return waited
+
+
+def _governor_admit(worker_id: int, active: int) -> str:
+    """Pool admission callback. Armed only in AUTO mode — advise observes and logs and
+    must change nothing, and with admit_cb unset the pool takes its legacy staggered-start
+    path instead, untouched.
+
+    The wait is timed HERE rather than read off admit()'s verdict string, so what gets
+    charged to the cell is what the gate really cost — timeout, early release, or a raise.
+    """
+    _t0 = time.monotonic()
+    try:
+        return GOVERNOR.admit(worker_id=worker_id, active=active)
+    finally:
+        _GATE_WAIT.seconds = max(0.0, time.monotonic() - _t0)
+
+
+def _cells_size(cells: list[dict], settings: dict) -> int:
+    """Regions-per-axis of the cells about to run.
+
+    Read off the cell KEYS ("rx,rz,size"), not off job_size_regions: a resume or a
+    retry-missing run re-generates cells that were planned at whatever size was configured
+    THEN, and the governor's history bucket has to describe the work actually being done.
+    Falls back to the setting for a bare-bbox job with no keys.
+    """
+    for c in cells or []:
+        parts = str(c.get("cell_key") or "").split(",")
+        if len(parts) == 3:
+            try:
+                return max(1, int(parts[2]))
+            except (TypeError, ValueError):
+                break
+    try:
+        return max(1, int(settings.get("job_size_regions") or 4))
+    except (TypeError, ValueError):
+        return 4
+
+
+def _governor_begin_run(*, total_cells: int, settings: dict, cell_size: int,
+                        ceiling: int) -> None:
+    """Open a governor run and put the pool into whichever regime it asked for.
+
+    The admission callback is the switch between the two pacing schemes, and exactly one of
+    them may be armed: with admit_cb set the pool asks the governor when each worker may
+    start; with it None the pool falls back to its legacy per-worker stagger. ONLY AUTO arms
+    it. Off mode clears it, which is what keeps "governor off == today's behaviour" true for
+    start-up pacing as well as for the thread formula — and advise clears it too, because
+    advise's whole contract is that it observes and logs and changes nothing. A gate is a
+    change: armed under advise it disabled the legacy stagger and could park a worker at the
+    gate on a RAM-tight machine, which is neither what its docstring nor its UI tooltip say.
+    """
+    try:
+        GOVERNOR.begin_run(total_cells=int(total_cells),
+                           scale=float(settings.get("scale", 1.0) or 1.0),
+                           cell_size=int(cell_size or 1),
+                           ceiling=int(ceiling))
+    except Exception as ex:  # noqa: BLE001 - never let scheduling policy block a render
+        log(f"[Governor] disabled for this run ({ex})")
+        POOL.admit_cb = None
+        return
+    POOL.admit_cb = _governor_admit if GOVERNOR.mode == "auto" else None
+    if GOVERNOR.mode == "off":
+        return
+    # begin_run CHOOSES an opening count — the calibrate start, or a warm start read back from
+    # this bucket's history — and it has to be the count the run actually begins with. Without
+    # this the pool kept the stored max_workers, the very first threads_for_next_cell() call
+    # re-anchored the governor to that number, and a run told to calibrate from 4 calibrated
+    # from 24 instead: the exact "climbs to 24 and stays there" the measured Berlin curve says
+    # must not happen. Guarded on AUTO, not just on "not off": advise's contract is that it
+    # observes and changes nothing, and its opening count is clamped to the governor ceiling —
+    # so with governor_max_workers set BELOW max_workers (8 workers, ceiling 4) advise silently
+    # shrank the pool to 4 and reported it as an advisory run. Only auto may move the pool.
+    if GOVERNOR.mode == "auto" and GOVERNOR.workers != POOL.max_workers:
+        log(f"[Governor] opening at {GOVERNOR.workers} worker(s) "
+            f"(pool was {POOL.max_workers}, ceiling {GOVERNOR.ceiling})")
+        POOL.set_max_workers(int(GOVERNOR.workers))
+    snap = GOVERNOR.snapshot()
+    log(f"[Governor] {snap.mode} · {snap.state.lower()} · {snap.workers} workers "
+        f"(ceiling {GOVERNOR.ceiling}) · {snap.note}")
+
+
+def _log_occupancy_advice() -> None:
+    """The pre-governor per-cell advisory line, kept verbatim for governor_mode="off".
+
+    This is the "N workers would fit" note the log has always carried. What is gone from it is
+    the branch beside it that ACTED on the number when worker_autoscale was set: that was the
+    old half-governor, and two things stepping on POOL.set_max_workers would fight. Projects
+    that had it on are migrated to governor_mode="auto" at load, where the real one takes over.
+
+    Note the recommendation is the occupancy ENVELOPE, and it is advice, not a target: it
+    assumes each cell keeps using the cores it used when measured, which contention makes
+    false as the pool grows. That is exactly why acting on it was the wrong loop.
+    """
+    per_cell = OCCUPANCY.cores_per_cell
+    if per_cell is None:
+        return
+    live = PROJECT.settings()
+    pct = float(live.get("cpu_target_pct", 90) or 90)
+    cores = os.cpu_count() or 4
+    try:
+        import psutil
+        # 95% of what is free right now: the last 5% is the OS's, and paging
+        # one worker costs more than the worker would have earned.
+        avail_mb = psutil.virtual_memory().available / (1024 * 1024) * 0.95
+    except Exception:  # noqa: BLE001
+        avail_mb = None
+    target = suggest_workers(per_cell, cores, pct,
+                             ram_available_mb=avail_mb,
+                             ram_per_cell_mb=_peak_rss_mb_estimate(),
+                             gpu_fraction_per_cell=OCCUPANCY.gpu_fraction_per_cell,
+                             gpu_target_pct=95.0)
+    if target == POOL.max_workers:
+        return
+    gpu_frac = OCCUPANCY.gpu_fraction_per_cell or 0.0
+    gpu_note = f", GPU {gpu_frac * 100:.1f}%/worker" if gpu_frac > 0 else ""
+    log(f"  [Workers] {per_cell:.2f} cores/cell measured{gpu_note} -> "
+        f"{target} workers would fit (currently {POOL.max_workers}; "
+        f"set governor_mode to apply)")
+
+
+def _governor_snapshot_dict() -> dict:
+    """The governor's snapshot as plain JSON, for /api/status, /api/mini and /api/governor.
+
+    Additive everywhere it appears, and shaped so an OLD client that has never heard of it
+    simply ignores an extra key. It never raises: a status poll is what the UI uses to notice
+    that generation stopped, so it must survive a governor in any state at all.
+    """
+    try:
+        s = GOVERNOR.snapshot()
+        return {"mode": s.mode, "state": s.state, "workers": s.workers, "target": s.target,
+                "threads": s.threads, "flush": s.flush, "cores_per_cell": s.cores_per_cell,
+                "rss_p95_mb": s.rss_p95_mb, "cells_per_min": s.cells_per_min,
+                "binding": s.binding, "samples": s.samples, "note": s.note}
+    except Exception as ex:  # noqa: BLE001
+        return {"mode": "off", "state": "OFF", "workers": POOL.max_workers,
+                "target": POOL.max_workers, "threads": 0, "flush": 0,
+                "cores_per_cell": None, "rss_p95_mb": None, "cells_per_min": None,
+                "binding": "none", "samples": 0, "note": f"unavailable: {ex}"}
+
+
+def _governor_end_run() -> None:
+    """Close a governor run: persist the history entry, then disarm admission.
+
+    Disarming matters. admit_cb left set would silently replace the legacy stagger on the
+    NEXT run even if that run resolves to governor_mode="off".
+    """
+    _governor_persist_history()
+    POOL.admit_cb = None
+
+
+def _governor_persist_history() -> None:
+    """Store what this run converged on, so the next run of the same shape warm-starts there.
+
+    Keyed by scale bucket + cell size (the governor's own bucket_key), because a 1:1 cell and
+    a 1:20 cell are different machines' worth of work. end_run() returns None for any run that
+    never actually chose anything — advisory, static small grid, or too few samples — so a
+    guess is never written back as if it were a converged answer.
+    """
+    try:
+        result = GOVERNOR.end_run()
+    except Exception as ex:  # noqa: BLE001
+        log(f"[Governor] history not saved: {ex}")
+        return
+    if not result:
+        return
+    bucket, entry = result
+    try:
+        hist = dict(PROJECT.settings().get("governor_history") or {})
+        hist[bucket] = entry
+        PROJECT.update_settings({"governor_history": hist})
+        log(f"[Governor] learned {bucket}: {entry.get('workers')} workers, "
+            f"{entry.get('cells_per_min')} cells/min")
+    except Exception as ex:  # noqa: BLE001
+        log(f"[Governor] history not saved: {ex}")
+
+
 # ── worker runner: generate one cell, then merge it ────────────────────────
 
 def _runner(job: dict, state: dict) -> bool:
+    # Read (and clear) the admission wait FIRST, before any early return can strand it on
+    # this thread for the next cell to be billed for. Consumed by _governor_cell_done below.
+    _gate_wait_s = _take_gate_wait_s()
     cell_key = job["cell_key"]
     out = job["output_path"]
     settings = job["settings"]
@@ -2277,6 +2603,9 @@ def _runner(job: dict, state: dict) -> bool:
         return False
 
     PROJECT.set_cell_status(cell_key, "running")
+    # The pool resets the standard state fields when it picks a job up, but not this one, so
+    # clear it here or the previous cell's last phase is what this cell's stage reads as.
+    state["phase"] = ""
     _timing_started(cell_key, state.get("worker_id"))
     clean_output_dir(out)
     Path(out).mkdir(parents=True, exist_ok=True)
@@ -2357,12 +2686,19 @@ def _runner(job: dict, state: dict) -> bool:
 
     # Per-child env (merged Arnis reads these; an older binary ignores them):
     #  - RAYON_NUM_THREADS: a size>=2 cell uses Arnis's in-process tile parallelism. We
-    #    divide a core budget across workers, BUT never collapse a worker to 1 thread:
-    #    workers are in different phases (fetch/prep/tiles/save) at any instant, so only a
-    #    fraction are CPU-bound at once. A per-worker floor (min_threads_per_worker, default
-    #    2) keeps each cell's tile parallelism alive — mild oversubscription that the OS
-    #    shares across phases, not thrash. cpu_target_pct is the budget (default 100% of
-    #    cores; set >100 to oversubscribe harder, <100 to leave headroom).
+    #    divide a core budget across workers. cpu_target_pct is that budget (default 90% of
+    #    cores, clamped 10..95 by /api/settings — the last 5-10% is the OS's, and a run that
+    #    takes all of it just pages).
+    #
+    #    Who decides is now governor_mode. OFF (the default) returns the legacy formula
+    #    verbatim: max(min_threads_per_worker, core_budget // workers) rayon threads and
+    #    max(2, min(6, rayon // 2)) flush threads, with min_threads_per_worker (default 4) as
+    #    a per-worker floor so each cell keeps some tile parallelism — mild oversubscription
+    #    the OS shares across phases, not thrash. ADVISE/AUTO hand the decision to
+    #    src/governor.py, which sizes rayon from MEASURED cores-per-cell instead of from a
+    #    division (floor 1, not 4: the old floor is what produced 96 rayon threads across 24
+    #    workers on a 24-core box) and takes the flush ceiling from flush_threads_cap
+    #    (default 12) rather than the hardcoded 6 that used to live on the line below.
     #  - ARNIS_STREAM_TO_DISK=1: region eviction so big test cells (8x8/16x16) don't OOM.
     #    Env, not a CLI flag (upstream removed the flag). Forced for size>=8 or when the
     #    user enables the setting; smaller cells let Arnis's own RAM heuristic decide.
@@ -2372,73 +2708,113 @@ def _runner(job: dict, state: dict) -> bool:
     # the snapshot above, so a mid-run tweak never desyncs the world. max_workers is already live
     # (the pool resizes), and POOL.max_workers below reflects the current value.
     _live = PROJECT.settings()
-    cpu_pct = float(_live.get("cpu_target_pct", settings.get("cpu_target_pct", 100)) or 100)
-    min_threads = max(1, int(_live.get("min_threads_per_worker", settings.get("min_threads_per_worker", 2)) or 1))
-    core_budget = max(1, int((os.cpu_count() or 4) * cpu_pct / 100.0))
-    rayon_threads = max(min_threads, core_budget // max(1, POOL.max_workers))
-    log(f"  [{cell_key}] {rayon_threads} threads/cell (cpu {int(cpu_pct)}% · {POOL.max_workers} workers, live)")
+    # 90, not 100: project.py's default IS 90 and the governor's fallback is 90, so the three
+    # places that read this key now agree. (The old 100 here only ever fired for a settings blob
+    # with the key deleted, and handed out a core budget the OS never actually had spare.)
+    cpu_pct = float(_live.get("cpu_target_pct", settings.get("cpu_target_pct", 90)) or 90)
+    # The pool size is the divisor, and it is LIVE — the governor may have resized the pool
+    # between cells, and threads_for_next_cell() is also how the governor learns the count
+    # actually in force (it re-anchors its sample windows when that changes).
+    _workers_now = max(1, POOL.max_workers)
     # The fork's region flush pool defaults to cores/4 PER PROCESS - correct for a
     # lone arnis, oversubscribed the moment several workers run (8 workers x 6 flush
-    # threads = 48 compression threads on 24 cores). Scale it with the same per-worker
-    # budget the rayon threads get: about half a worker's threads, floor 2 so the pool
-    # never degenerates back into the serial writer that cost 63 s a cell.
-    flush_threads = max(2, min(6, rayon_threads // 2))
+    # threads = 48 compression threads on 24 cores). Both numbers come from the governor
+    # now; in "off" mode it returns exactly what the two hand-rolled expressions here
+    # returned before it existed.
+    rayon_threads, flush_threads = GOVERNOR.threads_for_next_cell(workers=_workers_now)
+    # Log the percentage the BUDGET was actually computed from, not the raw setting. The two
+    # differ: a governed path clamps cpu_target_pct to 10..95, off mode reads it raw (so the
+    # documented >100 oversubscription still means what it always meant). Logging the raw
+    # number beside numbers derived from a clamped one is how a support thread ends up
+    # explaining why 24 threads at "cpu 120%" is really 22.
+    _cpu_pct_used = cpu_pct if GOVERNOR.mode == "off" else min(95.0, max(10.0, cpu_pct))
+    _gov_note = "" if GOVERNOR.mode == "off" else f" · governor {GOVERNOR.state.lower()}"
+    log(f"  [{cell_key}] {rayon_threads} threads/cell, {flush_threads} flush "
+        f"(cpu {int(_cpu_pct_used)}% · {_workers_now} workers, live{_gov_note})")
     child_env = {
         "RAYON_NUM_THREADS": str(rayon_threads),
         "ARNIS_FLUSH_THREADS": str(flush_threads),
+        # Flood-fill stop rule: a BUDGET (blocks visited), not the wall clock. Set for every
+        # cell in every governor mode, deliberately unconditional.
+        #
+        # Why it matters: --timeout is a WALL CLOCK, so how far a fill got depends on how
+        # loaded the machine was when it ran. The governor varies concurrency by design, so
+        # the same cell at 4 workers and at 12 finishes a different amount of fill, and two
+        # neighbours that disagree leave a visible seam. It is the one output path in the
+        # renderer whose result depends on scheduling timing; a budget is deterministic, so
+        # setting it is what makes "the governor cannot change the world" true.
+        #
+        # Why it is safe: the budget binds strictly sooner than the wall clock on the fills
+        # that trigger either, and the arnis golden hashes were verified byte-identical with
+        # it forced on. An arnis without the variable ignores it and keeps the old rule.
+        "ARNIS_FILL_BUDGET": "1",
     }
+    # Phase markers (arnis stdout protocol v1). Asked for whenever the governor is actually
+    # running — no capability probe: the lines are machine output that arnis_cmd consumes
+    # before on_line(), and a binary that predates the protocol just ignores an env var it
+    # does not know and emits nothing. (The probe that used to guard this grepped --help for
+    # a token clap never prints, so it answered False for every binary including the ones
+    # that DO emit markers, and the whole protocol was dead.)
+    _want_markers = GOVERNOR.mode != "off"
+    if _want_markers:
+        child_env["ARNIS_PHASE_MARKERS"] = "1"
     if settings.get("stream_to_disk") or cell_size >= 8:
         child_env["ARNIS_STREAM_TO_DISK"] = "1"
     # Elevation source zoom: caps Arnis's terrain zoom so the whole world generates at the chosen
     # detail (auto = scale-matched). Matches the zoom the data pack downloaded, so it's a cache hit.
     child_env["ARNIS_ELEV_ZOOM"] = str(effective_elev_zoom(settings, float(origin.get("lat", 45.0))))
 
+    # What this cell actually cost, captured by on_stats and consumed AFTER run_arnis returns.
+    # It cannot be fed to the governor from inside the callback: on_stats fires on every exit,
+    # success or not, and only the return value of run_arnis says which this was. A cell that
+    # was killed by Stop at four seconds is evidence about the Stop button, not about how many
+    # cells this machine should run at once.
+    _cell_stats: dict = {}
+
+    def on_stats(cpu_seconds: float, wall_seconds: float,
+                 peak_rss_mb: float | None = None, source: str | None = None,
+                 gpu_ms: float | None = None) -> None:
+        """Record what this cell actually used.
+
+        The extra keyword arguments are the ones src/arnis_cmd.py offers when the generator
+        reported its own counters (`[meld] v=1 phase=done`); it inspects this signature and
+        passes only what is named here, so it stays compatible either way. `source` says which
+        it was: "arnis" (measured inside the process at exit) or "sampler" (Meld's 0.5 s psutil
+        poll, which undercounts the last half second).
+        """
+        gpu_s = (float(gpu_ms) / 1000.0) if gpu_ms is not None else (_gpu_ms["v"] / 1000.0)
+        _cell_stats.update(cpu_s=float(cpu_seconds or 0.0), wall_s=float(wall_seconds or 0.0),
+                           rss_mb=peak_rss_mb, gpu_s=gpu_s, source=source or "sampler")
+        OCCUPANCY.record(cpu_seconds, wall_seconds, gpu_seconds=gpu_s,
+                         peak_rss_mb=peak_rss_mb)
+        if GOVERNOR.mode == "off":
+            _log_occupancy_advice()
+
+    def on_phase(name: str, t_ms: int) -> None:
+        """Live stage from the generator's own mouth, when it is emitting markers.
+
+        Written to its OWN field, not over `message`. `message` is the line the UI shows a
+        person ("Generating tile 3/16"), and replacing it with "place" would trade a sentence
+        for a word. _worker_stage() prefers this field and falls back to scraping the prose,
+        which is all an un-instrumented binary gives it. Progress is left to parse_progress()
+        so the percentage cannot jump backwards when a phase repeats.
+        """
+        state["phase"] = str(name or "")
+
     # cwd = APP_DIR, not the bundled payload: arnis resolves cave-pack/ and tree-packs/ relative
     # to where it lives, and a temp _MEIPASS cwd would also strand any relative path it writes.
-    def on_stats(cpu_seconds: float, wall_seconds: float) -> None:
-        """Record what this cell actually used, and say what the pool should be.
-
-        Advisory by default: `worker_autoscale` opts in to acting on it. The step is
-        damped because occupancy was measured UNDER the current worker count -- adding
-        workers adds contention -- so each move is re-measured before the next.
-        """
-        OCCUPANCY.record(cpu_seconds, wall_seconds, gpu_seconds=_gpu_ms["v"] / 1000.0)
-        per_cell = OCCUPANCY.cores_per_cell
-        if per_cell is None:
-            return
-        live = PROJECT.settings()
-        pct = float(live.get("cpu_target_pct", 90) or 90)
-        cores = os.cpu_count() or 4
-        try:
-            import psutil
-            # 95% of what is free right now: the last 5% is the OS's, and paging
-            # one worker costs more than the worker would have earned.
-            avail_mb = psutil.virtual_memory().available / (1024 * 1024) * 0.95
-        except Exception:  # noqa: BLE001
-            avail_mb = None
-        ram_per_cell = _peak_rss_mb_estimate()
-        target = suggest_workers(per_cell, cores, pct,
-                                 ram_available_mb=avail_mb,
-                                 ram_per_cell_mb=ram_per_cell,
-                                 gpu_fraction_per_cell=OCCUPANCY.gpu_fraction_per_cell,
-                                 gpu_target_pct=95.0)
-        if target == POOL.max_workers:
-            return
-        gpu_frac = OCCUPANCY.gpu_fraction_per_cell or 0.0
-        gpu_note = f", GPU {gpu_frac * 100:.1f}%/worker" if gpu_frac > 0 else ""
-        if live.get("worker_autoscale"):
-            stepped = damped_step(POOL.max_workers, target)
-            if stepped != POOL.max_workers:
-                log(f"  [Workers] {per_cell:.2f} cores/cell measured{gpu_note} -> "
-                    f"{POOL.max_workers} to {stepped} workers (target {target})")
-                POOL.set_max_workers(stepped)
-        else:
-            log(f"  [Workers] {per_cell:.2f} cores/cell measured{gpu_note} -> "
-                f"{target} workers would fit (currently {POOL.max_workers}; "
-                f"enable worker_autoscale to apply)")
-
     ok = run_arnis(cmd, cwd=str(APP_DIR), on_line=on_line, on_proc=on_proc,
-                   env=child_env, on_stats=on_stats)
+                   env=child_env, on_stats=on_stats,
+                   on_phase=on_phase if _want_markers else None)
+    # Stop is not a failure of the cell, and the sample from a half-run cell is not a
+    # measurement — feed the governor `ok=False` for both so neither steers the pool.
+    _stopped_now = _run_stop_requested()
+    _governor_cell_done(_cell_stats, ok=bool(ok) and not _stopped_now,
+                        gate_s=_gate_wait_s, launched_workers=_workers_now)
+    # arnis is done; everything after this line is Meld's own work (merge, prune, meta), which
+    # the generator's phase names do not describe. Left set, the last one ("save") would keep
+    # colouring the worker block through the whole merge.
+    state["phase"] = ""
     if cell_log_fp is not None:
         try:
             cell_log_fp.write(f"\n=== arnis exit ok={ok} ===\n")
@@ -2447,6 +2823,14 @@ def _runner(job: dict, state: dict) -> bool:
             pass
     if not ok:
         PROJECT.set_cell_status(cell_key, "failed")
+        if _stopped_now:
+            # Deliberately NOT scanning the log tail: a killed generator's last lines are
+            # whatever it happened to be doing (an in-flight Overpass read reads as "network
+            # timeout"), and that guess is a retryable reason. The cause here is known
+            # exactly — somebody pressed Stop — so it is stated, not inferred.
+            _record_fail(cell_key, _STOPPED_FAIL_REASON)
+            state.update(message="Stopped.")
+            return False
         _record_fail(cell_key, "Arnis generation failed", out=out)
         _surface_failure_tail(cell_key, out)
         state.update(message="Arnis generation failed.")
@@ -2551,6 +2935,11 @@ _RETRYABLE_FAIL = ("timeout", "rate limit", "network", "fetch failed",
                    # cell instead of silently using AWS; retrying usually succeeds off
                    # the (by then) warm tile cache
                    "elevation fetch failed")
+#: Reasons that are NEVER retried, whatever else they happen to contain. This is a hard veto
+#: applied on top of the transient check: "stopped by user" does not match anything in
+#: _RETRYABLE_FAIL today, and this makes sure it still doesn't after someone widens that tuple.
+#: Re-queueing a cell the user just stopped is the one retry that is always wrong.
+_NEVER_RETRY_FAIL = (_STOPPED_FAIL_REASON,)
 _MAX_CELL_RETRIES = 2
 
 
@@ -2839,11 +3228,16 @@ def _on_complete(job, ok, err):
         rlow = reason.lower()
         status = PROJECT.load_grid().get(ck)
         deterministic = (status in ("drift", "collision")
-                         or any(x in rlow for x in ("disk full", "panic", "merge error")))
+                         or any(x in rlow for x in ("disk full", "panic", "merge error"))
+                         or any(x in rlow for x in _NEVER_RETRY_FAIL))
         transient = any(t in rlow for t in _RETRYABLE_FAIL)
         retries = int(job.get("_retries", 0))
+        # POOL.is_stopped is the pool's own flag, and it is now actually SET (by /api/stop and
+        # the render-queue Kill, both of which call POOL.stop() before terminating anything).
+        # It used to be read through getattr on an attribute nothing ever wrote, so this whole
+        # guard was dead and a stopped run re-queued each killed cell up to twice.
         if (transient and not deterministic and retries < _MAX_CELL_RETRIES
-                and not getattr(POOL, "_stopped", False)):
+                and not POOL.is_stopped and not _run_stop_requested()):
             job = {**job, "_retries": retries + 1}
             PROJECT.set_cell_status(ck, "queued")
             _clear_fail(ck)
@@ -2876,6 +3270,7 @@ def _on_complete(job, ok, err):
             write_world_meta()
             run_done = True
     if run_done:
+        _governor_end_run()         # persist what the run converged on; hand the pool back
         power.release()             # the machine may sleep again
         _record_size_calibration()  # what a region ACTUALLY costs here, for the next estimate
         _write_run_report()   # benchmark JSON + HTML into the world folder (best-effort)
@@ -2885,6 +3280,11 @@ def _on_complete(job, ok, err):
 
 
 POOL.configure(_runner, _on_complete)
+# Boot-time settings migration. Deliberately here and not beside PROJECT's construction: it
+# logs, and log() is defined further down this file. A project that opted into the pre-governor
+# worker_autoscale asked once for adaptive scheduling and must keep it, so it lands on
+# governor_mode="auto" rather than silently falling back to the legacy formulas.
+_apply_governor_migration()
 
 
 # ── routes ──────────────────────────────────────────────────────────────────
@@ -2912,7 +3312,20 @@ def index():
 
 #: Worker lifecycle, in the order a cell passes through it. The status bar colours a block per
 #: worker from this, so the pool becomes readable at a glance without any text.
-WORKER_STAGES = ("idle", "queued", "fetch", "prepare", "build", "save", "merge", "failed")
+WORKER_STAGES = ("idle", "queued", "waiting for admission", "fetch", "prepare", "build",
+                 "save", "merge", "finishing merges", "failed")
+
+#: arnis' phase names (stdout protocol v1) -> Meld's worker stages. The generator has more
+#: phases than the bar has colours, which is the point: several map onto one stage. Anything
+#: not listed here (a phase a newer generator adds) falls through to the prose scan rather
+#: than inventing a stage the UI has no colour for.
+_PHASE_STAGE = {
+    "fetch": "fetch", "overture": "fetch",
+    "parse": "prepare", "elevation": "prepare", "ground": "prepare",
+    "place": "build", "post": "build",
+    "merge": "merge",
+    "save": "save", "done": "save",
+}
 
 
 def _worker_stage(state: dict) -> str:
@@ -2922,12 +3335,36 @@ def _worker_stage(state: dict) -> str:
     the same keywords parse_progress() keys its percentage off - one source of truth for "what
     does this line mean", even if that source is English text. Falls back to the percentage,
     which is monotonic, when a line does not name its phase.
+
+    Two of the stages are not Arnis' voice but Meld's, and both are checked before the prose
+    scan because both would otherwise be swallowed by it ("waiting for admission" names no
+    phase at all and would fall through to the percentage, reading as "queued"; "finishing
+    merges" contains "merg" and would read as an ordinary merge).
+
+    When the generator is emitting phase markers (ARNIS_PHASE_MARKERS=1, which Meld only asks
+    for while the governor is running), state["phase"] holds the phase NAME it last announced.
+    That is the same pipeline said in a field instead of in English, so it is preferred over
+    the scrape - "post" and "place" name no keyword the prose scan knows, and would otherwise
+    be read off the percentage.
     """
     msg = (state.get("message") or "").lower()
+    # Written by the pool itself (src/workers.py) while the governor is holding this worker
+    # at the admission gate. It is a real state, distinct from queued: the cell has been
+    # taken off the queue and is waiting on RAM headroom, not on a free slot. RAM only —
+    # a near-100% CPU is the GOAL of a CPU-bound render, never a reason to hold a worker.
+    if "waiting for admission" in msg:
+        return "waiting for admission"
     if "fail" in msg or "error" in msg or "panic" in msg:
         return "failed"
+    phase = str(state.get("phase") or "").strip().lower()
+    if phase and phase in _PHASE_STAGE:
+        stage = _PHASE_STAGE[phase]
+        return "finishing merges" if (stage == "merge" and POOL.is_stopped) else stage
     if "merg" in msg:
-        return "merge"
+        # After Stop, the workers still merging are the reason the app has not gone quiet.
+        # A merge is never killed - a half-written .mca cannot be recovered - so saying so
+        # is the difference between "it ignored me" and "it is finishing what it must".
+        return "finishing merges" if POOL.is_stopped else "merge"
     if "saving" in msg or "writing region" in msg:
         return "save"
     if "generating" in msg or "painting" in msg or "tile" in msg:
@@ -3057,6 +3494,7 @@ def api_mini():
         task = {"title": "Idle", "detail": "nothing running", "pct": None}
 
     _u = update.cached_state()
+    _gov = _governor_snapshot_dict()
     return jsonify({
         "ok": True,
         "app": "Meld",
@@ -3070,6 +3508,10 @@ def api_mini():
         "eta_s": int(eta) if eta is not None else None,
         "workers_busy": busy,
         "workers_max": POOL.max_workers,
+        # Three fields, not the whole snapshot: this route is polled every second or two by the
+        # status bar and its entire reason to exist is being tiny. The bar renders "gov 8→12"
+        # from exactly these, and draws nothing at all when state is "OFF".
+        "gov": {"state": _gov["state"], "w": _gov["workers"], "target": _gov["target"]},
         "queue": rq,
         "awake": power.active(),
         "task": task,
@@ -3625,6 +4067,38 @@ def api_settings():
         patch["cpu_target_pct"] = max(10, min(95, int(patch["cpu_target_pct"])))
     if patch.get("min_threads_per_worker") is not None:
         patch["min_threads_per_worker"] = max(1, min(8, int(patch["min_threads_per_worker"])))
+    # ── governor ──────────────────────────────────────────────────────────────────────────
+    # Clamped here rather than trusted, because these are the knobs that decide how hard the
+    # machine works: a bad ram_headroom_mb is the difference between a run and a swap storm.
+    # Every one of them is also read live mid-run, so a value that lands here lands in the
+    # next cell's budget.
+    if patch.get("governor_mode") is not None:
+        gm = str(patch["governor_mode"]).strip().lower()
+        # Anything unrecognised means legacy scheduling, never a guess: an unknown mode must
+        # not silently start resizing the pool.
+        patch["governor_mode"] = gm if gm in ("off", "advise", "auto") else "off"
+    if patch.get("ram_headroom_mb") is not None:
+        try:
+            patch["ram_headroom_mb"] = max(512, min(8192, int(patch["ram_headroom_mb"])))
+        except (TypeError, ValueError):
+            patch["ram_headroom_mb"] = 2048
+    if patch.get("flush_threads_cap") is not None:
+        try:
+            patch["flush_threads_cap"] = max(1, min(24, int(patch["flush_threads_cap"])))
+        except (TypeError, ValueError):
+            patch["flush_threads_cap"] = 12
+    if patch.get("governor_max_workers") is not None:
+        # 0 is meaningful: "use max_workers as the ceiling". It is not a missing value, so it
+        # survives the None-stripping in update_settings only because 0 is not None.
+        try:
+            patch["governor_max_workers"] = max(0, min(64, int(patch["governor_max_workers"])))
+        except (TypeError, ValueError):
+            patch["governor_max_workers"] = 0
+    if patch.get("governor_history") is not None:
+        # Written by the server at the end of a run, not by a person. Accept only a dict, so a
+        # malformed POST cannot poison the warm start of every future run.
+        patch["governor_history"] = (patch["governor_history"]
+                                     if isinstance(patch["governor_history"], dict) else {})
     if patch.get("cave_biome_amounts") is not None:
         raw = patch["cave_biome_amounts"] if isinstance(patch["cave_biome_amounts"], dict) else {}
         clean = {}
@@ -3784,7 +4258,22 @@ def api_settings():
     elif patch.get("regional_elevation_only") is True:
         patch["aws_only_elevation"] = False
     s = PROJECT.update_settings(patch)
-    POOL.set_max_workers(int(s.get("max_workers") or 4))
+    _cfg_w = max(1, min(WorkerPool.MAX_WORKERS_HARD_CAP, int(s.get("max_workers") or 4)))
+    if POOL.admit_cb is None:
+        # Nothing is pacing the pool, so the stored count IS the pool size. Unchanged.
+        POOL.set_max_workers(int(s.get("max_workers") or 4))
+    else:
+        # A governed run is in flight, and there max_workers means CEILING, not answer — so a
+        # settings POST about something else entirely (a seed, an export format) must not snap
+        # the pool back to the stored number and undo what the governor measured its way to.
+        # Both directions still work: lowering the ceiling under the live count shrinks the
+        # pool NOW (it is the safety valve, and has to bite immediately), raising it just gives
+        # the climb somewhere to go. governor_max_workers keeps its precedence from begin_run.
+        _explicit = max(0, min(WorkerPool.MAX_WORKERS_HARD_CAP,
+                               int(s.get("governor_max_workers") or 0)))
+        GOVERNOR.ceiling = _explicit or _cfg_w
+        if POOL.max_workers > GOVERNOR.ceiling:
+            POOL.set_max_workers(GOVERNOR.ceiling)
     # Stagger off => 0s (all workers start at once).
     POOL.stagger_seconds = float(s.get("cpu_stagger_seconds", 2) or 0) if s.get("cpu_stagger_enabled", True) else 0.0
     POOL.stagger_adaptive = bool(s.get("cpu_stagger_adaptive", True))
@@ -4172,6 +4661,19 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
     if POOL.max_workers != _cfg_workers:
         POOL.set_max_workers(_cfg_workers)
         log(f"[Workers] generation start: set pool to your {_cfg_workers} worker(s)")
+    # Everything measured about the LAST run stops describing this one. The scale bucket alone
+    # is enough to invalidate it: a 1:20 cell keeps ~1.02 cores busy and a 1:1 cell ~7.75, so a
+    # median taken across both describes no cell that ever ran. Three resets, one per keeper of
+    # per-run state:
+    #   - the pool's run epoch: re-arms every worker's first-job stagger (it used to fire once
+    #     per THREAD ever, so runs 2..N started every worker in lockstep) and clears the stop
+    #     flag, so a run that follows a Stop is not born stopped.
+    #   - OCCUPANCY: the advisory window behind /api/status and the off-mode "N would fit" line.
+    #   - the governor: begin_run() re-reads mode/ceiling and arms or disarms pool admission.
+    POOL.new_run_epoch()
+    OCCUPANCY.reset()
+    _governor_begin_run(total_cells=len(cells), settings=settings,
+                        cell_size=_cells_size(cells, settings), ceiling=_cfg_workers)
     exe = resolve_arnis_exe()
     # NOTE: stream-to-disk is delivered via the ARNIS_STREAM_TO_DISK env var in _runner
     # (the merged Arnis dropped the CLI flag). The env var is harmless on a binary that
@@ -4202,7 +4704,8 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
         # Phase 1: OSM (Overpass) — download once, share to every cell.
         try:
             osm_files = run_prefetch(cells, origin, settings, str(exe),
-                                     _osm_cache_dir(), log, _prefetch_on_chunk)
+                                     _osm_cache_dir(), log, _prefetch_on_chunk,
+                                     should_stop=_run_stop_requested)
         except Exception as ex:  # noqa: BLE001
             log(f"[Prefetch] error, falling back to live fetch: {ex}")
             osm_files = {}
@@ -4252,7 +4755,7 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
                     _PREFETCH.update(phase="terrain", note="warming terrain tiles…",
                                      terrain={"done": 0, "total": len(tiles), "ok": 0, "failed": 0})
                 try:
-                    purge_small_tiles(log=log)   # drop legacy poisoned tiles first
+                    purge_small_tiles(log=log, should_stop=_run_stop_requested)   # drop legacy poisoned tiles first
 
                     def _tp(done, total, ok, failed):
                         with _PREFETCH_LOCK:
@@ -4265,7 +4768,8 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
                     run_terrain_prefetch(tiles, str(exe), log, _tp, elev_zoom=ez,
                                          scale=float(settings.get("scale", 1.0) or 1.0),
                                          aws_only=bool(settings.get("aws_only_elevation")),
-                                         regional_only=bool(settings.get("regional_elevation_only")))
+                                         regional_only=bool(settings.get("regional_elevation_only")),
+                                         should_stop=_run_stop_requested)
                 except Exception as ex:  # noqa: BLE001
                     log(f"[Terrain] prefetch error (cells will fetch live): {ex}")
 
@@ -4310,6 +4814,25 @@ def _start_generation(cells: list[dict], reset_timing: bool = False) -> tuple[li
             log(f"[Workers] coverage clamp check skipped ({ex}); keeping user worker count")
 
         _phase_t["terrain"] = time.time() - _t_terr0
+        # The last gate, and the one that matters most. Stop during a prefetch used to reach
+        # here anyway — POOL.clear() had drained an empty queue minutes earlier and there was
+        # nothing left to kill — and then submitted the whole selection, so pressing Stop
+        # STARTED the run. The warm's own cancellation (should_stop, above) shortens the wait;
+        # this is what makes it final.
+        if _run_stop_requested():
+            with _PREFETCH_LOCK:
+                _PREFETCH.update(active=False, done=True, phase="idle",
+                                 note="stopped during prefetch", timings=dict(_phase_t))
+            log(f"[Prefetch] stopped after {sum(_phase_t.values()):.0f}s — "
+                f"{len(cells)} cell(s) not submitted")
+            with _RUN_LOCK:
+                if _RUN.get("started") and not _RUN.get("ended"):
+                    _RUN["ended"] = time.time()
+                    _RUN["phase"] = "idle"
+            # No power.release() here: the prefetch path never acquire()d (only _submit_cells
+            # does), and both stop routes already call power.reset().
+            _governor_end_run()
+            return
         with _PREFETCH_LOCK:
             _PREFETCH.update(active=False, done=True, phase="generating",
                              note=f"{len(osm_files)}/{len(cells)} cells from cached OSM",
@@ -4589,6 +5112,7 @@ def _switch_project(slug: str) -> dict:
     PROJECT = p
     ACTIVE_SLUG = slug
     _write_active_slug(slug)
+    _apply_governor_migration()   # settings are per-project, so the migration is too
     _load_cell_health()    # suspects are per-project
     with _MISSING_LOCK:    # missing-region markers are per-project
         _MISSING.clear()
@@ -5012,8 +5536,10 @@ def api_render_queue_kill():
         _RQ["stop"] = True
         _RQ["pause"] = False
         _RQ["note"] = "killed — aborting the current render"
+    POOL.stop()                     # flag first — see the note in /api/stop for why order matters
     killed = POOL.terminate_all()   # terminate the running arnis processes NOW (not just drain queue)
     POOL.clear()                    # then drop everything still pending
+    _governor_end_run()
     power.reset()
     return jsonify({"ok": True, "was_running": running, "terminated": killed})
 
@@ -5060,8 +5586,19 @@ def api_queue_clear():
 
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
+    # Order is the whole fix. stop() FIRST, so the flag is set before any child dies: killing
+    # arnis fires _on_complete, and that callback decides whether to re-queue the cell by
+    # reading this flag. Clearing and terminating first left a window where a killed cell was
+    # labelled "generation failed" (a retryable reason) with the pool still looking un-stopped,
+    # so Stop re-queued the run it had just killed, twice per cell.
+    #
+    # stop() does not touch a worker that is already past arnis and into its merge — a
+    # half-written .mca is not recoverable, so merges are always allowed to finish. The pool's
+    # idle threads wake and exit; the busy ones drain.
+    POOL.stop()
     POOL.clear()
     n = POOL.terminate_all()
+    _governor_end_run()    # disarm admission so the next run starts from a clean regime
     power.reset()          # a stopped run never reaches the "finished" path that would release it
     # Finalize a PARTIAL benchmark report for a run stopped mid-way, so the work so far (and where
     # it broke) is still saveable — cells that never finished show as running/incomplete.
@@ -5142,6 +5679,10 @@ def api_status():
         "stats": stats,
         "export": export,
         "mcserver": mcstat,
+        # Additive: scheduling state, so the Settings card can show what the governor is
+        # doing without a second poll. Always present (mode "off" / state "OFF" when it is
+        # not running), so the UI can tell "old server" from "governor idle".
+        "governor": _governor_snapshot_dict(),
         "report_ready": _report_exists(),
         # Folded in here rather than given its own route and its own poll: the web UI, the status
         # bar and the tray all already read /api/status, so this reaches every surface at once and
@@ -5150,6 +5691,57 @@ def api_status():
         "update": update.cached_state(),
         "log": _LOG[-150:],
     })
+
+
+@app.route("/api/governor")
+def api_governor():
+    """The full scheduling picture: live snapshot, the learned history, and the advisory.
+
+    Its own route rather than more weight on /api/status because the two are read at different
+    rates — the Settings card polls this only while its panel is open, and only every few
+    seconds, while /api/status is polled continuously by everything.
+
+    `advice` is the occupancy ENVELOPE (what the CPU/RAM/GPU budget would sanction), which is
+    deliberately not the control loop: it assumes a cell keeps using the cores it used when it
+    was measured, and contention makes that false as the pool grows. Shown, never applied.
+    `history` is what past runs of each scale/size bucket converged on — the warm-start source.
+    """
+    snap = _governor_snapshot_dict()
+    try:
+        advice = GOVERNOR.advice()
+    except Exception as ex:  # noqa: BLE001
+        advice = {"workers": None, "reason": f"unavailable: {ex}"}
+    try:
+        history = dict(PROJECT.settings().get("governor_history") or {})
+    except Exception:  # noqa: BLE001
+        history = {}
+    return jsonify({**snap, "ok": True, "history": history, "advice": advice,
+                    "cores": GOVERNOR.cores, "ceiling": GOVERNOR.ceiling,
+                    "pool_workers": POOL.max_workers,
+                    # Whether admission is actually armed on the pool, which is the honest
+                    # answer to "is the governor pacing this run" - mode alone is what was
+                    # asked for, this is what is in force.
+                    "admission_armed": POOL.admit_cb is not None})
+
+
+@app.route("/api/governor/recalibrate", methods=["POST"])
+def api_governor_recalibrate():
+    """Throw away the convergence and walk the worker curve again from where we are.
+
+    For when the work changed shape mid-run (a dense city block after empty farmland) and the
+    count the governor settled on no longer fits. A no-op in "off" mode, which is why the reply
+    reports the resulting state rather than assuming it took.
+    """
+    GOVERNOR.recalibrate()
+    return jsonify({**_governor_snapshot_dict(), "ok": True, "state": GOVERNOR.state})
+
+
+@app.route("/api/governor/freeze", methods=["POST"])
+def api_governor_freeze():
+    """Stop deciding: hold the current worker count. Measurement continues (the readout stays
+    live and the run still contributes history), only the resizing stops."""
+    GOVERNOR.freeze()
+    return jsonify({**_governor_snapshot_dict(), "ok": True, "state": GOVERNOR.state})
 
 
 @app.route("/api/update")

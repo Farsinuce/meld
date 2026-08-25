@@ -169,6 +169,27 @@ def default_settings() -> dict:
         # ~5 threads, so the honest worker count there is ~21, not 4 - but changing the
         # pool mid-run is the user's call. See src/occupancy.py.
         "worker_autoscale": False,
+        # ── governor: adaptive worker/thread scheduling (src/governor.py) ─────────────
+        # "off"    legacy scheduling formulas — byte-identical to previous releases (DEFAULT)
+        # "advise" measure + log the worker/thread target it would pick, change nothing
+        # "auto"   actually move the pool size and the per-cell thread split mid-run
+        # MELD_GOVERNOR=off in the environment force-overrides this (kill switch), so a
+        # machine that misbehaves can be put back on the legacy path without editing a project.
+        "governor_mode": "off",
+        # Learned scheduling memory, keyed "<scale_bucket>/<cell_size>" ("1:1/4", "1:10+/8", …):
+        # {"workers","threads","flush","cores_per_cell","rss_p95_mb","cells_per_min","ts"}. Lets a
+        # second run of the SAME shape warm-start at the measured knee instead of re-climbing to it
+        # (at 1:1 the knee is ~8-12 workers and every worker past it only inflates per-cell time).
+        "governor_history": {},
+        # RAM the governor refuses to spend: never admit another worker while available memory is
+        # below (measured rss_p95 + this). 512..8192 MB. The measured 93%-RAM run at cell_size 8 is
+        # what this exists to prevent — that build was one worker away from swapping.
+        "ram_headroom_mb": 2048,
+        # Ceiling for the region-save/flush thread pool handed to each cell. 1..24.
+        "flush_threads_cap": 12,
+        # Governor's own worker ceiling. 0 = use max_workers as the ceiling (the normal case);
+        # >0 = an explicit ceiling independent of max_workers. 0..64.
+        "governor_max_workers": 0,
         # Threads each worker (cell) uses for its in-process tile parallelism. The actual count is
         # max(this, floor(cores*pct/100) / max_workers). Keep workers x this AT OR UNDER your cores;
         # over the core count slows the build. On 24 cores, 12 workers x 2 and 8 x 3 perform about
@@ -301,6 +322,74 @@ def default_settings() -> dict:
     }
 
 
+# ── legacy → governor migration ──────────────────────────────────────────────────────────
+# worker_autoscale is the pre-governor opt-in: "resize the pool from measured CPU occupancy".
+# The governor is that idea finished, so a stored True means the user already asked for it and
+# must land on governor_mode="auto" rather than silently reverting to the legacy formulas.
+#
+# PURE: takes a settings blob, returns the PATCH to apply (possibly empty). It reads no files,
+# writes no files and mutates nothing — server.py calls it at load and feeds the result to
+# Project.update_settings, so the migration happens exactly where every other write happens.
+_GOVERNOR_MODES = ("off", "advise", "auto")
+
+
+def _governor_mode_was_written(settings) -> bool:
+    """Has the user ever chosen a governor_mode for this project?
+
+    Project.settings() merges default_settings() UNDER the stored blob, so the merged dict
+    always carries a governor_mode — "off" from the defaults reads exactly like an "off" the
+    user picked. Provenance is the only way to tell them apart, so Project.settings() returns
+    a _SettingsView that remembers which keys were actually persisted.
+
+    Without that provenance (a plain dict — a hand-built blob, or a copy that dropped the
+    attribute) fall back to "a recognised mode string means written". That errs toward
+    LEAVING THE MODE ALONE, which is the safe direction: the cost is a legacy autoscale
+    project staying on the legacy formulas, versus overriding a mode the user set."""
+    stored = getattr(settings, "stored_keys", None)
+    if stored is not None:
+        return "governor_mode" in stored
+    mode = settings.get("governor_mode")
+    mode = mode.strip().lower() if isinstance(mode, str) else ""
+    return mode in _GOVERNOR_MODES
+
+
+def migrate_governor_settings(settings: dict) -> dict:
+    """Patch that carries a legacy worker_autoscale=True project onto governor_mode="auto".
+
+    Migrates ONLY when governor_mode was never written. Any mode the user actually chose —
+    "off" included — is theirs and is left alone; the patch then just retires the legacy flag.
+    This runs at boot AND on every project switch, so the earlier "mode not in (advise, auto)"
+    rule re-imposed "auto" on every load of a project whose owner had deliberately turned the
+    governor off (the stored default "off" is indistinguishable from a chosen "off" without
+    provenance — see _governor_mode_was_written).
+
+    Idempotent by CONSUMING the legacy flag: the patch always clears worker_autoscale, so
+    applying it twice yields {} the second time. The key itself stays in default_settings for
+    one release (read-only, so old projects still round-trip)."""
+    if not isinstance(settings, dict):
+        return {}
+    if not bool(settings.get("worker_autoscale", False)):
+        return {}
+    if _governor_mode_was_written(settings):
+        return {"worker_autoscale": False}       # user owns the mode — just retire the old flag
+    return {"governor_mode": "auto", "worker_autoscale": False}
+
+
+class _SettingsView(dict):
+    """Merged settings that remember WHICH keys came from disk (`stored_keys`).
+
+    A plain dict everywhere it matters — json.dumps, {**s}, .get, ==, iteration — so every
+    existing reader is unaffected. Only migrations that must distinguish "the user chose this"
+    from "a default filled the hole" look at stored_keys. Any copy (dict(s), {**s}) drops the
+    attribute and readers fall back to their conservative path."""
+
+    __slots__ = ("stored_keys",)
+
+    def __init__(self, merged: dict, stored_keys=()):
+        super().__init__(merged)
+        self.stored_keys = frozenset(stored_keys)
+
+
 class Project:
     def __init__(self, root: Path):
         self.root = Path(root)
@@ -412,7 +501,13 @@ class Project:
             return name
 
     def settings(self) -> dict:
-        return {**default_settings(), **(self.load().get("settings") or {})}
+        """Defaults with the stored blob on top. The result is a _SettingsView: a dict that
+        also remembers which keys were actually persisted, so migrate_governor_settings can
+        tell a chosen "off" from the default "off"."""
+        stored = self.load().get("settings")
+        if not isinstance(stored, dict):
+            stored = {}
+        return _SettingsView({**default_settings(), **stored}, stored.keys())
 
     def update_settings(self, patch: dict) -> dict:
         # Drop None values so a blank UI field can't poison a setting.

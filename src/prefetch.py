@@ -33,6 +33,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -63,6 +64,24 @@ _RETRY_MARKERS = ("rate limited", "timed out", "request timeout", "timeout", "se
 # ~30,000 km² (≈170 km across) is a query a public Overpass handles for typical/rural density;
 # denser tiles get rejected and split automatically. The advanced slider overrides the cap.
 _AUTO_MAX_QUERY_KM2 = 30000.0
+
+
+def _stop_requested(should_stop: Callable[[], bool] | None) -> bool:
+    """True when the caller has asked this prefetch to stop.
+
+    Every entry point below takes `should_stop: Callable[[], bool] | None` and checks it
+    between UNITS (a sweep, a clump, a grid tile, a retry sleep). Cancellation is a clean
+    early RETURN with whatever was finished so far — never an exception — because a stopped
+    prefetch is a normal outcome: generation falls back to live fetching for the rest, and a
+    raise here would surface as "[Prefetch] error" in the user's log instead of "stopped".
+    A callback that itself raises is treated as 'keep going', so a broken flag cannot take
+    the fetch down."""
+    if should_stop is None:
+        return False
+    try:
+        return bool(should_stop())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _margin_deg(meters: float, lat: float) -> tuple[float, float]:
@@ -165,7 +184,8 @@ def _split_cells(cells: list[dict]) -> list[list[dict]]:
 
 
 def _download_one(exe: str, bbox: dict, out_json: Path, overpass_url: list[str],
-                  log, retries: int = 3) -> tuple[bool, str]:
+                  log, retries: int = 3,
+                  should_stop: Callable[[], bool] | None = None) -> tuple[bool, str]:
     """Run `arnis --download-only` for one bbox. Returns (ok, reason).
 
     Retries a few times with backoff on TRANSIENT failures (rate-limited / timeout / overloaded), so a
@@ -185,6 +205,9 @@ def _download_one(exe: str, bbox: dict, out_json: Path, overpass_url: list[str],
         cmd += ["--overpass-url", ",".join(overpass_url)]
     reason = "exit"
     for attempt in range(max(1, retries)):
+        if _stop_requested(should_stop):
+            tmp.unlink(missing_ok=True)
+            return False, "stopped"
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True,
                                   timeout=_DOWNLOAD_TIMEOUT_S, encoding="utf-8", errors="replace")
@@ -212,7 +235,11 @@ def _download_one(exe: str, bbox: dict, out_json: Path, overpass_url: list[str],
         if attempt < retries - 1 and reason in _RETRY_MARKERS:
             wait = 2 * (attempt + 1)
             log(f"  [Prefetch] tile fetch '{reason}' — retry {attempt + 1}/{retries - 1} in {wait}s…")
-            time.sleep(wait)
+            # Sleep in 1s slices so a stop during the backoff is honoured now, not in 6s.
+            for _ in range(wait):
+                if _stop_requested(should_stop):
+                    return False, "stopped"
+                time.sleep(1)
             continue
         return False, reason
     return False, reason
@@ -328,7 +355,8 @@ def aws_tile_cache_dir() -> Path:
     return meld_cache_root() / "arnis-tile-cache" / "aws"
 
 
-def purge_small_tiles(min_bytes: int = 67, log=None) -> int:
+def purge_small_tiles(min_bytes: int = 67, log=None,
+                      should_stop: Callable[[], bool] | None = None) -> int:
     """Delete only genuinely-junk terrain tiles (smaller than a minimal PNG, ~67 B = truncated /
     0-byte) from the shared cache. NOTE: legit ocean / uniform-elevation Terrarium tiles compress
     to ~100-750 B and are VALID, so the old 2048 floor wrongly nuked them and broke offline packs;
@@ -338,6 +366,8 @@ def purge_small_tiles(min_bytes: int = 67, log=None) -> int:
         return 0
     n = 0
     for f in d.glob("*.png"):
+        if _stop_requested(should_stop):
+            break
         try:
             if f.stat().st_size < min_bytes:
                 f.unlink()
@@ -352,7 +382,7 @@ def purge_small_tiles(min_bytes: int = 67, log=None) -> int:
 def run_terrain_prefetch(bboxes, exe, log, on_progress=None, timeout_s: int = 1200,
                          elev_zoom: int | None = None, scale: float = 1.0,
                          aws_only: bool = False, regional_only: bool = False,
-                         should_stop=None) -> dict:
+                         should_stop: Callable[[], bool] | None = None) -> dict:
     """Warm the AWS terrain tiles for each bbox SEQUENTIALLY via `arnis --download-terrain-only`
     (one process at a time, 8 concurrent inside). This pre-fills the shared tile cache without
     the ~64-concurrent S3 burst that the parallel cells would otherwise cause (which truncates
@@ -375,7 +405,7 @@ def run_terrain_prefetch(bboxes, exe, log, on_progress=None, timeout_s: int = 12
         env = {**os.environ, "ARNIS_ELEV_ZOOM": str(int(elev_zoom))}
         log(f"  [Terrain] warming at z{int(elev_zoom)} (matched to generation)")
     for i, bbox in enumerate(bboxes):
-        if should_stop is not None and should_stop():
+        if _stop_requested(should_stop):
             log(f"  [Terrain] stopped after {i}/{total} sweep(s) on request")
             break
         cmd = [
@@ -420,7 +450,8 @@ def run_terrain_prefetch(bboxes, exe, log, on_progress=None, timeout_s: int = 12
 
 
 def run_mapterhorn_bake(bboxes, exe, log, on_progress=None, timeout_s: int = 1800,
-                        scale: float = 1.0, aws_only: bool = False, should_stop=None) -> dict:
+                        scale: float = 1.0, aws_only: bool = False,
+                        should_stop: Callable[[], bool] | None = None) -> dict:
     """Pre-warm the elevation TILE cache for each bbox SEQUENTIALLY via `arnis
     --prewarm-elevation` (one process at a time, 8 concurrent downloads inside). Fills the exact
     per-tile disk cache the generation cells read (Mapterhorn globally, or the regional/AWS
@@ -436,7 +467,7 @@ def run_mapterhorn_bake(bboxes, exe, log, on_progress=None, timeout_s: int = 180
     failed = 0
     provider = None
     for i, bbox in enumerate(bboxes):
-        if should_stop is not None and should_stop():
+        if _stop_requested(should_stop):
             log(f"  [Mapterhorn] stopped after {i}/{total} sweep(s) on request")
             break
         cmd = [
@@ -469,7 +500,8 @@ def run_mapterhorn_bake(bboxes, exe, log, on_progress=None, timeout_s: int = 180
     return {"sweeps": total, "ok": cached, "absent": absent, "failed": failed, "provider": provider}
 
 
-def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk) -> dict:
+def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk,
+                 should_stop: Callable[[], bool] | None = None) -> dict:
     """Pre-fetch OSM for `cells` and return {cell_key: osm_source}.
 
     osm_source is the shared grid-cache DIRECTORY (str): the cell hands it to Arnis as
@@ -480,9 +512,13 @@ def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk) -> dict
     on_chunk(chunk_dict): called whenever a chunk's state changes (for the UI overlay).
     Cells whose covering tiles couldn't all be fetched are simply omitted from the map,
     so they fall back to live Overpass during generation.
+
+    should_stop: optional Callable[[], bool] polled between clumps, between grid tiles and
+    inside a tile's retry backoff. When it flips, the map built SO FAR is returned normally —
+    the cells it does not name just fetch live, which is the same fallback a failed tile takes.
     """
     olat, olon = origin.get("lat"), origin.get("lon")
-    if olat is None or olon is None:
+    if olat is None or olon is None or _stop_requested(should_stop):
         return {}
     scale = float(settings.get("scale", 1.0) or 1.0)
     seam = int(settings.get("seam_buffer_chunks", 8) or 0)
@@ -554,8 +590,15 @@ def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk) -> dict
             if _fresh_on_disk(xy):                  # baked .pbf tile or prior cache → no download
                 _tile_state[xy] = "cached"
                 return "cached"
+            if _stop_requested(should_stop):
+                # Deliberately NOT recorded in _tile_state: "we never tried" is not "this tile
+                # is broken", and a resumed/next run must be free to fetch it.
+                return "skip"
             path = cache_dir / osm_grid.tile_filename(x, y)
-            ok, reason = _download_one(exe, osm_grid.tile_bounds_ll(x, y), path, overpass_url, log)
+            ok, reason = _download_one(exe, osm_grid.tile_bounds_ll(x, y), path, overpass_url, log,
+                                       should_stop=should_stop)
+            if not ok and reason == "stopped":
+                return "skip"                        # stopped mid-download; same "never tried" rule
             if not ok:
                 log(f"  [Prefetch] grid tile {osm_grid.OSM_GRID_Z}/{x}/{y} failed "
                     f"({reason}) — cells using it fetch live")
@@ -567,6 +610,8 @@ def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk) -> dict
         fully-covered cell at the grid-cache dir (Arnis reads its own tiles — no merge). The clump
         is only an overlay/terrain GROUPING now — the cache lives on the grid tiles underneath, so
         overlapping selections reuse them."""
+        if _stop_requested(should_stop):
+            return                                   # nothing announced, nothing fetched
         keys = [g["cell_key"] for g in group]
         union = _union([g["expanded"] for g in group])
         d_lat, d_lon = _margin_deg(margin_m, olat)
@@ -591,12 +636,16 @@ def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk) -> dict
                 f"baked/local — NO download, NO merge (Arnis reads tiles directly)")
         n_dl = n_cache = 0
         any_fail = False
+        stopped = False
         for xy in clump_tiles:
             st = _ensure_tile(xy)
             if st == "done":
                 n_dl += 1
             elif st == "cached":
                 n_cache += 1
+            elif st == "skip":
+                stopped = True
+                break
             else:
                 any_fail = True
 
@@ -616,13 +665,14 @@ def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk) -> dict
 
         if n_ok == 0:
             chunk["state"] = "failed"
-            chunk["error"] = "all covering tiles failed"
+            chunk["error"] = "stopped on request" if stopped else "all covering tiles failed"
         else:
             chunk["state"] = "done" if n_dl else "cached"
         on_chunk(dict(chunk))
         parts = ([f"{n_dl} fetched"] if n_dl else []) + ([f"{n_cache} from local"] if n_cache else [])
         log(f"  [Prefetch] clump ({', '.join(parts) or 'no tiles'}); "
             f"{n_ok}/{len(keys)} cell(s) served from grid"
+            + (" — stopped on request" if stopped else "")
             + (" (some tiles failed → live)" if any_fail else ""))
 
     # Group cells into clumps for the overlay/terrain (the area budget keeps each overlay box a
@@ -648,10 +698,17 @@ def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk) -> dict
             f"{n_local} already local; {conc} download(s) at a time")
     if conc <= 1 or len(clumps) <= 1:
         for grp in clumps:
+            if _stop_requested(should_stop):
+                break
             fetch_group(grp, 0)
     else:
         # Up to `conc` clumps processed at once; a shared tile serializes on its own lock so the
         # number of live Overpass requests never exceeds `conc` (the public per-IP slot allowance).
+        # fetch_group returns immediately once the stop flag is up, so the queued clumps
+        # drain in microseconds instead of the pool being cancelled (which it cannot be).
         with ThreadPoolExecutor(max_workers=conc) as ex:
             list(ex.map(lambda g: fetch_group(g, 0), clumps))
+    if _stop_requested(should_stop):
+        log(f"  [Prefetch] stopped on request — {len(osm_files)} of {len(work)} cell(s) "
+            f"served from the grid cache; the rest fetch live")
     return osm_files
