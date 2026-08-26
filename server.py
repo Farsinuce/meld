@@ -668,7 +668,7 @@ def _stream_on_progress(p) -> None:
                        ratio=round(p.ratio, 2), message=p.message)
 
 
-def _post_merge_export_hook(cell_key: str) -> None:
+def _post_merge_export_hook(cell_key: str, master: Path | None = None) -> None:
     """Run right after a cell merges its canonical regions into the master. Two jobs:
       • Safeguard D — a regenerated region invalidates any prior .linear sibling, so drop it
         (keeps a converted world from going half-mca/half-linear).
@@ -681,7 +681,11 @@ def _post_merge_export_hook(cell_key: str) -> None:
         if not b:
             return
         rx0, rx1, rz0, rz1 = b
-        region_dir = master_world_path(create=False) / "region"
+        # C2/N2: prefer the master frozen at run start. Re-resolving here reopened the race
+        # C2 closed - PROJECT._read swallows a mid-rewrite read and returns defaults, so this
+        # could walk a region/ belonging to a different world (or none at all), silently
+        # skipping both the stale-.linear unlink and the export submit for that cell.
+        region_dir = (master or master_world_path(create=False)) / "region"
         s = PROJECT.settings()
         want_stream = _export_overlap_on(s)
         with _STREAM_LOCK:
@@ -788,6 +792,26 @@ def _timing_started(cell_key: str, worker_id) -> None:
         t["started"] = time.time()
         t["worker"] = worker_id
         t["attempts"] = int(t.get("attempts", 0)) + 1
+
+
+#: The four post-arnis steps I1 times, in the order the worker runs them. Every consumer
+#: (the log line, the per-cell report block, the summed run block) reads this one list, so a
+#: fifth step is added in exactly one place.
+TIMER_KEYS = ("merge_s", "prune_s", "health_s", "meta_s")
+
+
+def _timing_timers(cell_key: str, timers: dict) -> None:
+    """Record this cell's post-arnis step timings (I1).
+
+    Merge/prune/health/meta run on the worker thread AFTER arnis exits, so neither the
+    generator's own wall clock nor the governor's `wall_s` can see them; the only prior
+    measurement was cell-log mtimes, which is indirect. Stored per cell and summed into the run
+    report so N6 (`<= 7 s` per 81-cell run) is a harvestable number rather than a log line.
+    Last attempt wins, matching `duration`.
+    """
+    with _RUN_TIMING_LOCK:
+        t = _CELL_TIMING.setdefault(cell_key, {"attempts": 1})
+        t["timers"] = {k: round(float(timers.get(k, 0.0) or 0.0), 3) for k in TIMER_KEYS}
 
 
 def _timing_finished(cell_key: str, status: str, reason: str | None = None) -> None:
@@ -947,20 +971,60 @@ def _save_cell_health() -> None:
         pass
 
 
+#: Markers _scan_cell_health looks for. Kept as a tuple so the streaming scan below can size its
+#: chunk overlap off the longest one and stop early once every marker has been seen.
+_HEALTH_MARKERS = ("is too small", "Re-downloading", "Failed to read ESA tile",
+                   "offline: ", "not cached")
+
+
+def _log_markers(log_path: Path, markers: tuple[str, ...] = _HEALTH_MARKERS,
+                 chunk: int = 262_144) -> set[str]:
+    """Which of `markers` appear ANYWHERE in `log_path`, read in O(chunk) memory.
+
+    C5: the old code did `read_text()` of the whole cell log, and a cs8 cell log is megabytes.
+    A plain `[-6000:]` tail (the pattern `_record_fail` uses) is NOT interchangeable here:
+    `_record_fail` wants the last thing a *dying* generator said, whereas every marker below is
+    printed in the elevation / land-cover phase near the START of the run, with the entire
+    placement + save output after it (measured on a real cell log: the ESA banner sits at byte
+    1904 of 3999, i.e. ~2 KB of trailing output on a 4 KB log - on a megabyte log it is nowhere
+    near the last 6 KB). So the read is bounded without truncating what is scanned: fixed-size
+    chunks, overlapped by the longest marker so one cannot hide on a chunk boundary, and an
+    early exit once all of them have been found.
+    """
+    found: set[str] = set()
+    if not markers:
+        return found
+    overlap = max(len(m) for m in markers) - 1
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as fh:
+            carry = ""
+            while True:
+                buf = fh.read(chunk)
+                if not buf:
+                    break
+                hay = carry + buf
+                for m in markers:
+                    if m not in found and m in hay:
+                        found.add(m)
+                if len(found) == len(markers):
+                    break
+                carry = hay[-overlap:] if overlap > 0 else ""
+    except Exception:
+        pass
+    return found
+
+
 def _scan_cell_health(cell_key: str, out: str) -> None:
     """Scan a just-merged cell's log for artifact-predicting markers and record suspects."""
     tag = (cell_key or "").replace(",", "_")
     log_path = Path(out).parent.parent / "logs" / f"cell-{tag}.log"
     reasons = []
-    try:
-        txt = log_path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        txt = ""
-    if "is too small" in txt and "Re-downloading" in txt:
+    seen = _log_markers(log_path)
+    if "is too small" in seen and "Re-downloading" in seen:
         reasons.append("terrain-tile-retry")     # truncated AWS elevation tile -> possible flat seam
-    if "Failed to read ESA tile" in txt:          # the actual ESA WorldCover failure line (not the
+    if "Failed to read ESA tile" in seen:          # the actual ESA WorldCover failure line (not the
         reasons.append("landcover-404")           # always-printed "Fetching ... ESA" banner)
-    if "offline: " in txt and "not cached" in txt:
+    if "offline: " in seen and "not cached" in seen:
         # Cached-elevation-only ran and a tile was missing from the bake. arnis does NOT fail on
         # this - its fallback turns the miss into flat/NaN ground - so without this marker the
         # cell renders flat and says nothing. That is the exact silent failure the bake exists to
@@ -2148,6 +2212,11 @@ _META_SKIP_SETTINGS = {
     # The rest decide how hard this machine works, which is never a property of the world.
     "governor_mode", "governor_history", "ram_headroom_mb", "flush_threads_cap",
     "governor_max_workers", "worker_autoscale",
+    # Phase-2 switches (M1). All three are properties of THIS machine's run, not of the world:
+    # canonical_regions and parse_fast_json are kill switches for optimisations that must leave
+    # the world byte-identical either way, and phase2_timers only decides whether a log line is
+    # printed. Importing a world must never flip any of them on the importing machine.
+    "canonical_regions", "parse_fast_json", "phase2_timers",
 }
 
 
@@ -2592,6 +2661,18 @@ def _runner(job: dict, state: dict) -> bool:
     elevation = job["elevation"]
     seed = int((elevation or {}).get("seed", 1) or 1)
     world_name = job.get("world_name", "Meld World")
+    # C2: the master world folder is a FROZEN RUN INVARIANT, resolved once in _submit_cells and
+    # carried in the job next to settings/origin/elevation/world_name — not re-resolved here.
+    # master_world_path() reads settings.master_world_dir + the project name through
+    # PROJECT.settings()/load(), i.e. project.py's `_read`, which swallows every exception and
+    # returns the DEFAULT. `subworld_number` rewrites project.json non-atomically once per cell,
+    # so a read landing in that window used to yield master_world_dir="" -> parent = PROJECT.root
+    # and the cell was merged into the WRONG FOLDER. Freezing it also means a project switch
+    # mid-run can no longer redirect in-flight cells into a different world: every cell of this
+    # run (including its retries, which re-submit `{**job}`) lands in the world the run started
+    # in. The fallback is for jobs submitted without the key (a bare-bbox job from an older
+    # caller); it reproduces exactly today's behaviour for those.
+    master = job.get("master") or str(master_world_path())
 
     exe = resolve_arnis_exe()
     if not exe:
@@ -2852,6 +2933,10 @@ def _runner(job: dict, state: dict) -> bool:
         pass
 
     state.update(progress=96, message="Merging…")
+    # I1: four monotonic timers over the post-arnis tail. Wall-clock is deliberately not used —
+    # these are sub-second spans and a clock step would print a negative one.
+    _timers = {k: 0.0 for k in TIMER_KEYS}
+    _t_merge0 = time.monotonic()
     try:
         # overwrite_collisions=True is safe under the v1 uniform grid: each cell
         # owns a disjoint canonical region rectangle, so any collision is the
@@ -2860,7 +2945,6 @@ def _runner(job: dict, state: dict) -> bool:
         res = None
         for _attempt in range(3):
             try:
-                master = str(master_world_path())
                 res = merge_cell_into_master(
                     world_dir, master, cell_key,
                     seam_buffer_chunks=seam, world_name=world_name,
@@ -2877,6 +2961,7 @@ def _runner(job: dict, state: dict) -> bool:
                     time.sleep(0.5 * (_attempt + 1))
                     continue
                 raise
+        _timers["merge_s"] = time.monotonic() - _t_merge0
         log(f"MERGE {cell_key}: +{res['regions_copied']} regions, "
             f"-{res['regions_skipped']} seam, level.dat={res['level_dat']}")
     except MeldCoordinateDriftError as ex:
@@ -2900,10 +2985,19 @@ def _runner(job: dict, state: dict) -> bool:
 
     PROJECT.set_cell_status(cell_key, "merged")
     _clear_fail(cell_key)              # succeeded — drop any prior failure reason
+    _t0 = time.monotonic()
     _scan_cell_health(cell_key, out)   # flag the cell if its log predicts an artifact
-    _post_merge_export_hook(cell_key)  # D: drop stale .linear; overlap: stream the new regions
+    _timers["health_s"] = time.monotonic() - _t0
+    # N1: this runs inside the timed tail, so it must be timed too - otherwise
+    # summary.timers under-reports the post-arnis tail by the whole cost of a
+    # canonical-region walk plus a per-region exists/unlink (and a submit when
+    # export_overlap is on), which is exactly the sum I1 exists to make harvestable.
+    _t0 = time.monotonic()
+    _post_merge_export_hook(cell_key, master)  # D: drop stale .linear; overlap: stream new regions
+    _timers["export_hook_s"] = time.monotonic() - _t0
     # Prune the per-cell subregion world now that its canonical regions live in the
     # master world — avoids doubling storage. Toggle via settings.prune_cell_after_merge.
+    _t0 = time.monotonic()
     if settings.get("prune_cell_after_merge", True):
         try:
             shutil.rmtree(out, ignore_errors=True)
@@ -2919,9 +3013,20 @@ def _runner(job: dict, state: dict) -> bool:
             log(f"  [Keep] {cell_key}: stripped {n} seam-buffer region files (canonical-only, drag-drop ready)")
         except Exception:
             pass
+    _timers["prune_s"] = time.monotonic() - _t0
     # Refresh the world's reproducibility sidecar so origin + elevation + seed +
     # settings stay current with the latest merged state.
+    _t0 = time.monotonic()
     write_world_meta(Path(master), throttle=True)
+    _timers["meta_s"] = time.monotonic() - _t0
+    # I1: one line per cell, and the same four numbers into the run report. The report half is
+    # unconditional (N6 has to be harvestable from any run); only the log line is gated, because
+    # a line per cell is noise for someone who is not benchmarking.
+    _timing_timers(cell_key, _timers)
+    if settings.get("phase2_timers", True):
+        log(f"  [Timers] {cell_key}: merge {_timers['merge_s']:.2f}s "
+            f"prune {_timers['prune_s']:.2f}s health {_timers['health_s']:.2f}s "
+            f"meta {_timers['meta_s']:.2f}s")
     state.update(progress=100, message="Merged.")
     return True
 
@@ -4099,6 +4204,21 @@ def api_settings():
         # malformed POST cannot poison the warm start of every future run.
         patch["governor_history"] = (patch["governor_history"]
                                      if isinstance(patch["governor_history"], dict) else {})
+    # ── phase-2 switches (M1) ─────────────────────────────────────────────────────────────
+    # Three booleans, each defaulting (in project.py) to TODAY's behaviour:
+    #   canonical_regions - kill switch for arnis writing only the regions Meld keeps (default
+    #                       False = arnis writes all 36 and Meld deletes the surplus, as now)
+    #   parse_fast_json   - kill switch for the faster OSM decode path (default False = today's)
+    #   phase2_timers     - emit the per-cell merge/prune/health/meta log line (default True;
+    #                       the report fields are written either way)
+    # Coerced to real bools rather than trusted, so a stray "false"/0/null from a client cannot
+    # be stored as a truthy string and silently arm a kill switch that is supposed to be off.
+    for _p2 in ("canonical_regions", "parse_fast_json", "phase2_timers"):
+        if patch.get(_p2) is not None:
+            _raw = patch[_p2]
+            if isinstance(_raw, str):
+                _raw = _raw.strip().lower() not in ("", "0", "false", "no", "off")
+            patch[_p2] = bool(_raw)
     if patch.get("cave_biome_amounts") is not None:
         raw = patch["cave_biome_amounts"] if isinstance(patch["cave_biome_amounts"], dict) else {}
         clean = {}
@@ -4600,6 +4720,24 @@ def _submit_cells(cells: list[dict], osm_files: dict | None = None,
     origin = origin if origin is not None else PROJECT.origin()
     elevation = PROJECT.elevation()
     world_name = PROJECT.load().get("name", "Meld World")
+    # C2: resolve the master world ONCE per run and freeze it into every job, next to the other
+    # world invariants above. It used to be re-resolved inside the per-cell merge retry loop,
+    # where PROJECT.settings()/load() -> project.py's exception-swallowing `_read` could race the
+    # non-atomic project.json rewrite `subworld_number` does on every cell and hand back the
+    # DEFAULT save location — merging that cell into a different folder. It also means switching
+    # project mid-run can no longer redirect in-flight cells: they finish in the world they
+    # started in, and the switch takes effect for the next run.
+    # create=True is what the per-cell call did (mkdir + region/ + icon), so the world folder is
+    # still made exactly once before any cell can merge. If that mkdir fails - an offline save
+    # drive that got past the queue-time pre-flight - fall back to resolving the path WITHOUT
+    # touching disk rather than failing the whole submit: the merge then fails per cell with its
+    # existing retry/backoff, which is what happened before this change.
+    try:
+        master_frozen = str(master_world_path())
+    except OSError as _ex:
+        log(f"[Merge] could not prepare the save location now ({_ex}); "
+            f"cells will create it at merge time")
+        master_frozen = str(master_world_path(create=False))
     # Generate center-out (spiral): order cells by their ring distance from the selection
     # center, tie-broken by angle, so the middle fills first and the build grows outward
     # in concentric rings (nicer to watch + the dense city core lands first).
@@ -4638,6 +4776,7 @@ def _submit_cells(cells: list[dict], osm_files: dict | None = None,
             "cell_key": ck, "bbox": c["bbox"], "settings": settings,
             "origin": origin, "elevation": elevation, "output_path": out,
             "world_name": world_name, "osm_file": osm_files.get(ck),
+            "master": master_frozen,     # C2 — frozen for the whole run, retries included
         })
         queued.append(ck)
     return queued

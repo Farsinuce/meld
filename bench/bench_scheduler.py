@@ -78,9 +78,22 @@ WORLD_KEYS = {
     "overture", "trees", "caves", "land_cover", "fill_ground", "bake_lighting",
     "elevation_zoom", "elevation_mode", "seam_buffer_chunks", "vertical_exaggeration",
     "ground_level", "world_min_y", "world_max_y", "height_headroom", "height_underroom",
-    "disable_height_limit", "mc_version", "region_format", "field_mix", "field_scale",
+    "disable_height_limit", "mc_version", "native_region_format", "native_blinear_level",
+    "field_mix", "field_scale",
     "scatter_mode", "signage", "rocks", "bushes", "grass_texture", "cave_biome_amounts",
     "tree_size_weights", "gpu_accel",
+}
+# Keys that LOOK like settings and are not. A matrix naming one used to be accepted, applied,
+# dropped by update_settings (which keeps only keys present in project.default_settings) and
+# never mentioned again — which is exactly how the sweep spent phase 1 declaring
+# `region_format: "anvil"` while the arms rendered blinear. Named here so the error can say
+# what to write instead.
+NOT_A_SETTING = {
+    "region_format": "native_region_format",
+    "blinear_level": "native_blinear_level",
+    "native_region_compression": "native_blinear_level",
+    "cell_size": "job_size_regions",
+    "workers": "max_workers",
 }
 
 # Rough cells/min used ONLY for the dry-run wall-time estimate. Measured on the reference
@@ -99,6 +112,22 @@ THROUGHPUT_MODEL = {
 DEFAULT_THROUGHPUT = 20.0
 
 BLOCK_HASH_RE = re.compile(r"\[BENCHMARK\]\s+block_hash=([0-9a-fA-F]+)")
+
+# Report schemas this harness understands. schema/4 is additive over /3 — it adds
+# summary.cells_per_min, summary.timers{merge_s,prune_s,health_s,meta_s} and the same
+# `timers` object per cell — so a /3 report from phase 1 still reads correctly here and a
+# /4 report is preferred where it carries a number the harness would otherwise re-derive.
+REPORT_SCHEMAS = ("meld-run-report/3", "meld-run-report/4")
+TIMER_KEYS = ("merge_s", "prune_s", "health_s", "meta_s")
+
+# The settings a sweep must be able to prove it actually ran with. Checked against live
+# /api/settings after every apply; a mismatch aborts. Overridable per matrix via
+# `assert_settings`. These seven are the phase-1 divergence (bench/README.md, "Editing
+# matrix.json") plus stream_to_disk, which decides whether regions leave through
+# flush_region_via or save_java and therefore which half of W2 is doing the work.
+DEFAULT_ASSERT_SETTINGS = ("buildings", "interior", "bake_lighting",
+                           "native_region_format", "native_blinear_level",
+                           "overture", "stream_to_disk")
 
 
 def scale_bucket(scale: float) -> str:
@@ -223,6 +252,76 @@ class RunSpec:
         return s
 
 
+def meld_default_settings() -> dict | None:
+    """Meld's own settings blob, imported from this repo — the authority on what is a real
+    setting name. Returns None when it cannot be imported (a bench copied elsewhere), in
+    which case the name check downgrades to the curated WORLD_KEYS/SCHED_KEYS lists."""
+    try:
+        if str(REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(REPO_ROOT))
+        from src.project import default_settings  # noqa: PLC0415 — optional, repo-local
+        d = default_settings()
+        return dict(d) if isinstance(d, dict) else None
+    except Exception:  # noqa: BLE001 — a missing/renamed module must not fail the sweep
+        return None
+
+
+def check_setting_names(settings: dict, where: str, defaults: dict | None) -> None:
+    """Refuse a settings block that names something Meld does not have, or gives a key a
+    value of the wrong type. Both failures are silent at runtime — update_settings drops
+    unknown keys and the server clamps a wrong type — so they have to die here."""
+    if not settings:
+        return
+    for key in sorted(settings):
+        hint = NOT_A_SETTING.get(key)
+        if hint:
+            raise BenchError(f"{where}: {key!r} is not a Meld setting — write {hint!r} instead. "
+                             f"Meld drops unknown keys silently, so this would have rendered "
+                             f"with the server default and reported nothing.")
+        if defaults is None:
+            continue
+        if key not in defaults:
+            raise BenchError(f"{where}: {key!r} is not a Meld setting (not in "
+                             f"src/project.default_settings()). Fix the name or delete the key.")
+        want, have = settings[key], defaults[key]
+        if isinstance(have, bool) != isinstance(want, bool):
+            raise BenchError(f"{where}: {key!r} wants {type(have).__name__}, got "
+                             f"{want!r} ({type(want).__name__})")
+        if (isinstance(have, (int, float)) and not isinstance(have, bool)
+                    and isinstance(want, str)):
+            raise BenchError(f"{where}: {key!r} wants a number, got the string {want!r}")
+
+
+def settings_drift(want: dict, live: dict, keys) -> dict:
+    """What the server ACTUALLY has versus what was asked for, over `keys`.
+
+    Pure, so the selftest can exercise it without a server. A key the server does not know
+    at all reports live="<absent>" — that is the `region_format` failure mode, and it must
+    read as a failure rather than as "nothing to compare"."""
+    out = {}
+    for k in keys:
+        if k not in want:
+            continue
+        if k not in live:
+            out[k] = {"want": want[k], "live": "<absent>"}
+            continue
+        w, l = want[k], live[k]
+        if isinstance(w, bool) or isinstance(l, bool):
+            same = bool(w) == bool(l)
+        elif isinstance(w, (int, float)) and isinstance(l, (int, float)):
+            same = float(w) == float(l)
+        else:
+            same = w == l
+        if not same:
+            out[k] = {"want": w, "live": l}
+    return out
+
+
+def format_drift(drift: dict) -> str:
+    return "; ".join(f"{k}: asked {v['want']!r}, server has {v['live']!r}"
+                     for k, v in sorted(drift.items()))
+
+
 def load_matrix(path: Path) -> dict:
     if not path.exists():
         raise BenchError(f"matrix not found: {path}")
@@ -247,11 +346,34 @@ def build_specs(matrix: dict, only: list[str] | None, repeats_override: int | No
     if not runs:
         raise BenchError("matrix has no `runs`")
     world_settings = matrix.get("world_settings") or {}
-    bad = sorted(set(world_settings) - WORLD_KEYS)
+    defaults = meld_default_settings()
+    # A wrong NAME is worse than a wrong value: Meld drops the key, the sweep renders with the
+    # server default, and the results file records the matrix's fiction. Die on it here, before
+    # anything is rendered, rather than discovering it in a log a month later.
+    check_setting_names(world_settings, "world_settings", defaults)
+    bad = sorted(set(world_settings) - WORLD_KEYS - SCHED_KEYS)
     if bad:
         print(f"  note: world_settings carries non-world keys {bad} — they are applied to every "
               f"run identically, which is fine, but they belong in a run's `settings` if they "
               f"are meant to differ.")
+    pinned = sorted(set(world_settings) & SCHED_KEYS)
+    if pinned:
+        print(f"  note: world_settings pins scheduling keys {pinned} for every run — no arm may "
+              f"override them.")
+    assert_keys = matrix.get("assert_settings")
+    if assert_keys is not None and not isinstance(assert_keys, list):
+        raise BenchError("`assert_settings` must be a list of setting names")
+    if assert_keys:
+        unknown_assert = [k for k in assert_keys if k in NOT_A_SETTING
+                          or (defaults is not None and k not in defaults)]
+        if unknown_assert:
+            raise BenchError(f"assert_settings names non-settings {sorted(unknown_assert)}")
+        undeclared = [k for k in assert_keys if k not in world_settings]
+        if undeclared:
+            raise BenchError(
+                f"assert_settings names {sorted(undeclared)}, which world_settings does not "
+                f"declare — there is nothing to compare the live server against. Declare the "
+                f"value you expect, or drop the key from assert_settings.")
 
     specs: list[RunSpec] = []
     seen: set[str] = set()
@@ -546,6 +668,12 @@ class Bench:
         self.prep_cfg = matrix.get("prep") or {}
         self.wd = matrix.get("watchdog") or {}
         self.world_settings = dict(matrix.get("world_settings") or {})
+        # Keys whose live value must match the matrix exactly or the sweep aborts. Defaults to
+        # the seven that decide which world is built; a matrix may narrow or widen the list.
+        declared = matrix.get("assert_settings")
+        self.assert_settings = tuple(declared) if declared is not None else tuple(
+            k for k in DEFAULT_ASSERT_SETTINGS if k in self.world_settings)
+        self._asserted = False
         self.seed = int(matrix.get("seed", 1))
         self.label = args.label or matrix.get("label") or "sweep"
         self.results: list[dict] = []
@@ -664,14 +792,39 @@ class Bench:
         code, body = self.http.post("/api/settings", patch)
         must_ok(code, body, "apply settings")
         _, live = self.http.get("/api/settings")
-        missing = {k: v for k, v in patch.items()
-                   if k != "seed" and k in live and live.get(k) != v}
-        absent = [k for k in patch if k not in live and k != "seed"]
+
+        # HARD GATE. World-shaping keys and everything named in `assert_settings` must come back
+        # exactly as asked. Phase 1 shipped a matrix declaring buildings/interior/bake_lighting the
+        # wrong way round and a `region_format` key Meld does not have, and NOTHING said so: the
+        # sweep rendered one world and every number was quoted against another. A silent divergence
+        # is worse than a stopped sweep, so this aborts with the diff.
+        must_match = (set(patch) & (WORLD_KEYS | set(self.assert_settings))) - {"seed"}
+        drift = settings_drift(patch, live, must_match)
+        if drift:
+            raise BenchError(
+                f"settings did not apply — the sweep would measure a different world than the "
+                f"matrix declares. {format_drift(drift)}. "
+                f"A '<absent>' server value means the key is not a Meld setting at all (check "
+                f"src/project.default_settings); anything else means the server clamped or "
+                f"normalised it and the matrix must say what the server will actually do.")
+
+        # Scheduling keys are allowed to be clamped — that is the server's job (max_workers 1..64,
+        # cpu_target 10..95) and a clamp does not change which world is built. Reported, not fatal.
+        sched = (set(patch) - must_match) - {"seed"}
+        clamped = settings_drift(patch, live, sched)
+        absent = [k for k, v in clamped.items() if v["live"] == "<absent>"]
         if absent:
-            print(f"    warning: this server does not know settings {absent} — the governor "
-                  f"keys may not be merged yet; the run still executes with the legacy path")
-        if missing:
-            print(f"    note: server clamped/normalised {missing}")
+            print(f"    warning: this server does not know settings {sorted(absent)} — the "
+                  f"governor keys may not be merged yet; the run still executes with the "
+                  f"legacy path")
+        rest = {k: v for k, v in clamped.items() if v["live"] != "<absent>"}
+        if rest:
+            print(f"    note: server clamped/normalised {format_drift(rest)}")
+        if self.assert_settings and not self._asserted:
+            shown = {k: live.get(k) for k in self.assert_settings if k in live}
+            print(f"    settings verified live: "
+                  + ", ".join(f"{k}={v!r}" for k, v in sorted(shown.items())))
+            self._asserted = True
         return live
 
     def lock_elevation(self, spec: RunSpec) -> None:
@@ -730,6 +883,20 @@ class Bench:
         rec["hashes"], rec["hash_source"] = self.collect_hashes(slug)
         self.save_report_copy(report, tag)
         m = rec["metrics"]
+        # A schema/4 report publishes cells_per_min itself. If it disagrees with the harness's
+        # own merged/wall arithmetic the two are measuring different things, and quoting either
+        # without saying which would be the phase-1 mistake again.
+        rep, der = m.get("cells_per_min"), m.get("cells_per_min_derived")
+        if (m.get("cells_per_min_source") == "report" and rep and der
+                and abs(rep - der) > max(0.02 * der, 0.05)):
+            print(f"    note: report says {rep} cells/min, merged/wall says {der} — using the "
+                  f"report; they should agree, so check summary.cells_per_min in runreport.py")
+        t = m.get("timers")
+        if t:
+            print("    post-arnis timers: "
+                  + " ".join(f"{k.removesuffix('_s')}={fmt(t[k], 2)}s"
+                             for k in TIMER_KEYS if k in t)
+                  + f" total={fmt(t.get('post_arnis_total_s'), 2)}s")
         print(f"  -> {fmt(m.get('wall_s'))}s wall · {fmt(m.get('cells_per_min'))} cells/min · "
               f"par {fmt(m.get('effective_parallelism'))}x · cpu {fmt(m.get('cpu_avg'))}% · "
               f"ram {fmt(m.get('ram_peak'))}% · median {fmt(m.get('cell_median_s'))}s · "
@@ -809,9 +976,10 @@ class Bench:
         for _ in range(20):
             code, body = self.http.get("/api/report.json", timeout=120)
             if code == 200 and isinstance(body, dict) and body.get("summary"):
-                if body.get("schema") != "meld-run-report/3":
+                if body.get("schema") not in REPORT_SCHEMAS:
                     print(f"    note: report schema is {body.get('schema')!r}, "
-                          f"this harness was written for meld-run-report/3")
+                          f"this harness reads {' / '.join(REPORT_SCHEMAS)} — unknown fields "
+                          f"are ignored and the /3 fields are still read")
                 return body
             time.sleep(1.5)
         raise BenchError("the run finished but /api/report.json never produced a report")
@@ -980,19 +1148,55 @@ def percentile(values: list[float], q: float) -> float | None:
     return v[lo] + (v[hi] - v[lo]) * (pos - lo)
 
 
+def _num(v):
+    """A float, or None. Guards every new schema/4 field: a report written by an older Meld
+    simply does not carry it, and `None` must not become `0.0`."""
+    if isinstance(v, bool) or v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def report_timers(obj: dict) -> dict:
+    """schema/4's `timers{merge_s,prune_s,health_s,meta_s}` off a summary{} or a cell{}.
+    Returns {} on a schema/3 report, which is the honest answer: not zero, absent."""
+    t = (obj or {}).get("timers")
+    if not isinstance(t, dict):
+        return {}
+    out = {k: _num(t.get(k)) for k in TIMER_KEYS if _num(t.get(k)) is not None}
+    if out:
+        out["post_arnis_total_s"] = round(sum(out.values()), 3)
+    return out
+
+
 def metrics_from_report(report: dict, harness_wall_s: float) -> dict:
-    """Everything in the table, read out of meld-report.json (schema meld-run-report/3)."""
+    """Everything in the table, read out of meld-report.json.
+
+    Reads meld-run-report/3 and /4. Where /4 publishes a number the harness would otherwise
+    re-derive (cells_per_min), the report wins and `cells_per_min_source` records that it did,
+    so a phase-1 /3 result and a phase-2 /4 result stay comparable and it is visible which is
+    which. Timers are absent on /3 and must read as absent, never as zero."""
     sm = (report or {}).get("summary") or {}
     cells = [c for c in ((report or {}).get("cells") or [])
              if c.get("duration_s") and c.get("status") == "merged"]
     durs = [float(c["duration_s"]) for c in cells]
     wall = float(sm.get("elapsed_s") or harness_wall_s or 0.0)
     merged = int(sm.get("merged") or len(durs))
+    cpm_reported = _num(sm.get("cells_per_min"))
+    cpm_derived = round(merged / wall * 60.0, 2) if wall > 0 else None
+    timers = report_timers(sm)
     return {
+        "report_schema": (report or {}).get("schema"),
         "wall_s": round(wall, 1),
         "cells_merged": merged,
         "cells_failed": int(sm.get("failed") or 0),
-        "cells_per_min": round(merged / wall * 60.0, 2) if wall > 0 else None,
+        "cells_per_min": round(cpm_reported, 2) if cpm_reported is not None else cpm_derived,
+        "cells_per_min_source": "report" if cpm_reported is not None else "derived",
+        "cells_per_min_derived": cpm_derived,
+        "timers": timers or None,
+        "post_arnis_total_s": timers.get("post_arnis_total_s"),
         "effective_parallelism": round(sum(durs) / wall, 2) if wall > 0 and durs else None,
         "cpu_avg": sm.get("cpu_avg"),
         "cpu_peak": sm.get("cpu_peak"),
@@ -1060,6 +1264,19 @@ def render_table(results: list[dict]) -> str:
                 f"{fmt(m.get('ram_peak'), 0)} | {fmt(m.get('cell_median_s'))} | "
                 f"{fmt(m.get('cell_p95_s'))} | {fmt(m.get('workers_peak'), 0)} | "
                 f"{r['outcome']} |")
+        # schema/4 only. N6's tripwire (merge+prune+health+meta <= 7 s per run) lives here rather
+        # than in a column, because on a schema/3 report it does not exist and a blank column
+        # reads as a zero.
+        timed = [r for r in rows if (r["metrics"] or {}).get("timers")]
+        if timed:
+            lines.append("")
+            lines.append("| config | merge s | prune s | health s | meta s | post-arnis total s |")
+            lines.append("|---|--:|--:|--:|--:|--:|")
+            for r in timed:
+                t = r["metrics"]["timers"]
+                lines.append(f"| `{r['tag']}` | "
+                             + " | ".join(fmt(t.get(k), 2) for k in TIMER_KEYS)
+                             + f" | {fmt(t.get('post_arnis_total_s'), 2)} |")
     return "\n".join(lines)
 
 
@@ -1117,6 +1334,12 @@ def print_plan(bench: Bench) -> None:
               f"(ARNIS_BLOCK_HASH=1 goes into the spawned server's env)")
     ws = ", ".join(f"{k}={v}" for k, v in sorted(bench.world_settings.items()))
     print(f"world settings   {ws or '(server defaults)'}")
+    if bench.assert_settings:
+        print(f"asserted live    {', '.join(sorted(bench.assert_settings))}")
+        print("                 (checked against /api/settings after every apply; "
+              "a mismatch ABORTS the sweep)")
+    else:
+        print("asserted live    NONE - nothing verifies that these settings actually applied")
     prep = bench.prep_cfg
     print(f"prep             survey={prep.get('survey', True)} "
           f"bake_elevation={prep.get('bake_elevation', True)} "
@@ -1220,6 +1443,140 @@ def selftest() -> int:
     check("--only still takes a single run name",
           len(build_specs(grouped, ["a"], None, False)) == 1)
 
+    # -- H2: the matrix must follow the MEASURED arms, and must be unable to lie -------------
+    defaults = meld_default_settings()
+    check("Meld's own settings defaults are importable (the authority on key names)",
+          defaults is not None and "native_region_format" in defaults,
+          "src/project.default_settings() did not import - name checking is degraded")
+
+    try:
+        check_setting_names({"region_format": "anvil"}, "world_settings", defaults)
+        check("a key that is not a Meld setting is refused", False, "region_format was accepted")
+    except BenchError as ex:
+        check("a key that is not a Meld setting is refused", "native_region_format" in str(ex),
+              str(ex))
+    try:
+        check_setting_names({"native_region_format": True}, "world_settings", defaults)
+        check("a wrong-typed setting is refused", False, "a bool was accepted for a string")
+    except BenchError:
+        check("a wrong-typed setting is refused", True)
+    try:
+        check_setting_names({"buildings": False, "bake_lighting": True,
+                             "native_region_format": "blinear", "native_blinear_level": 6},
+                            "world_settings", defaults)
+        check("the measured arms' own keys pass the name check", True)
+    except BenchError as ex:
+        check("the measured arms' own keys pass the name check", False, str(ex))
+
+    live = {"buildings": False, "interior": False, "bake_lighting": True,
+            "native_region_format": "blinear", "native_blinear_level": 6,
+            "overture": True, "stream_to_disk": True}
+    check("no drift when the server agrees",
+          settings_drift(dict(live), live, DEFAULT_ASSERT_SETTINGS) == {})
+    d = settings_drift({**live, "bake_lighting": False}, live, DEFAULT_ASSERT_SETTINGS)
+    check("a flipped world setting is drift", list(d) == ["bake_lighting"], json.dumps(d))
+    d = settings_drift({"region_format": "anvil"}, {}, ["region_format"])
+    check("a setting the server does not have reads as <absent>, not as agreement",
+          d.get("region_format", {}).get("live") == "<absent>", json.dumps(d))
+    check("6 == 6.0 is not drift (the server round-trips ints as ints or floats)",
+          settings_drift({"native_blinear_level": 6}, {"native_blinear_level": 6.0},
+                         ["native_blinear_level"]) == {})
+
+    shipped = load_matrix(DEFAULT_MATRIX)
+    ws = shipped.get("world_settings") or {}
+    measured = {"buildings": False, "interior": False, "bake_lighting": True,
+                "overture": True, "native_region_format": "blinear",
+                "native_blinear_level": 6, "stream_to_disk": True}
+    for k, v in measured.items():
+        check(f"matrix.json declares the measured arm: {k}={v!r}", ws.get(k) == v,
+              f"matrix has {ws.get(k)!r} - the arms do NOT move to the matrix, the matrix "
+              f"moves to the arms (docs/perf-phase2-plan.md, H2)")
+    check("matrix.json no longer names the phantom `region_format`", "region_format" not in ws)
+    check("matrix.json asserts every measured key",
+          set(shipped.get("assert_settings") or ()) >= set(measured),
+          json.dumps(shipped.get("assert_settings")))
+    check("the shipped matrix builds specs (names + types validated)",
+          len(build_specs(shipped, None, None, False)) == len(shipped["runs"]))
+
+    liar = json.loads(json.dumps(base_matrix))
+    liar["world_settings"] = {"region_format": "anvil"}
+    try:
+        build_specs(liar, None, None, False)
+        check("a matrix naming a phantom setting is refused", False, "it was accepted")
+    except BenchError:
+        check("a matrix naming a phantom setting is refused", True)
+
+    liar2 = json.loads(json.dumps(base_matrix))
+    liar2["world_settings"] = {"buildings": False}
+    liar2["assert_settings"] = ["bake_lighting"]
+    try:
+        build_specs(liar2, None, None, False)
+        check("asserting a key world_settings never declares is refused", False, "accepted")
+    except BenchError:
+        check("asserting a key world_settings never declares is refused", True)
+
+    # The abort itself, end to end, against a stubbed server. This is the check that would have
+    # caught phase 1: the matrix asks for blinear, the server answers "mca", the sweep stops.
+    class _FakeHttp:
+        def __init__(self, live):
+            self.live = live
+            self.posted = None
+
+        def post(self, path, payload=None, timeout=None):
+            if path == "/api/settings":
+                self.posted = dict(payload or {})
+            return 200, {"ok": True}
+
+        def get(self, path, timeout=None):
+            return 200, dict(self.live)
+
+    class _S(Bench):
+        def __init__(self, world, live, assert_keys):   # noqa: D107 — settings-gate stub
+            self.world_settings = dict(world)
+            self.assert_settings = tuple(assert_keys)
+            self._asserted = False
+            self.seed = 1
+            self._http = _FakeHttp(live)
+
+        @property
+        def http(self):
+            return self._http
+
+    world = {"buildings": False, "bake_lighting": True, "native_region_format": "blinear"}
+    spec_ok = build_specs(base_matrix, ["a"], None, False)[0]
+    honest = _S(world, {**world, "scale": 1.0, "job_size_regions": 4, "max_workers": 4,
+                        "governor_mode": "off", "governor_max_workers": 0,
+                        "cpu_target_pct": 90, "flush_threads_cap": 12,
+                        "ram_headroom_mb": 2048}, world)
+    try:
+        honest.apply_settings(spec_ok)
+        check("an honest server passes the settings gate", True)
+    except BenchError as ex:
+        check("an honest server passes the settings gate", False, str(ex))
+
+    lying = _S(world, {**world, "native_region_format": "mca", "scale": 1.0,
+                       "job_size_regions": 4, "max_workers": 4, "governor_mode": "off",
+                       "governor_max_workers": 0, "cpu_target_pct": 90,
+                       "flush_threads_cap": 12, "ram_headroom_mb": 2048}, world)
+    try:
+        lying.apply_settings(spec_ok)
+        check("a server that did not apply the region format ABORTS the sweep", False,
+              "it was accepted")
+    except BenchError as ex:
+        check("a server that did not apply the region format ABORTS the sweep",
+              "native_region_format" in str(ex), str(ex))
+
+    clamps = _S(world, {**world, "scale": 1.0, "job_size_regions": 4, "max_workers": 64,
+                        "governor_mode": "off", "governor_max_workers": 0,
+                        "cpu_target_pct": 90, "flush_threads_cap": 12,
+                        "ram_headroom_mb": 2048}, world)
+    try:
+        clamps.apply_settings(spec_ok)
+        check("a clamped SCHEDULING key is reported, not fatal", True)
+    except BenchError as ex:
+        check("a clamped SCHEDULING key is reported, not fatal", False, str(ex))
+
+
     report = {
         "schema": "meld-run-report/3",
         "summary": {"elapsed_s": 120.0, "merged": 4, "failed": 0, "cpu_avg": 79,
@@ -1235,6 +1592,28 @@ def selftest() -> int:
     check("median cell time", m["cell_median_s"] == 25.0, str(m["cell_median_s"]))
     check("p95 cell time interpolates", m["cell_p95_s"] == 38.5, str(m["cell_p95_s"]))
     check("percentile of one sample is that sample", percentile([7.0], 0.95) == 7.0)
+
+    # -- H2: schema/4 is read when present, schema/3 still reads ----------------------------
+    r4 = json.loads(json.dumps(report))
+    r4["schema"] = "meld-run-report/4"
+    r4["summary"]["cells_per_min"] = 2.0
+    r4["summary"]["timers"] = {"merge_s": 3.0, "prune_s": 1.5, "health_s": 0.25, "meta_s": 0.25}
+    m4 = metrics_from_report(r4, 130.0)
+    check("schema/4 cells_per_min comes from the report", m4["cells_per_min_source"] == "report")
+    check("schema/4 timers are read", m4["timers"]["merge_s"] == 3.0, json.dumps(m4["timers"]))
+    check("post-arnis total sums the four timers (N6's tripwire)",
+          m4["post_arnis_total_s"] == 5.0, str(m4["post_arnis_total_s"]))
+    check("the derived cells/min is kept alongside for cross-checking",
+          m4["cells_per_min_derived"] == 2.0)
+    m3 = metrics_from_report(report, 130.0)
+    check("schema/3 still reads, and its cells/min is marked derived",
+          m3["cells_per_min"] == 2.0 and m3["cells_per_min_source"] == "derived")
+    check("absent timers read as absent, never as zero", m3["timers"] is None
+          and m3["post_arnis_total_s"] is None)
+    r4b = json.loads(json.dumps(r4))
+    r4b["summary"]["timers"] = {"merge_s": None}
+    check("a null timer is dropped rather than counted as 0",
+          metrics_from_report(r4b, 130.0)["timers"] is None)
 
     check("faster wall reads as a positive delta", delta_pct(100, 80, True) == "+20.0%")
     check("higher throughput reads as a positive delta", delta_pct(10, 12, False) == "+20.0%")
@@ -1294,6 +1673,13 @@ def selftest() -> int:
     table = render_table(b.results)
     check("the table renders both arms", "`a`" in table and "`b`" in table)
     check("the governor row shows its ceiling", "auto<=20" in table, table)
+    check("no timers table on schema/3 results (a blank column would read as zero)",
+          "post-arnis total s" not in table)
+    b.results[1]["metrics"]["timers"] = {"merge_s": 3.0, "prune_s": 1.5,
+                                         "post_arnis_total_s": 4.5}
+    table4 = render_table(b.results)
+    check("a schema/4 result gets the post-arnis timers table",
+          "post-arnis total s" in table4 and "4.50" in table4, table4)
     check("the determinism block renders", "Determinism gate" in
           render_determinism(b.determinism_gate()))
 

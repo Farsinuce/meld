@@ -231,6 +231,27 @@ def default_settings() -> dict:
         # Stream regions to disk during generation (upstream Arnis --stream-to-disk). Lets a
         # single cell be 8x8/16x16 without OOM. Only used if the arnis binary supports the flag.
         "stream_to_disk": False,
+        # ── phase 2 perf work: kill switches + measurement (docs/perf-phase2-plan.md) ──
+        # The first two gate work that is NOT implemented yet. They exist now so the later
+        # change lands flag-gated from its very first commit instead of being switched on by
+        # the act of merging it — if you go looking for the feature behind them, it is not
+        # missing, it has not been written. Both default to today's behaviour.
+        #
+        # Emit arnis's --canonical-regions (plan task B1): let a cell write only the regions it
+        # actually owns instead of the full (job_size_regions+2)² halo. False = omit the flag
+        # entirely, so arnis writes exactly the same region files it writes today, and an older
+        # bundled arnis.exe never sees an unknown clap argument.
+        "canonical_regions": False,
+        # Ask the fork for its fast OSM tile parser (plan task A1: serde_json from_slice instead of
+        # the from_reader IoRead path, plus a cheaper dedup key). False = the fork parses tiles
+        # exactly as it does today. The switch exists so the replacement can be A/B'd against the
+        # current parser and turned back off in one setting if the two ever disagree by a block.
+        "parse_fast_json": False,
+        # Emit the phase-2 per-phase timers (merge / prune / health / meta) into the run report:
+        # summary.timers + cells[].timers, schema "meld-run-report/4". True = today's behaviour,
+        # because the timers ship on by default — they only measure, they change no scheduling
+        # decision. Off drops the new keys; a schema/3 reader ignores them either way.
+        "phase2_timers": True,
         # World management
         "prune_cell_after_merge": True,   # delete per-cell subregion after merge (saves storage)
         "master_world_dir": "",            # where the merged world lives ("" = <project>/Meld World)

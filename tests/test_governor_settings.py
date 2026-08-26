@@ -33,6 +33,16 @@ GOVERNOR_KEYS = (
     "flush_threads_cap", "governor_max_workers", "worker_autoscale",
 )
 
+# Phase-2 (docs/perf-phase2-plan.md, task M1): key -> the default that means "today's
+# behaviour". canonical_regions and parse_fast_json are kill switches for work that is NOT
+# implemented yet — they exist so that work is flag-gated from its first commit, and a wrong
+# default here would switch it on the moment it lands. phase2_timers is measurement only.
+PHASE2_SETTINGS = {
+    "canonical_regions": False,
+    "parse_fast_json": False,
+    "phase2_timers": True,
+}
+
 
 # ── defaults ─────────────────────────────────────────────────────────────────────────────
 def test_defaults_present_and_legacy_safe():
@@ -46,10 +56,35 @@ def test_defaults_present_and_legacy_safe():
     assert d["cpu_target_pct"] == 90          # the one true fallback (not 100)
 
 
+def test_phase2_settings_default_to_todays_behaviour():
+    """Each phase-2 switch exists, with the default that changes nothing. `is` on purpose:
+    these are booleans the emitters branch on, not truthy placeholders."""
+    d = default_settings()
+    for key, want in PHASE2_SETTINGS.items():
+        assert key in d, f"phase-2 setting missing from default_settings: {key}"
+        assert d[key] is want, f"{key} defaults to {d[key]!r}, not today's behaviour {want!r}"
+
+
 # ── the never-travels lists ──────────────────────────────────────────────────────────────
 def test_governor_keys_are_machine_keys():
     missing = [k for k in GOVERNOR_KEYS if k not in _MACHINE_KEYS]
     assert not missing, f"would travel inside a shared preset: {missing}"
+
+
+def test_phase2_settings_are_machine_keys():
+    """A shared preset must not flip a stranger's build onto an experimental parser, an
+    unbuilt region-write path, or this box's measurement choices."""
+    missing = [k for k in PHASE2_SETTINGS if k not in _MACHINE_KEYS]
+    assert not missing, f"would travel inside a shared preset: {missing}"
+
+
+def test_phase2_settings_stripped_in_both_directions():
+    blob = {k: PHASE2_SETTINGS[k] for k in PHASE2_SETTINGS}
+    blob["scale"] = 0.5                       # a real world key must survive
+    for known_only in (False, True):          # save direction, then import/apply
+        kept, machine, _unknown = clean_settings(blob, known_only=known_only)
+        assert kept == {"scale": 0.5}
+        assert set(machine) == set(PHASE2_SETTINGS)
 
 
 def test_gpu_accel_never_travels():

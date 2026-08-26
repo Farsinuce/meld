@@ -15,21 +15,41 @@
     "bbox": { "south": 44.36, "west": 25.96, "north": 44.5072, "east": 26.1662 }
   },
 
+  "_world_settings_comment": [
+    "These are the MEASURED arms, not an aspiration. Phase 1's A/B ran",
+    "`--no-buildings --interior false --bake-lighting --region-format blinear --blinear-level 6`",
+    "(verified in ab-perf-governor-cs4/logs/cell--1_-1_4.log). The matrix used to declare the",
+    "opposite of four of those and named a fifth key that is not a Meld setting at all",
+    "(`region_format`; the real one is `native_region_format`), so the sweep silently rendered a",
+    "different world from every number quoted in docs/perf-phase2-plan.md.",
+    "THE DIRECTION IS FIXED: the matrix follows the arms. Moving the arms to this file instead",
+    "voids every phase-1 baseline and costs a full 45-60 min re-baseline.",
+    "`assert_settings` below is checked against live /api/settings after every apply; a mismatch",
+    "aborts the sweep instead of quietly measuring something else."
+  ],
   "world_settings": {
-    "buildings": true,
+    "buildings": false,
     "terrain": true,
     "overture": true,
     "trees": true,
     "roof": true,
-    "interior": true,
+    "interior": false,
     "caves": false,
     "fill_ground": true,
-    "bake_lighting": false,
+    "bake_lighting": true,
     "land_cover": true,
     "elevation_mode": "global",
     "seam_buffer_chunks": 8,
-    "region_format": "anvil"
+    "native_region_format": "blinear",
+    "native_blinear_level": 6,
+    "stream_to_disk": true
   },
+
+  "assert_settings": [
+    "buildings", "interior", "bake_lighting",
+    "native_region_format", "native_blinear_level",
+    "overture", "stream_to_disk"
+  ],
 
   "prep": {
     "enabled": true,

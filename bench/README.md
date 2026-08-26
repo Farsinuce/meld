@@ -75,7 +75,7 @@ area in the matrix:
   lock. Elevation is a world-shaping input; letting each run survey for itself would let it drift
   between arms and quietly void the gate.
 - **bakes the elevation tiles** (`/api/datapack/bake-mapterhorn`) at the generation scale.
-- **pre-warms Overture** (`/api/overture/prewarm`) when `world_settings.buildings` is on.
+- **pre-warms Overture** (`/api/overture/prewarm`) when `world_settings.overture` is on.
 
 Turn any of it off in `matrix.json` under `prep`. The harness **never sets `ARNIS_OFFLINE`** —
 forcing offline mode would change what the generator produces, and this harness is not allowed to
@@ -235,10 +235,25 @@ bench/results/<label>/server.log  the spawned server's stdout (find "arnis binar
 bench/results/<label>/reports/    a copy of each run's meld-report.json
 ```
 
-Timings are **never re-derived** by the harness. `meld-report.json` (schema `meld-run-report/3`)
-is the source of truth; the harness only reads `summary{}` and `cells[]` out of it. The one number
-it measures itself is `harness_wall_s`, kept alongside for sanity, and used only if a report has
-no `elapsed_s`.
+Timings are **never re-derived** by the harness. `meld-report.json` is the source of truth; the
+harness only reads `summary{}` and `cells[]` out of it. The one number it measures itself is
+`harness_wall_s`, kept alongside for sanity, and used only if a report has no `elapsed_s`.
+
+Both **`meld-run-report/3`** and **`meld-run-report/4`** are read. schema/4 is additive, so a
+phase-1 result file stays readable and comparable next to a phase-2 one:
+
+| schema/4 field | how the harness uses it | on a schema/3 report |
+|---|---|---|
+| `summary.cells_per_min` | taken as-is; `metrics.cells_per_min_source` records `report` | derived as merged/wall, source `derived` |
+| `summary.timers{merge_s,prune_s,health_s,meta_s}` | `metrics.timers` + `metrics.post_arnis_total_s`, printed per run and as a second table under each group | **absent, not zero** - `metrics.timers` is `null` and no table is printed |
+| `cells[].timers` | not read yet (the per-run sums are what N6 tripwires) | absent |
+
+schema/4 always writes the full timer set, so all-zero timers mean "collection was off", not
+"the tail was free" - `config.phase2_timers` in the same report says which.
+
+The harness keeps `metrics.cells_per_min_derived` alongside the reported one and prints a note if
+the two disagree by more than 2%. They measure the same thing; if they diverge, one of them is
+wrong and quoting either without saying which is how phase 1 went astray.
 
 ---
 
@@ -250,6 +265,7 @@ no `elapsed_s`.
   "seed": 1,                           // one seed for the whole sweep
   "site":  { "origin": {...}, "bbox": {...} },
   "world_settings": { ... },           // applied IDENTICALLY to every run
+  "assert_settings": [ ... ],          // keys whose LIVE value must match, or the sweep aborts
   "prep":  { ... },
   "watchdog": { ... },
   "runs": [ { "name": "...", "group": "...", "arm": "legacy|governor",
@@ -260,14 +276,52 @@ no `elapsed_s`.
 }
 ```
 
-Two rules the harness enforces, because breaking either makes the gate meaningless:
+Four rules the harness enforces, because breaking any of them makes the gate meaningless:
 
 1. **World-shaping settings may not differ between runs.** `scale`, `cell_size`, `seed`,
-   `buildings`, `terrain`, `caves`, `land_cover`, height flags, `region_format` and the rest live
-   in `world_settings` and are applied to everything. A run whose `settings` block touches one is
-   refused. `--allow-world-override` opens that door, and you own what comes through it.
+   `buildings`, `terrain`, `caves`, `land_cover`, height flags, `native_region_format` and the
+   rest live in `world_settings` and are applied to everything. A run whose `settings` block
+   touches one is refused. `--allow-world-override` opens that door, and you own what comes
+   through it.
 2. **Every run in a group shares bbox + scale + cell size.** Otherwise the group's Δ column is
    comparing two different amounts of work. Give the odd run its own `group`.
+3. **Every key must be a real Meld setting, of the right type.** Checked at load time against
+   `src/project.default_settings()`. `update_settings` drops keys it does not recognise, so a
+   typo used to be *completely* silent: the sweep rendered with the server default and the
+   results file recorded the matrix's fiction. `region_format`, `blinear_level`, `cell_size` and
+   `workers` are rejected by name with the correct spelling in the error.
+4. **`assert_settings` must come back from the live server unchanged.** After every
+   `/api/settings` apply the harness reads `/api/settings` back and compares. Any world key or
+   asserted key that differs — including one the server does not have at all, which reports as
+   `<absent>` — **aborts the sweep with a per-key diff**. Scheduling keys are exempt: the server
+   is entitled to clamp `max_workers` to 1..64 and `cpu_target_pct` to 10..95, and a clamp does
+   not change which world is built, so those are printed and not fatal.
+
+### `world_settings` is the MEASURED config, not an aspiration
+
+Phase 1 shipped a matrix declaring `buildings:true, interior:true, bake_lighting:false,
+region_format:"anvil"` while the arms actually ran
+`--no-buildings --interior false --bake-lighting --region-format blinear --blinear-level 6`.
+Five divergences, one of them (`bake_lighting`) deciding the headline weighting of the whole
+region-write workstream, and one of them (`region_format`) not a Meld setting at all.
+
+**The direction is fixed: the matrix follows the arms.** Moving the arms to the matrix instead
+voids every phase-1 baseline, promotes Overture's serial parquet decode to a new dominant phase
+of unknown warm cost, and costs a full 45-60 min re-baseline. The shipped matrix therefore
+declares, and asserts:
+
+| key | value | why it is that value |
+|---|---|---|
+| `buildings` | `false` | the measured arms ran `--no-buildings` |
+| `interior` | `false` | `--interior false` |
+| `bake_lighting` | `true` | `--bake-lighting`; this is the one that prices the discarded-region work |
+| `native_region_format` | `"blinear"` | `--region-format blinear` (**not** `region_format`, which Meld does not have) |
+| `native_blinear_level` | `6` | `--blinear-level 6` |
+| `overture` | `true` | unchanged; the arms carry no `--no-overture` |
+| `stream_to_disk` | `true` | decides whether regions leave via `flush_region_via` or `save_java`, so it must be recorded, not inferred |
+
+`--dry-run` prints the asserted list under `asserted live`; `--selftest` checks the shipped
+matrix against that table so it cannot drift back.
 
 Only these may differ per run: `max_workers`, `governor_mode`, `governor_max_workers`,
 `cpu_target_pct`, `flush_threads_cap`, `ram_headroom_mb`, `min_threads_per_worker`,
@@ -283,8 +337,8 @@ keep the origin inside the area, and re-run `--dry-run` until the planned cell c
 | code | meaning |
 |---|---|
 | `0` | sweep finished; the determinism gate passed (or was skipped / weak-and-not-strict) |
-| `1` | sweep aborted or errored — partial results were still written |
-| `2` | the matrix is invalid; nothing ran |
+| `1` | sweep aborted or errored — partial results were still written. **Includes a settings-drift abort**: the server did not have the settings the matrix declares, so the sweep refused to measure a world it cannot describe |
+| `2` | the matrix is invalid (bad JSON, a key Meld does not have, a wrong type); nothing ran |
 | `3` | **determinism gate failed on strong evidence — the sweep is void** |
 
 ---

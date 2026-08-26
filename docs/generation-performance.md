@@ -3,7 +3,8 @@
 How Meld decides how hard to drive your PC while it builds a world, what you can
 change, and how the machinery works underneath.
 
-**Branch:** `perf/speed-to-worldgen` (Meld and the arnis fork, both).
+**Branch:** `perf/speed-to-worldgen-phase2` (Meld and the arnis fork, both), which
+continues `perf/speed-to-worldgen`.
 **Default behaviour is unchanged.** Everything described here is off until you turn
 it on: `governor_mode` ships as `"off"`, which reproduces the pre-governor
 scheduling formulas exactly, and every arnis-side addition is gated behind an
@@ -497,9 +498,10 @@ DataVersions. `set_biome_amounts` required widening `BiomeAmounts` to derive
 
 ## Settings keys
 
-All six live in `src/project.py` `default_settings()`, are validated in `server.py`
+All of them live in `src/project.py` `default_settings()`, are validated in `server.py`
 `/api/settings`, and **must** appear in **both** `presets._MACHINE_KEYS` and
-`server.py`'s `_META_SKIP_SETTINGS`.
+`server.py`'s `_META_SKIP_SETTINGS`. The first block is the governor's six keys plus
+the retired `worker_autoscale`; the second is the three keys phase 2 added.
 
 | Key | Type | Default | Clamp |
 |---|---|---|---|
@@ -510,6 +512,23 @@ All six live in `src/project.py` `default_settings()`, are validated in `server.
 | `flush_threads_cap` | int | 12 | 1..24 |
 | `governor_max_workers` | int | 0 | 0..64. 0 means "use `max_workers` as the ceiling"; > 0 is an explicit ceiling independent of it. |
 | `worker_autoscale` | bool | False | **Legacy, read-only for one release.** `project.migrate_governor_settings()` returns a patch mapping `True` onto `governor_mode="auto"` and always clears the flag, so it is idempotent and never resurrects a mode the user turned off. Called at boot and on project switch. |
+
+Phase 2 adds three more, in the same four places:
+
+| Key | Type | Default | Clamp |
+|---|---|---|---|
+| `phase2_timers` | bool | `True` | coerced to bool (a string `"false"`/`"0"`/`"off"` is read as false rather than stored as a truthy string). Gates the per-cell `[Timers]` log line **only**; `summary.timers` and `cells[].timers` are written either way. On by default because it is measurement, not behaviour: four `time.monotonic()` reads per cell, and nothing about what is written changes. |
+| `canonical_regions` | bool | `False` | coerced to bool. **Declared, not wired.** Would gate emitting arnis's `--canonical-regions`; `False` = arnis writes all 36 regions and Meld deletes the surplus, as today. |
+| `parse_fast_json` | bool | `False` | coerced to bool. **Declared, not wired.** Would gate the faster OSM decode path; `False` = the fork parses tiles exactly as today. |
+
+`canonical_regions` and `parse_fast_json` are kill switches for work that has **not
+landed**. Nothing in the code reads them today: no `--canonical-regions` flag is
+emitted, and no JSON parser is swapped. They exist now, defaulting to today's
+behaviour, so that the tasks behind them (the region-write filter and the OSM parse
+change, both HOLD in `perf-phase2-plan.md`) can be flag-gated the day they land
+without a settings migration, a preset re-save, or a world-meta rewrite. If you are
+reading this and neither has landed, they are dead keys and setting them does
+nothing. Do not document them to users as features.
 
 `governor_history` is keyed by `f"{scale_bucket}/{cell_size}"` where `scale_bucket` is
 `"1:1"` for scale >= 0.5, `"1:2..1:9"` for >= 0.1, else `"1:10+"`. Each entry holds
@@ -591,6 +610,163 @@ bakes elevation tiles and pre-warms Overture before measuring, and never sets
 `ARNIS_OFFLINE`: forcing offline mode would change what the generator produces, and
 this harness is not allowed to change what the generator produces.
 
+## What a run measures, and where it lands
+
+Phase 1 measured the generator. Everything after the generator exited was untimed,
+and the run report had no throughput field at all, so every cells/min figure in this
+document was computed by hand from `elapsed_s` and a cell count. Phase 2 closes both
+gaps. It adds instruments only: nothing here changes what is generated, merged or
+written.
+
+### The post-generator timers
+
+`_runner` in `server.py` now wraps four spans with `time.monotonic()` and reports
+them per cell:
+
+| Timer | Covers |
+|---|---|
+| `merge_s` | the `merge.py` call that copies the cell's regions into the master world |
+| `prune_s` | deleting the cell's scratch world after a successful merge |
+| `health_s` | `_scan_cell_health` over the cell's log |
+| `meta_s` | the project/world metadata writes that follow the merge |
+
+They are recorded per cell and summed over the run, and a cell that merged prints
+them after its `MERGE` line (with the `[Prune]` line in between whenever `prune_cell_after_merge` is on, which is the default):
+
+```
+MERGE 3,-2: +16 regions, -20 seam, level.dat=copied
+  [Timers] 3,-2: merge 0.04s prune 0.01s health 0.00s meta 0.00s
+```
+
+**`phase2_timers` (default `True`) gates only that log line, not the measurement.**
+The report fields are written either way, because N6 has to be harvestable from any
+run; a line per cell is just noise for someone who is not benchmarking. Turning the
+setting off therefore costs you nothing except the log line, and turning it on
+changes nothing about the world.
+
+`server.TIMER_KEYS` is the single list every consumer reads - the log line, the
+per-cell report block and the summed run block - so a fifth span is added in exactly
+one place.
+
+**Read them as a tripwire, not as a target.** **Derived** from the phase-1 reports,
+the four together come to **4.24-6.54 worker-seconds out of 2401.7, about 0.27% of
+worker time** on an 81-cell cs4 run - roughly twelve times below the bench harness's
+own noise floor. That number was an estimate; these timers are what turn it into a
+measurement, and the pass criterion on it is a ceiling (`<= 7 s` per run), not a
+target. They are here so a future change to the post-generator tail is caught getting
+worse, not because there is time in there to win.
+
+### The run report: `meld-run-report/4`
+
+`src/runreport.py` bumps `SCHEMA` to `meld-run-report/4`. The bump is **additive
+only** - every schema/3 field keeps its name and its meaning, and a schema/3 reader
+still parses a schema/4 report because the new keys are absent-safe.
+
+| New field | Type | Meaning |
+|---|---|---|
+| `summary.cells_per_min` | float | `len(merged cells) / elapsed_s * 60`, computed when the report is built. The number the governor optimises, finally written down instead of recomputed by hand in every write-up. |
+| `summary.timers` | object | `{"merge_s", "prune_s", "health_s", "meta_s"}`, floats, summed over the run. |
+| `cells[].timers` | object | the same four keys for one cell. |
+
+H2 also stops the harness lying about what it ran. `matrix.json` now declares what
+the measured arms actually used, and after every settings apply the harness compares
+the live `/api/settings` against `DEFAULT_ASSERT_SETTINGS` - `buildings`, `interior`,
+`bake_lighting`, `native_region_format`, `native_blinear_level`, `overture` and
+`stream_to_disk` - and **aborts** on a mismatch instead of quietly measuring a
+different world. `stream_to_disk` is in that list because it decides which of the two
+region-write paths below carries the traffic. Both report schemas are accepted by
+the reader (`REPORT_SCHEMAS`), so an old result on disk still harvests.
+
+`summary.timers` is what makes the 0.27% figure above harvestable by the harness
+rather than something you grep out of a log by hand.
+
+### The arnis region-count split
+
+A cs4 cell hands arnis a bbox widened by the seam buffer, so the generator writes
+6x6 = 36 region files and `merge.py` keeps only the canonical 4x4 = 16. Those 20
+discarded files leave the process by one of two paths, never both, and which one
+carries them depends on whether the run streamed to disk:
+
+- `flush_region_via` (`src/world_editor/mod.rs`) - the eviction path, taken under
+  `ARNIS_STREAM_TO_DISK`, inside the `place` span.
+- `save_java` (`src/world_editor/java.rs`) - the end-of-run write of whatever is still
+  resident in RAM, inside `save`.
+
+These two are the only callers of `write_region_to_disk`, so their sum is the complete
+count of region files a cell wrote. `world_editor::region_stats` counts both and prints
+one line per cell, on every exit path of `save_java` including its two early returns
+(which is exactly the shape of a fully streamed run, the case that matters most):
+
+```
+[regions] flushed=31 saved=5 canonical=16 discarded=20 flushed_discarded=17 saved_discarded=3
+```
+(shape only - those are illustrative counts, not a measurement.)
+
+`flushed_discarded` versus `saved_discarded` is the whole point: it says which of the
+two region-write changes in the plan would actually recover the discarded work. The
+prefix is deliberately `[regions]` and not `[meld]`, so it stays a plain diagnostic in
+the cell log, is never mistaken for a protocol v1 record, and carries no `N/M` pair or
+`parse_progress` keyword that could move the progress bar. It counts; it does not
+change which regions are written.
+
+### What is still not measured
+
+- **Per-run CPU seconds.** The per-cell `cpu_s` on the `done` line exists (phase 1,
+  `GetProcessTimes`), but it is **not** summed into the run report. Until it is, the
+  only run-level CPU figure available is the `timeline[].cpu` integral, and that is
+  **not an instrument independent of wall time**: 10 samples at 20 s, each a mean of
+  about four `cpu_percent` readings clamped at 100, pinned at 100 through the middle
+  of the run. With the cores pinned it collapses to about `elapsed x cores`, so it is
+  a *floor on demand* and a "CPU seconds went down" claim built on it is really just
+  "wall time went down" restated.
+- **The phase split inside `parse` and `place`.** The v1 marker set still reports
+  `parse` and `place` as single spans, and the `bench.mark` labels the generator can
+  produce are not reachable from a Meld-driven run (nothing in Meld passes
+  `--benchmark`).
+
+### Two corrections phase 2 made to phase 1's arithmetic
+
+Both of these contradict figures phase 1 left in the write-ups. They are recorded
+here because re-deriving them from the old numbers leads to the wrong plan.
+
+**1. The per-cell profile behind phase 2 was taken on the cheapest cell in the
+grid.** Cell `(0,0)` is the NW-corner cell, not the centre. It covers exactly **one**
+z11 tile - the smallest of the four, 18.8 MB - where a typical cell covers **four**,
+and it ran **12.4 s against a 27.2 s run median**. Ring 0-1 cells (9 of 81) run
+11.5-16.8 s; rings 2-4 run 29-32 s. Multiplying that cell's 27.7 cpu-s by 81 is what
+produced the phase-1 headroom figure, and it is wrong:
+
+| | phase 1 claimed | corrected |
+|---|---|---|
+| CPU demand, 81-cell cs4 run | 2244 cpu-s | **>= 3395 cpu-s** |
+| CPU-conservation floor on 24 cores | 93.5 s | **~141 s** |
+| Warm-run efficiency against that floor | 58% | **~88%** (160.3 s against a 141.5 s floor) |
+| Headroom from scheduling alone | ~1.7x | **~1.11-1.15x** |
+
+The corrected column comes from the machine-level `timeline[].cpu` integral in the
+real reports, and it is a **floor on demand**, not a measurement of CPU seconds: see
+"What is still not measured" above for why that integral cannot be used to claim a
+cpu-second win. It is good enough for this correction because it is a *lower* bound
+and it already exceeds the old estimate by 51-69%.
+
+The practical consequence: the warm run is already close to the CPU floor, so there
+is very little left for a scheduler to find. Further wall-time gains have to come
+from removing CPU work, not from arranging it better - which is exactly why the
+phase-2 tasks that could deliver seconds are the ones held for review.
+
+**2. Merge offload is dead as a performance idea.** See the timer numbers above:
+merge + prune + health + meta together derive to 4.24-6.54 worker-s per 81-cell run,
+about 0.27% of worker time, in a mid-run window with no core headroom to overlap into. A
+`MergePool` would touch about twenty correctness-critical consumers - run-end,
+auto-export, the render-queue driver that rebinds the global `PROJECT`, and the Stop
+guarantee that currently holds *by construction* - to chase a quarter of a percent.
+It is not deferred pending a better design; it is priced and rejected. Re-open it
+only if per-cell CPU work falls far enough that tens of milliseconds are a real
+share, and re-measure with these timers first.
+
+Full evidence, file:line citations and the confidence gate for every phase-2 task
+are in [`perf-phase2-plan.md`](./perf-phase2-plan.md).
+
 ## Determinism rules any future change must respect
 
 1. **Per-cell generator output must not change by default.** Every behavioural change
@@ -611,19 +787,33 @@ this harness is not allowed to change what the generator produces.
 6. **New settings keys go in four places**: `project.default_settings()`,
    `presets._MACHINE_KEYS`, `server._META_SKIP_SETTINGS`, and a clamp in
    `/api/settings`. Miss the second and a preset carries one machine's tuning onto
-   another; miss the third and a world-meta import overwrites local scheduling.
+   another; miss the third and a world-meta import overwrites local scheduling. This
+   holds for a key that nothing reads yet: `canonical_regions` and `parse_fast_json`
+   are in all four places today precisely so the feature behind them is a code change
+   and not also a settings migration.
 7. **Label measured numbers as measured and estimates as estimates.** The
    recommendation table above distinguishes them; keep it that way when you extend it.
+8. **A kill switch defaults to today's behaviour, and an unwired one stays `False`.**
+   `phase2_timers` defaults `True` only because it is measurement and changes nothing
+   that is written. Anything that changes what is generated or written defaults off.
+9. **Do not build a per-cell number into a per-run number.** The phase-1 headroom
+   figure was one cell's cpu-seconds times 81, and the cell was the cheapest in the
+   grid; it overstated available headroom by about 1.5x. Multiply by a measured
+   distribution or measure the run.
 
 ## Explicitly not done
 
 Named so nobody re-derives them as new ideas.
 
-- **Merge offload.** Merging is Meld-side and runs after the generator exits, so the
-  governor measures generator wall time and does not see it. `_governor_cell_done`
-  therefore reports `ok=True` for a cell whose merge later fails. That is a deliberate
-  choice, not an oversight, but merge itself is untouched work: it neither parallelises
-  across cells nor overlaps with the next generation.
+- **Merge offload - now measured, and rejected on the measurement.** Merging is
+  Meld-side and runs after the generator exits, so the governor still measures
+  generator wall time and does not see it; `_governor_cell_done` still reports
+  `ok=True` for a cell whose merge later fails, which remains a deliberate choice.
+  What changed is that the tail is no longer unmeasured: merge + prune + health +
+  meta derive to **4.24-6.54 worker-s per 81-cell run, about 0.27% of worker time**,
+  and I1's four spans now measure it directly, in every run. Merge still neither parallelises across cells nor overlaps the
+  next generation, and on these numbers it should not: see "What a run measures"
+  above for why a `MergePool` is priced and rejected rather than deferred.
 - **Streaming prefetch.** OSM and elevation prefetch still run as a phase before the
   run rather than overlapping it. Cancellation was fixed on this branch (every entry
   point takes `should_stop`, retry backoff sleeps in 1 s slices instead of up to 6, and

@@ -88,6 +88,11 @@ _MACHINE_KEYS = frozenset({
     "osm_cache_ttl_days", "overpass_url",
     # Observed per-region output size on THIS machine's renders; feeds the disk estimate.
     "mb_per_region_observed",
+    # Phase-2 perf switches (src/project.py). Two are kill switches for work that is not written
+    # yet and one turns on extra run-report timers: all three are decisions about how THIS box
+    # renders and measures, and a shared preset must not flip a stranger's build onto an
+    # experimental parser or an unbuilt region-write path.
+    "canonical_regions", "parse_fast_json", "phase2_timers",
     # Filesystem paths (also caught by the suffix rule; named here so the list reads whole).
     "master_world_dir",
 })

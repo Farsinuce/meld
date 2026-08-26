@@ -27,7 +27,15 @@ from pathlib import Path
 
 REPORT_JSON_NAME = "meld-report.json"
 REPORT_HTML_NAME = "meld-report.html"
-SCHEMA = "meld-run-report/3"
+#: schema/4 (H2 + I1) is ADDITIVE over schema/3: every field schema/3 defined keeps its name,
+#: its type and its meaning, so a schema/3 reader still works unchanged. What 4 adds:
+#:   summary.cells_per_min  float   merged cells / elapsed * 60, computed here at build time
+#:   summary.timers         object  {merge_s, prune_s, health_s, meta_s} summed over the run
+#:   cells[].timers         object  the same four keys, per cell
+SCHEMA = "meld-run-report/4"
+#: The post-arnis steps server.py times per cell (I1). Named here as well as in server.py so a
+#: report can be read (and its timers summed) without importing the server.
+TIMER_KEYS = ("merge_s", "prune_s", "health_s", "meta_s")
 MAX_CELL_ROWS = 200   # cap the printed table (~5 pages); the full list is in the JSON
 
 _C = {
@@ -76,6 +84,22 @@ def _icon_data_uri() -> str:
     return uri
 
 
+def _timers(raw) -> dict:
+    """Normalise one cell's timer block to the four float keys (I1).
+
+    Always the full set, never a partial dict: a consumer summing `cells[].timers` must not have
+    to tell "this step took no measurable time" from "this run predates the timers".
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    out = {}
+    for k in TIMER_KEYS:
+        try:
+            out[k] = round(float(raw.get(k) or 0.0), 3)
+        except (TypeError, ValueError):
+            out[k] = 0.0
+    return out
+
+
 def build_report(*, world_name: str, meld_version: str, run: dict, timing: dict,
                  timeline: list, grid: dict, prefetch_timings: dict, settings: dict,
                  actual_mb, max_workers: int, machine: dict | None = None,
@@ -95,13 +119,14 @@ def build_report(*, world_name: str, meld_version: str, run: dict, timing: dict,
             "worker": t.get("worker"), "queued": t.get("queued"), "started": t.get("started"),
             "ended": t.get("ended"), "duration_s": t.get("duration"),
             "attempts": int(t.get("attempts", 1) or 1), "reason": t.get("reason") or None,
+            "timers": _timers(t.get("timers")),
         })
     seen = {c["cell"] for c in cells}
     for ck, status in grid.items():
         if ck not in seen:
             cells.append({"cell": ck, "status": status, "worker": None, "queued": None,
                           "started": None, "ended": None, "duration_s": None,
-                          "attempts": 0, "reason": None})
+                          "attempts": 0, "reason": None, "timers": _timers(None)})
 
     merged = [c for c in cells if c["status"] == "merged"]
     failed = [c for c in cells if c["status"] in _FAILED_STATUS]
@@ -112,6 +137,14 @@ def build_report(*, world_name: str, meld_version: str, run: dict, timing: dict,
         (max((c["worker"] for c in cells if c.get("worker") is not None), default=-1) + 1)
     cpu_vals = [b["cpu"] for b in timeline if b.get("cpu") is not None]
     ram_vals = [b["ram"] for b in timeline if b.get("ram") is not None]
+    # I1: the run's post-arnis tail, summed over every cell that reported timers (worker-seconds,
+    # not wall — several workers merge at once). This is the N6 tripwire, so it is harvestable
+    # from the JSON rather than only from the log.
+    run_timers = {k: round(sum(c["timers"][k] for c in cells), 3) for k in TIMER_KEYS}
+    # H2: throughput as the governor optimises it. Merged cells only — a failed cell produced no
+    # world — over the run's whole elapsed wall, prefetch included, because that is the wall a
+    # person waits. 0.0 rather than None on a zero-length run so it is always a float.
+    cells_per_min = round(len(merged) / elapsed * 60.0, 2) if elapsed > 0 else 0.0
     # Everything the size and time models key on has to be in here, or a finished run cannot be
     # used to calibrate them later. Auditing the reports already on disk, none recorded caves,
     # the height flags, land cover or the seam buffer -- so a pile of real runs could not answer
@@ -123,7 +156,18 @@ def build_report(*, world_name: str, meld_version: str, run: dict, timing: dict,
                 "caves", "disable_height_limit", "world_min_y", "world_max_y",
                 "height_headroom", "height_underroom", "land_cover", "terrain",
                 "interior", "roof", "overture", "trees", "seam_buffer_chunks",
-                "vertical_exaggeration", "ground_level", "region_format"]
+                "vertical_exaggeration", "ground_level",
+                # N3: "region_format" was a phantom - default_settings() has no such key, so
+                # config.region_format was None in every report ever written. These three are
+                # the real ones, and they are exactly the settings phase 1 got wrong in the
+                # bench matrix: without them a phase-2 result is indistinguishable from a
+                # phase-1 one on the axis that differed.
+                "native_region_format", "native_blinear_level", "stream_to_disk",
+                # M1 phase-2 switches. Recorded because they change what arnis writes
+                # (canonical_regions), how it parses (parse_fast_json) and what the run reports
+                # about itself (phase2_timers) — a report that does not say which of them was on
+                # cannot be compared with one that had them off.
+                "canonical_regions", "parse_fast_json", "phase2_timers"]
 
     return {
         "schema": SCHEMA, "world": world_name, "meld_version": meld_version,
@@ -138,6 +182,8 @@ def build_report(*, world_name: str, meld_version: str, run: dict, timing: dict,
             "cell_fastest_s": durs[0] if n else None, "cell_slowest_s": durs[-1] if n else None,
             "cell_median_s": durs[n // 2] if n else None,
             "cell_avg_s": round(sum(durs) / n, 1) if n else None,
+            "cells_per_min": cells_per_min,          # schema/4
+            "timers": run_timers,                    # schema/4 — merge/prune/health/meta sums
             "cpu_avg": round(sum(cpu_vals) / len(cpu_vals)) if cpu_vals else None,
             "cpu_peak": max(cpu_vals) if cpu_vals else None,
             "ram_peak": max(ram_vals) if ram_vals else None,
@@ -180,8 +226,11 @@ def _tiles(sm: dict) -> str:
     if sm.get("incomplete"):
         sub.append(f"{sm['incomplete']} incomplete")
     cores = sm.get("cores")
+    # schema/4: throughput under the headline time, where "was this run faster" is actually asked.
+    cpm = sm.get("cells_per_min")
+    cpm_sub = f"{cpm:.1f} cells/min" if isinstance(cpm, (int, float)) and cpm else ""
     return "".join([
-        tile("total time", fmt_dur(sm.get("elapsed_s"))),
+        tile("total time", fmt_dur(sm.get("elapsed_s")), cpm_sub),
         tile("cells merged", f"{sm.get('merged', 0)} / {sm.get('total', 0)}", " · ".join(sub)),
         tile("on disk", disk, f"{sm.get('regions', 0)} regions"),
         tile("peak workers", sm.get("workers_peak", 0),
@@ -255,6 +304,14 @@ def _config_block(cfg: dict, sm: dict, prefetch: dict) -> str:
         ("Elevation zoom", _e(cfg.get("elevation_zoom"))),
         ("Lighting bake", "on" if cfg.get("bake_lighting") else "off"),
     ]
+    # schema/4: Meld's own post-arnis tail, in worker-seconds (several workers merge at once, so
+    # this is not wall). Shown only when a run actually recorded it, so reports built from an
+    # older run's timing do not grow a row of zeros.
+    tm = sm.get("timers") if isinstance(sm.get("timers"), dict) else {}
+    if any(tm.get(k) for k in TIMER_KEYS):
+        rows.append(("Post-arnis tail",
+                     " &middot; ".join(f"{k[:-2]} {tm.get(k, 0.0):.2f}s" for k in TIMER_KEYS)
+                     + f" &middot; {sum(float(tm.get(k) or 0.0) for k in TIMER_KEYS):.2f}s total"))
     return f'<table class="kv">{_kv(rows)}</table>'
 
 
