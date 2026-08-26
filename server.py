@@ -2708,9 +2708,18 @@ def _runner(job: dict, state: dict) -> bool:
     arnis_bbox = expand_bbox_for_seam(base_bbox, seam, origin, scale_f)
 
     _lt = PROJECT.root / "loot_table.json"
-    cmd = build_arnis_cmd(str(exe), arnis_bbox, out, settings, origin, elevation, seed,
+    # M2: --canonical-regions is only understood by arnis >= 3.1.8. An older binary
+    # rejects an unknown argument outright and the cell would fail, so the flag is
+    # withheld rather than gambled on. build_arnis_cmd also requires a cell_key: a bbox
+    # render owns no cell, and has no neighbour to generate the ground its edge would lose.
+    from src.arnis_cmd import arnis_version as _arnis_version
+    _cr_ok = settings.get("canonical_regions") and _arnis_version(str(exe)) >= (3, 1, 8)
+    cmd = build_arnis_cmd(str(exe), arnis_bbox, out,
+                          {**settings, "canonical_regions": bool(_cr_ok)},
+                          origin, elevation, seed,
                           osm_file=job.get("osm_file"),
-                          loot_table=str(_lt) if _lt.exists() else None)
+                          loot_table=str(_lt) if _lt.exists() else None,
+                          cell_key=cell_key)
     if job.get("osm_file"):
         log(f"  [{cell_key}] using pre-fetched OSM (no Overpass call)")
     log("RUN " + " ".join(cmd))

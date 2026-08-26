@@ -258,7 +258,8 @@ def clamp_scale(value) -> float:
 def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
                     settings: dict, origin: dict, elevation: dict | None,
                     seed: int, osm_file: str | None = None,
-                    loot_table: str | None = None) -> list[str]:
+                    loot_table: str | None = None,
+                    cell_key: str | None = None) -> list[str]:
     s, w, n, e = bbox["south"], bbox["west"], bbox["north"], bbox["east"]
     # Last line of defence. The settings API clamps on write, so a stored scale is already
     # in range; this catches a preset or project file written by an older Meld.
@@ -406,6 +407,22 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
         cmd.append("--bake-lighting")
     if settings.get("timeout"):
         cmd += ["--timeout", str(int(settings["timeout"]))]
+
+    # B1: name the region rectangle this cell owns, so arnis never writes the seam halo
+    # ring that the merge deletes moments later - measured at 20 of 36 files for a 4x4
+    # cell, 12.3% of the cell's CPU. Placement is unaffected (the halo is still generated,
+    # and the neighbouring cell renders that ground itself); only the write is skipped,
+    # which is why the block_hash is identical with and without the flag.
+    #
+    # Gated on the setting AND on having a cell key: a bbox render with no owning cell has
+    # no neighbour to generate the adjacent ground, so suppressing its edge would lose
+    # real terrain. Requires an arnis that knows the flag - an older binary rejects an
+    # unknown argument outright, hence the version gate at the call site.
+    if settings.get("canonical_regions") and cell_key:
+        from src.coords import canonical_region_bounds
+        rect = canonical_region_bounds(cell_key)
+        if rect:
+            cmd += ["--canonical-regions", ",".join(str(v) for v in rect)]
 
     # Global elevation lock → consistent Y mapping across all cells (no cliffs).
     # The fork only consumes --elevation-min/max inside its `if args.terrain`
