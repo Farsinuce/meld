@@ -19,6 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.governor import (  # noqa: E402
+    CLIMB_STEP,
     ADMIT_POLL_S,
     ADMIT_TIMEOUT_S,
     Admission,
@@ -373,9 +374,13 @@ class TestWarmStart:
         assert gov.workers == 8
 
     def test_a_different_bucket_does_not_warm_start(self):
-        gov, _ = make_gov(governor_history=dict(self.HISTORY))
+        # 6 GB free keeps the calibrate opening well away from the remembered 12, so
+        # "did not warm-start" cannot be confused with "opened where history said".
+        gov, _ = make_gov(governor_history=dict(self.HISTORY), avail_mb=6_000.0)
         gov.begin_run(total_cells=400, scale=0.05, cell_size=4, ceiling=24)
-        assert gov.state == "CALIBRATE" and gov.workers == 4
+        assert gov.state == "CALIBRATE", "a foreign bucket must be measured, not assumed"
+        assert gov.workers != self.HISTORY["1:1/4"]["workers"]
+        assert gov._steady_tp is None, "and it must not inherit the other bucket's rate"
 
 
 class TestCalibrateAndConverge:
@@ -445,11 +450,14 @@ class TestCalibrateAndConverge:
         assert max(seen) == 6
 
     def test_ram_headroom_stops_the_climb(self):
-        # 2.5 GB free, 1.5 GB/cell, 2 GB headroom: two more workers need 5 GB.
-        gov, _ = make_gov(avail_mb=2_500.0)
+        # 5 GB free, 1.5 GB/cell measured, 2 GB headroom. The opening is RAM-bounded too
+        # now, so price every level the climb could reach and assert on the binding.
+        gov, _ = make_gov(avail_mb=5_000.0)
         gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=24)
-        drive(gov, {4: 20.0}, cells=6)
-        assert gov.state == "STEADY" and gov._binding == "ram" and gov.target == 4
+        opened = gov.workers
+        drive(gov, {w: 20.0 for w in range(1, 26)}, cells=30)
+        assert gov.state == "STEADY" and gov._binding == "ram"
+        assert gov.target <= opened + CLIMB_STEP, "RAM must cap the climb almost at once"
 
     def test_the_contention_signature_stops_the_climb(self):
         # Throughput still rising, but each cell's measured occupancy collapsed 5 -> 1
@@ -501,7 +509,9 @@ class TestSteadyAndRecal:
         settled = gov.workers
         gov.recalibrate()
         assert gov.state == "RECAL"
-        drive(gov, BERLIN_WALL_S, cells=4)
+        # Enough completions for the post-RECAL window to span MIN_RATE_SPAN_S; three
+        # samples inside one burst are an interval, not a rate.
+        drive(gov, BERLIN_WALL_S, cells=12)
         assert gov.state == "CONVERGE" and gov.target == settled + 2
 
 
@@ -894,13 +904,17 @@ class TestFinding10SampleAttribution:
     def test_finding_10_a_completion_from_the_previous_level_is_ignored(self):
         gov, _ = make_gov()
         gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=24)
-        for _ in range(3):
+        # 4 workers x 20 s cells => a completion every 5 s, so six of them span 25 s and the
+        # window is long enough to be a rate rather than a burst interval.
+        for _ in range(6):
+            gov._clock.advance(5.0)
             gov.on_cell_complete(wall_s=20.0, cpu_s=40.0, peak_rss_mb=1500.0,
                                  gpu_s=0.0, ok=True, launched_workers=4)
         assert gov.target == 6 and gov.state == "CONVERGE"
         gov.threads_for_next_cell(workers=6)          # the pool applied it
         before = gov.snapshot().samples
         for _ in range(3):                            # cells that were already in flight
+            gov._clock.advance(5.0)
             assert gov.on_cell_complete(wall_s=20.0, cpu_s=40.0, peak_rss_mb=1500.0,
                                         gpu_s=0.0, ok=True, launched_workers=4) is None
         assert gov.snapshot().samples == before, "4-worker walls are not evidence about 6"
@@ -1185,3 +1199,58 @@ class TestIdleMachineKeepsClimbing:
     def test_the_idle_allowance_is_strictly_more_patient(self):
         from src.governor import STOP_STRIKES, STOP_STRIKES_IDLE
         assert STOP_STRIKES_IDLE > STOP_STRIKES
+
+
+class TestRateNeedsARealWindow:
+    """Completions arrive in bursts - workers start together, so they finish together.
+
+    A real cold run on this branch produced steps of "+40.4", "-58.0" and "-176.9"
+    cells/min and then "throughput drifted 78%, recalibrating" on a loop, thrashing
+    4 -> 6 -> 12 -> 8 -> 6 and settling at 6 of 24 cores. Throughput cannot swing by 176
+    cells/min; the estimator was reading the gap between two neighbours inside one batch.
+    """
+
+    def test_a_burst_is_not_a_rate(self):
+        gov, _ = make_gov()
+        gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=24)
+        for _ in range(3):                      # three completions 0.7 s apart
+            gov._clock.advance(0.7)
+            gov.on_cell_complete(wall_s=20.0, cpu_s=30.0, peak_rss_mb=1000.0,
+                                 gpu_s=0.0, ok=True, launched_workers=gov.workers)
+        # 2 intervals over 1.4 s would read as 85.7 cells/min. It must refuse instead.
+        assert gov._rate_tp() is None, "a 1.4 s window is an interval, not a rate"
+
+    def test_a_long_enough_window_is_believed(self):
+        from src.governor import MIN_RATE_SPAN_S
+        gov, _ = make_gov()
+        gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=24)
+        # Two completions, spaced past the floor: the window is long enough to be a rate,
+        # but STEP_SAMPLES has not been reached, so no decision fires and clears it.
+        step = MIN_RATE_SPAN_S + 1.0
+        for _ in range(2):
+            gov._clock.advance(step)
+            gov.on_cell_complete(wall_s=20.0, cpu_s=30.0, peak_rss_mb=1000.0,
+                                 gpu_s=0.0, ok=True, launched_workers=gov.workers)
+        rate = gov._rate_tp()
+        assert rate is not None, "a window past the floor is a rate"
+        assert rate == pytest.approx(60.0 / step, rel=1e-6)   # 1 interval over `step` seconds
+
+    def test_the_climb_does_not_thrash_on_bursty_arrivals(self):
+        """The end-to-end shape of the bug: a rising curve delivered in bursts.
+
+        Every level's completions land in a tight clump, which is exactly what the real
+        pool does. The climb must still climb instead of oscillating.
+        """
+        gov, _ = make_gov()
+        gov._budget_spent = lambda: False
+        gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=20)
+        tp = {w: 20.0 + w * 0.6 for w in range(2, 26, 2)}      # genuinely rising
+        seen = {gov.workers}
+        for _ in range(300):
+            gov.threads_for_next_cell(workers=gov.target)
+            w = gov.workers
+            gov._clock.advance(60.0 / tp[w])                   # steady delivery at this level
+            gov.on_cell_complete(wall_s=w * 60.0 / tp[w], cpu_s=30.0, peak_rss_mb=1000.0,
+                                 gpu_s=0.0, ok=True, launched_workers=w)
+            seen.add(gov.workers)
+        assert max(seen) >= 12, f"climb stalled at {max(seen)}w on a rising curve"

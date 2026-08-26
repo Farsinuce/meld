@@ -81,6 +81,16 @@ STEP_SAMPLES = 3
 #: Rolling window (cells) behind cells_per_min and the STEADY drift check.
 WINDOW_CELLS = 6
 
+#: A delivered-rate reading is only believed once its window covers this much wall clock.
+#:
+#: Completions arrive in BURSTS: workers start together, so they finish together. Three
+#: completions 0.7 s apart read as 171 cells/min, and a real cold run produced exactly that -
+#: steps of "+40.4", "-58.0" and "-176.9" cells/min, then "throughput drifted 78%,
+#: recalibrating" on a loop, with the pool thrashing 4 -> 6 -> 12 -> 8 -> 6 and settling at 6
+#: of 24 cores. The estimator was measuring burst arrival, not throughput. A span floor is
+#: what makes the reading a rate rather than an interval between two neighbours in a batch.
+MIN_RATE_SPAN_S = 10.0
+
 #: Under this many cells the ramp costs more than it can repay - a 20-cell grid is
 #: over before CALIBRATE finishes. Use the static/persisted worker count.
 SMALL_GRID_CELLS = 32
@@ -150,6 +160,20 @@ CFG_STAMP_NONE = object()
 
 #: Where CALIBRATE starts. Low on purpose: climbing is cheap, unwinding is not.
 CALIBRATE_START = 4
+
+#: Fraction of the machine's cores to OPEN the climb at when nothing is remembered.
+#:
+#: Opening at a flat 4 is timid on a 24-core box: the climb then needs eight +2 steps, each
+#: waiting MIN_RATE_SPAN_S for an honest reading, and on an 81-cell run that spends more of
+#: the run ramping than working. Measured after the span floor landed: the pool converged
+#: correctly to 18-20 workers but the run still took 169-173 s against 138 s warm, and the
+#: whole difference is the climb.
+#:
+#: Half the cores is a deliberately conservative guess - it is a STARTING point that the
+#: climb refines in both directions, and it is still passed through the RAM envelope and the
+#: occupancy budget before a single cell is spawned, so a small or memory-poor machine opens
+#: lower. Scaling by cores rather than a constant is what makes it portable.
+CALIBRATE_START_CORE_FRAC = 0.5
 
 MODES = ("off", "advise", "auto")
 #: The states in which the hill climb is still moving. Reporting only: admission no
@@ -471,7 +495,7 @@ class Governor:
             return
 
         self.state = "CALIBRATE"
-        self.workers = self.target = _clamp(min(CALIBRATE_START, self.ceiling), 1, self.ceiling)
+        self.workers = self.target = self._calibrate_opening(cfg)
         self._note = f"calibrating from {self.workers}w"
         self._log(f"  [Governor] calibrating from {self.workers} workers (ceiling {self.ceiling})")
 
@@ -716,7 +740,9 @@ class Governor:
         if len(stamps) < 2:
             return None
         span = stamps[-1] - stamps[0]
-        if span <= 0:
+        if span < MIN_RATE_SPAN_S:
+            # Not a rate yet, just the gap between neighbours in a burst. Returning None
+            # means "keep measuring" - the caller holds the level and the window grows.
             return None
         # n-1 intervals between n completions.
         return (len(stamps) - 1) * 60.0 / span
@@ -837,9 +863,30 @@ class Governor:
         return w
 
     def _rss_estimate_mb(self) -> float:
-        """Static per-cell RAM estimate, mirroring server.py's scale threshold: a 1:1
-        cell peaks around 4.15 GB with eviction on, a small-scale cell around 1.2 GB."""
-        return 4150.0 if self._scale >= 0.25 else 1200.0
+        """Static per-cell RAM estimate, used only until a real p95 exists.
+
+        The pessimistic figures mirror server.py: a 1:1 cell peaks around 4.15 GB, a
+        small-scale one around 1.2 GB. Those are NON-STREAMING numbers, and streaming
+        exists precisely to cap how many regions stay resident - measured on this branch,
+        a 1:1 cs4 cell with stream_to_disk on peaks at 1008-1085 MB, about a quarter of
+        the non-streaming figure.
+
+        Using the non-streaming number while streaming is on made the RAM envelope four
+        times too pessimistic, which mattered because it also bounds where the climb
+        OPENS: 20 GB free admitted only 4 workers on a 24-core machine.
+
+        A real measurement replaces this after the first few cells; this only has to be
+        close enough not to open somewhere absurd.
+        """
+        big = self._scale >= 0.25
+        try:
+            streaming = bool(self._cfg().get("stream_to_disk"))
+        except Exception:  # noqa: BLE001 - an estimate must never be the thing that throws
+            streaming = False
+        if streaming:
+            return 1300.0 if big else 700.0
+        return 4150.0 if big else 1200.0
+
 
     def _ram_fits(self, target: int) -> bool:
         """Room for the workers this step ADDS, on top of what is already resident."""
@@ -870,11 +917,28 @@ class Governor:
     def _reset_strikes(self) -> None:
         self._strikes = 0
 
+    def _calibrate_opening(self, cfg: dict) -> int:
+        """Where to open the climb with no history to warm-start from.
+
+        Scaled off the machine rather than a constant, then bounded by the same RAM
+        envelope the rest of the governor uses, so a 4-core laptop and a 24-core desktop
+        both open somewhere sensible and neither opens into swap.
+        """
+        by_cores = int(self.cores * CALIBRATE_START_CORE_FRAC)
+        want = max(CALIBRATE_START, by_cores)
+        want = _clamp(want, 1, self.ceiling)
+        fits = self._ram_envelope(want, cfg)
+        if fits < want:
+            self._log(f"  [Governor] opening at {fits}w rather than {want}w: RAM envelope")
+        return max(1, min(fits, self.ceiling))
+
     def _on_calibrate(self) -> int | None:
         """Measure the opening level, then hand over to the hill climb."""
         if len(self._step_walls) < STEP_SAMPLES:
             return None
         tp = self._step_tp()
+        if tp is None:
+            return None          # window too short to be a rate; keep gathering
         self._remember_step(tp)
         if self.workers >= self.ceiling:
             self._settle("ceiling", f"at ceiling {self.ceiling}", tp)
@@ -899,7 +963,11 @@ class Governor:
             return None
         tp = self._step_tp()
         prev = self._prev_tp
-        if tp is None or prev is None:
+        if tp is None:
+            # The window is not yet long enough to be a rate. Hold the level and keep
+            # gathering rather than deciding on a burst interval.
+            return None
+        if prev is None:
             self._remember_step(tp)
             return None
         gain = tp - prev
