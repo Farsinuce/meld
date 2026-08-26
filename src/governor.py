@@ -112,6 +112,13 @@ GAIN_MIN_ABS = 0.15
 #: the same A/B stepped 4 -> 6 -> 8 and unwound to 6 on a single bad measurement.
 STOP_STRIKES = 2
 
+#: ...and more of them while the machine is still visibly idle. Measured: with the region
+#: write filter on, three cs4 runs converged at 8 workers with CPU at 53-60% and 16 cores
+#: doing nothing, costing 8% against the same build with the filter off. Cheaper cells make
+#: each +2 step a smaller FRACTION of throughput, so the relative threshold is reached while
+#: real headroom remains. A stop is only trustworthy once the machine is actually busy.
+STOP_STRIKES_IDLE = 4
+
 #: While the CPU budget is this far from spent, a step that merely fails to pay is a
 #: strike, never an immediate stop. At 71% CPU and 51% RAM nothing should have settled
 #: at 6 of 24 cores - there was budget left and the stop rules did not know it.
@@ -921,7 +928,11 @@ class Governor:
         if gain < threshold:
             self._strikes += 1
             spent = self._budget_spent()
-            last = self._strikes >= STOP_STRIKES or (gain < 0 and spent)
+            # The budget guard has to be able to PREVENT a stop, not merely hasten one:
+            # with cores still idle, a weak step is far likelier to be a noisy sample than
+            # the knee, so it takes more of them in a row to settle the pool.
+            need = STOP_STRIKES if spent else STOP_STRIKES_IDLE
+            last = self._strikes >= need or (gain < 0 and spent)
             if last:
                 if gain < 0:
                     # Genuinely worse: unwind exactly one step. Whatever the last move
@@ -938,12 +949,12 @@ class Governor:
                 self._settle(
                     "throughput",
                     f"+{gain:.2f} < {threshold:.2f} cells/min for {self._strikes} "
-                    f"steps - knee at {self.workers}w",
+                    f"steps (cpu spent={spent}) - knee at {self.workers}w",
                     tp,
                 )
                 return None
             self._binding = "throughput"
-            self._note = (f"strike {self._strikes}/{STOP_STRIKES} "
+            self._note = (f"strike {self._strikes}/{need} "
                           f"({gain:+.2f} cells/min, cpu spent={spent})")
             if gain < 0:
                 # Worse, but only once. Re-measure THIS level rather than climbing

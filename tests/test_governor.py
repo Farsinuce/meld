@@ -1146,3 +1146,42 @@ class TestFinding16MinThreadsFallback:
         del cfg["min_threads_per_worker"]
         gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=24)
         assert gov.threads_for_next_cell(workers=8) == (4, 2)
+
+
+class TestIdleMachineKeepsClimbing:
+    """Measured on the phase-2 branch: with the region-write filter on, three cs4 runs all
+    converged at 8 workers with CPU at 53-60% - sixteen cores doing nothing - and lost 8%
+    against the same build with the filter off. Cheaper cells make each +2 step a smaller
+    FRACTION of throughput, so the relative threshold is reached while real headroom
+    remains. A stop is only trustworthy once the machine is actually busy.
+    """
+
+    @staticmethod
+    def _walls(tp: dict[int, float]) -> dict[int, float]:
+        return {w: w * 60.0 / t for w, t in tp.items()}
+
+    # Gains of ~2% a step: under the relative threshold, but the curve is still rising.
+    RISING = {4: 21.0, 6: 21.4, 8: 21.9, 10: 22.3, 12: 22.8, 14: 23.2, 16: 23.7,
+              18: 24.1, 20: 24.6, 22: 25.0, 24: 25.5}
+
+    def test_an_idle_machine_climbs_past_the_first_weak_steps(self):
+        gov, _ = make_gov()
+        gov._budget_spent = lambda: False          # cores to spare
+        gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=20)
+        seen = drive(gov, self._walls(self.RISING), cells=200)
+        assert max(seen) > 8, (
+            f"settled at {max(seen)}w with the machine idle - this is the measured 8-worker "
+            f"regression"
+        )
+
+    def test_a_busy_machine_still_settles_promptly(self):
+        gov, _ = make_gov()
+        gov._budget_spent = lambda: True           # genuinely saturated
+        gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=20)
+        seen = drive(gov, self._walls(self.RISING), cells=200)
+        assert gov.state == "STEADY"
+        assert max(seen) <= 20
+
+    def test_the_idle_allowance_is_strictly_more_patient(self):
+        from src.governor import STOP_STRIKES, STOP_STRIKES_IDLE
+        assert STOP_STRIKES_IDLE > STOP_STRIKES
