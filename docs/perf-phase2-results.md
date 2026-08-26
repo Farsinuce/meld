@@ -5,6 +5,35 @@ Branch `perf/speed-to-worldgen-phase2`, both repos. Same Bucharest-centre bbox a
 `bench/ab_bucharest.py`. The baseline is released Meld 1.9.7 + arnis 3.1.7 hand-tuned to 16
 workers - a real opponent, not the stock default of 4.
 
+## The full ladder
+
+Every row is the same 81-cell Bucharest cs4 render, same warm cache, GPU off. "Stock" is
+what a fresh install actually does - the shipped default of 4 workers - and it is the honest
+denominator for "how much faster did this get", because the hand-tuned 16-worker baseline is
+already a third of the way up the ladder.
+
+| configuration | wall | cells/min | vs stock | vs hand-tuned |
+|---|---|---|---|---|
+| stock 1.9.7, 4 workers (shipped default) | 230.3 s | 21.10 | 1.00x | 0.76x |
+| 1.9.7 hand-tuned to 16 workers | 174.9 s | 27.79 | 1.32x | 1.00x |
+| phase 1 governor, cold | 171.0 s | 28.42 | 1.35x | 1.02x |
+| phase 1 governor, warm | 160.3 s | 30.32 | 1.44x | 1.09x |
+| phase 2, cold (median of 3) | 173.9 s | 27.95 | 1.32x | 1.01x |
+| phase 2, warm (median of 3) | 141.7 s | 34.30 | **1.63x** | **1.23x** |
+| phase 2, warm (best) | 137.6 s | 35.32 | **1.67x** | **1.27x** |
+
+Phase 2 over phase 1, warm: **1.13x** median, 1.16x best. The write filter isolated against
+its own branch with the filter off: 163.5 s -> 141.7 s, **1.15x**.
+
+## GPU: nothing, and nothing was expected
+
+No GPU work was implemented in either phase. `gpu_accel` was `off` in every benchmark run,
+neither `--gpu` nor `--caves` appears in any command line, and the phase markers report
+`gpu_ms=0` for every cell profiled. arnis has had a wgpu compute path since before this work
+(`src/caves/gpu.rs`) but it evaluates cave density only, and these renders have no caves.
+GPU offload was designed and scored during phase-2 research and did not clear the confidence
+gate; it remains unbuilt. Any speedup above is CPU-side work only.
+
 ## Headline
 
 | configuration | cs4 cold | cs4 warm (runs 2+) |
