@@ -422,7 +422,10 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
         from src.coords import canonical_region_bounds
         rect = canonical_region_bounds(cell_key)
         if rect:
-            cmd += ["--canonical-regions", ",".join(str(v) for v in rect)]
+            # --flag=VALUE, not --flag VALUE: a rectangle west or north of the origin starts
+            # with a minus, and clap reads a bare "-4,-1,0,3" as an unknown flag. That failed
+            # 36 of 81 cells on the first real run - exactly the cells with a negative rx.
+            cmd.append("--canonical-regions=" + ",".join(str(v) for v in rect))
 
     # Global elevation lock → consistent Y mapping across all cells (no cliffs).
     # The fork only consumes --elevation-min/max inside its `if args.terrain`

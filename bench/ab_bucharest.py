@@ -83,6 +83,10 @@ RUNS = [
 ARM = {
     "A": {"label": "baseline-1.9.7", "settings": {"max_workers": 16, "governor_mode": "off"}},
     "B": {"label": "perf-governor",  "settings": {"max_workers": 20, "governor_mode": "auto"}},
+    # Phase 2: the same governor, plus B1 - arnis skips writing the seam-halo region ring
+    # that the merge deletes anyway. Measured per-cell at -11.5% wall / -12.3% CPU.
+    "C": {"label": "perf-phase2",    "settings": {"max_workers": 20, "governor_mode": "auto",
+                                                  "canonical_regions": True}},
 }
 
 
@@ -500,6 +504,13 @@ def do_run(arm: str, run: dict, *, reuse: bool = False, tag: str = ""):
     wall = time.time() - t0
     assert_active_project(name, "after the run, before harvesting")
     rec = harvest(name, arm, run, wall, since=t0, expect_cells=queued)
+    # A run with failed cells is not a faster run, it is a broken one: the first phase-2
+    # attempt "finished" 52s early because 36 of 81 cells never rendered. Fail the row.
+    if rec.get("failed"):
+        rec["error"] = f"{rec['failed']} of {rec.get('cells_total')} cells FAILED"
+    elif rec.get("cells_merged") != rec.get("cells_total"):
+        rec["error"] = (f"only {rec.get('cells_merged')} of {rec.get('cells_total')} "
+                        f"cells merged")
     rec["warm_start"] = reuse
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / f"{arm}-{run['id']}{tag}.json").write_text(json.dumps(rec, indent=1), encoding="utf-8")
@@ -550,7 +561,7 @@ def mode_warm():
 def mode_run(arm: str):
     assert arm in ARM
     meld_dir = MELD_A if arm == "A" else MELD_B
-    want = "main" if arm == "A" else "perf/speed-to-worldgen"
+    want = "main" if arm == "A" else "perf/speed-to-worldgen-phase2"
     branch = subprocess.run(["git", "-C", str(meld_dir), "branch", "--show-current"],
                             capture_output=True, text=True).stdout.strip()
     if branch != want:
@@ -562,7 +573,7 @@ def mode_run(arm: str):
     try:
         for run in RUNS:
             do_run(arm, run)
-        if arm == "B":
+        if arm in ("B", "C"):
             # Runs 2+ are what a user actually experiences: the ramp is paid once.
             do_run(arm, RUNS[0], reuse=True, tag="-warm")
     finally:

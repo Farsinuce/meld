@@ -26,7 +26,13 @@ def _cmd(settings_extra: dict, **kw) -> list[str]:
 
 
 def _rect(cmd: list[str]) -> str | None:
-    return cmd[cmd.index("--canonical-regions") + 1] if "--canonical-regions" in cmd else None
+    """The rectangle as arnis will receive it, whichever spelling is used."""
+    for i, a in enumerate(cmd):
+        if a.startswith("--canonical-regions="):
+            return a.split("=", 1)[1]
+        if a == "--canonical-regions":
+            return cmd[i + 1]
+    return None
 
 
 def test_off_by_default() -> None:
@@ -63,3 +69,17 @@ def test_the_rectangle_matches_the_cell_size() -> None:
     for size in (1, 4, 8):
         rx0, rx1, rz0, rz1 = canonical_region_bounds(f"0,0,{size}")
         assert (rx1 - rx0 + 1) == size and (rz1 - rz0 + 1) == size
+
+
+def test_a_negative_rectangle_is_not_mistaken_for_a_flag() -> None:
+    """The bug that failed 36 of 81 cells on the first real phase-2 run.
+
+    A cell west or north of the origin owns a rectangle starting with a minus, and clap
+    reads a bare "-4,-1,0,3" as an unknown argument: `error: unexpected argument '-4'`.
+    The --flag=VALUE spelling is what makes it parse.
+    """
+    cmd = _cmd({"canonical_regions": True}, cell_key="-1,-1,4")
+    rect = _rect(cmd)
+    assert rect is not None and rect.startswith("-"), "this cell's rectangle is negative"
+    assert f"--canonical-regions={rect}" in cmd, "must use the = form, not a separate argv"
+    assert "--canonical-regions" not in cmd, "the bare flag would strand the value"
