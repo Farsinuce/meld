@@ -420,3 +420,65 @@ Any hash mismatch in G1-G6. `ram_peak` up on any arm. `cells_per_min` down on an
 | 9 | **The atomic-write fixes convert a benign race into a hard Windows failure.** CPython's `open()` shares read/write but not delete; `os.replace` over a `project.json` or `meld-world.json` that an unlocked `_read` (or the UI, or the export path) holds open raises WinError 5/32. Today that window yields a defaulted read; after a naive C3a it yields an exception inside `subworld_number`. | C2 lands **before** C3a so the hot read disappears first; C3a and C4 both wrap `os.replace` in a bounded 5 x 20 ms retry whose last attempt falls back to `write_text`. Both are HOLD at 80 rather than GO at 88-90 for exactly this reason. |
 | 10 | **The gates that would catch B1/B2/C6/C7 currently see nothing.** G6 globs `*.mca` on arms that write `.b_linear` and passes on an empty dict; G3 as originally written compared raw bytes that a changed flush layout legitimately alters; G8's evidence is `rmtree`'d before anyone can count it; G2 on a single-tile cell never exercises a duplicate element. | H3 repairs the instruments (glob, empty-dict failure, payload comparator) and blocks B1/B2/C6/C7. G8 moves to an unpruned isolation arm with per-subdirectory expectations. G2 gains the 4-tile cell plus a synthetic same-id-two-types fixture. None of these deliver a second, and all of them are prerequisites for believing the ones that do. |
 | 11 | **The plan got bigger, and the GO set got emptier.** 32 tasks / 89 agent-h / 75 test-h against the original 22 / 58 / 45, and with A1 on HOLD the auto-implementable set now delivers no measurable seconds at all. | That is the honest state, not a regression: the added hours are work that already existed unowned (settings, version gate, release, docs, two broken gates, the telemetry channel). The consequence is stated in the results table rather than hidden - **do not report a GO-only delta at 3 repeats**, and expect the wall win only when the HOLD set, and specifically B2, is approved. |
+---
+
+## Phase 3 candidate - open polygons at the cell seam (user proposal, 2026-08-26)
+
+**Not scheduled. Recorded here so the reasoning is not lost.**
+
+### The observation
+
+Generating a cell builds an artificial one-block wall along the cell boundary where a building or
+water body crosses it. The proposal: give Meld an open-polygon mode so arnis does not close the cut
+edge, do not write the region files that ring the cell, and merge neighbouring cells on the shared
+building - the same seed should make the two halves line up.
+
+### Mechanism, confirmed in code
+
+`src/clipping.rs:11` clips ways with Sutherland-Hodgman, and around line 60 it deliberately
+re-closes the result:
+
+> `// Re-close the polygon: SH output is implicitly closed, and dedup may have removed the explicit`
+> `// closing point. Re-adding it preserves the closure signal so downstream code (flood fill) can`
+> `// distinguish closed ...`
+
+So a building straddling the boundary becomes a closed polygon whose new edge lies exactly on the
+bbox line, and the building renderer draws walls along polygon edges. The wall is a clipping
+artifact, not a region-file artifact. Note the re-close is load-bearing for flood fill, so it cannot
+simply be deleted - the cut edges need to be MARKED as cut rather than dropped, so wall rendering
+skips them while fill still sees a closed ring.
+
+### Two separable ideas
+
+1. **Open polygons at the cut (QUALITY).** Mark bbox-clipped edges so the wall renderer skips them
+   while flood fill keeps its closed ring. Local to `clipping.rs` plus the building renderer. This is
+   the part worth doing, and it fixes a visible defect.
+2. **Sparse overflow patches instead of halo regions (PERFORMANCE).** Write only the spilled blocks
+   rather than whole halo region files.
+
+### Why idea 2 is not the speed win it looks like
+
+The saving is the same 200-500 core-s per run that tasks B1/B2 already target - both approaches avoid
+writing the same 20 discarded region files per cs4 cell. The patch design does not save more; it
+moves work into Meld's merge (today 0.27% of worker time) and adds a second merge path, so it costs
+materially more complexity and determinism risk for roughly the same seconds. Prefer the plain
+write-side filter for speed.
+
+Also note the halo itself must keep being GENERATED: `data_processing.rs:581-586` uses a 64-block
+tile halo so elements whose centroid falls inside a tile can render blocks past the strict boundary
+("halo writes only if the target position is still AIR"). Skipping generation, rather than skipping
+the write, deletes real overhang blocks at every seam.
+
+### Open question that decides the fix
+
+Do BOTH neighbouring cells currently render a straddling building - each clipping its own half, i.e.
+two cut walls facing each other inside the building - or does only one cell own it? That determines
+whether the fix is "skip cut edges when rendering walls" or "assign ownership and merge the overflow".
+Answer this before designing further.
+
+### Test, when it is built
+
+Same Bucharest bbox, WITH buildings enabled (the phase-1 and phase-2 A/B runs all used
+`--no-buildings`, so none of those numbers speak to this). Compare, in order:
+baseline 1.9.7 -> phase 1 -> phase 2 GO -> phase 2 + canonical regions -> open polygons.
+Quality gate is visual plus a block-diff along a cell seam; speed gate is the usual harness table.
