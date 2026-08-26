@@ -1254,3 +1254,52 @@ class TestRateNeedsARealWindow:
                                  gpu_s=0.0, ok=True, launched_workers=w)
             seen.add(gov.workers)
         assert max(seen) >= 12, f"climb stalled at {max(seen)}w on a rising curve"
+
+
+class TestPortableAcrossMachines:
+    """The governor must open somewhere sensible on hardware that is not this desktop.
+
+    Every opening is scaled off the machine's own cores and then bounded by its own free
+    RAM, so nothing here encodes 24 cores or 31 GB. These cases are the ones that would
+    embarrass us: a memory-poor box that must not open into swap, a small laptop, and a
+    machine with more cores than RAM to feed them.
+    """
+
+    @staticmethod
+    def _open(cores: int, avail_mb: float, *, streaming: bool = True,
+              ceiling: int | None = None, scale: float = 1.0) -> int:
+        gov, _ = make_gov(cores=cores, avail_mb=avail_mb, stream_to_disk=streaming)
+        gov.begin_run(total_cells=400, scale=scale, cell_size=4,
+                      ceiling=ceiling if ceiling is not None else min(64, cores))
+        return gov.workers
+
+    def test_it_never_opens_above_the_ceiling(self):
+        for cores in (2, 4, 8, 16, 24, 32, 64):
+            for ceiling in (1, 2, 4, 8, 24):
+                w = self._open(cores, 64_000.0, ceiling=ceiling)
+                assert 1 <= w <= ceiling, f"{cores} cores, ceiling {ceiling} opened {w}"
+
+    def test_a_memory_poor_machine_opens_low(self):
+        # 24 cores are useless if there is no RAM to run cells in. RAM must win.
+        assert self._open(24, 3_000.0) <= 2
+        assert self._open(24, 6_000.0) < self._open(24, 20_000.0)
+
+    def test_a_small_machine_opens_at_least_one(self):
+        for cores, ram in ((1, 2_000.0), (2, 3_000.0), (4, 4_000.0)):
+            assert self._open(cores, ram) >= 1, "a run must always be able to start"
+
+    def test_more_cores_opens_wider_when_ram_allows(self):
+        wide = [self._open(c, 128_000.0) for c in (4, 8, 16, 24, 32)]
+        assert wide == sorted(wide), f"opening should not shrink as cores grow: {wide}"
+        assert wide[-1] > wide[0]
+
+    def test_streaming_admits_more_than_non_streaming(self):
+        # stream_to_disk caps resident regions, so the same RAM holds more cells.
+        assert self._open(24, 20_000.0, streaming=True) > self._open(24, 20_000.0, streaming=False)
+
+    def test_a_missing_ram_probe_does_not_stop_the_run(self):
+        # psutil is optional everywhere else in this codebase; absent probe must degrade.
+        gov, _ = make_gov(cores=24)
+        gov._available_mb_probe = lambda: None
+        gov.begin_run(total_cells=400, scale=1.0, cell_size=4, ceiling=24)
+        assert gov.workers >= 1
