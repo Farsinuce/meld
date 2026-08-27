@@ -1,4 +1,4 @@
-# Meld 1.10 "Worldgen, faster" - draft release notes
+# Meld 1.9.8 "Worldgen, faster" - draft release notes
 
 *(pairs with arnis 3.1.8; arnis tags first, Meld bundles it)*
 
