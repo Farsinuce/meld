@@ -11,6 +11,8 @@ answers two questions in one pass:
 Question 2 is the one that matters. A scheduler that is 30% faster and moves one block is not a
 faster scheduler, it is a bug. The gate is therefore not advisory: a strong mismatch exits `3`.
 
+**Phase-5 perf claims** (branch `perf/speed-to-worldgen-phase5`) are booked through a second gate on top of this one: the contention-relief accept protocol in [`accept_protocol.md`](accept_protocol.md) — N=16 gain >= N=1 gain, delta > the measured ~2.3% spread, flat gains ship as free CPU only.
+
 ---
 
 ## Quick start

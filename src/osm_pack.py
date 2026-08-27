@@ -1069,6 +1069,8 @@ def bake_tiles_parallel(pbf_paths, tiles, *, on_progress=None, should_stop=None,
     baked = empty = fail = 0
     for xy in todo:
         final = cache_dir / osm_grid.tile_filename(xy[0], xy[1], z)
+        # A7: any publish of a fresh tile JSON invalidates its paired .osmbin sidecar.
+        osm_grid.reap_sidecar(final)
         srcs = sources.get(xy, [])
         try:
             if len(srcs) == 1:

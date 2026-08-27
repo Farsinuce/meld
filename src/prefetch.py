@@ -222,6 +222,11 @@ def _download_one(exe: str, bbox: dict, out_json: Path, overpass_url: list[str],
             if ok_file and _looks_complete(tmp):
                 try:
                     os.replace(tmp, out_json)      # atomic publish into the shared cache
+                    # A7: fresh JSON invalidates the paired .osmbin sidecar. arnis would
+                    # reject it anyway (content hash), but a stale sidecar left behind is
+                    # a full re-bake on the next cell - reap it with the republish.
+                    from src.osm_grid import reap_sidecar
+                    reap_sidecar(Path(out_json))
                     return True, "ok"
                 except Exception as ex:  # noqa: BLE001
                     tmp.unlink(missing_ok=True)
@@ -520,6 +525,15 @@ def run_prefetch(cells, origin, settings, exe, cache_dir, log, on_chunk,
     olat, olon = origin.get("lat"), origin.get("lon")
     if olat is None or olon is None or _stop_requested(should_stop):
         return {}
+    # A7: the prefetch walk is the natural cache sweep - reap orphaned sidecars (and
+    # crash-orphaned .osmbin.tmp files) once per run, before any tile work begins.
+    try:
+        from src.osm_grid import sweep_orphan_sidecars
+        swept = sweep_orphan_sidecars(Path(cache_dir))
+        if swept:
+            log(f"  [osm] swept {swept} orphaned sidecar file(s)")
+    except Exception:  # noqa: BLE001 - a sweep failure must never block a run
+        pass
     scale = float(settings.get("scale", 1.0) or 1.0)
     seam = int(settings.get("seam_buffer_chunks", 8) or 0)
     margin_m = float(settings.get("prefetch_margin_m", 256) or 0)

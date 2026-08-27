@@ -82,6 +82,99 @@ def tile_filename(x: int, y: int, z: int = OSM_GRID_Z) -> str:
     return f"osm_{OSM_GRID_VERSION}_z{z}_{x}_{y}.json"
 
 
+# ---------------------------------------------------------------------------
+# SIDECAR LIFECYCLE (perf phase 5, task A7)
+#
+# Arnis (WS-A) bakes a bincode sidecar next to every grid tile so repeat renders
+# skip the serde_json decode. The pairing contract is purely positional: the
+# sidecar for `<tile>.json` is `<tile>.osmbin` in the same directory (same stem,
+# suffix swapped). The Rust reader is fail-open — it re-hashes the .json on every
+# read and falls back to JSON on any mismatch — so a stale sidecar is never
+# MIS-read; these helpers exist so it is also never LEAKED. Rules:
+#
+#   * whenever a tile .json is deleted (TTL prune, cache cleanup, re-download
+#     that removes first), delete the paired .osmbin in the same operation
+#     (`remove_tile`, or `reap_sidecar` if the caller deletes the .json itself);
+#   * whenever a tile .json is rewritten in place with different bytes (TTL
+#     re-download, .pbf bake, merge_tiles below), reap the paired .osmbin — the
+#     content hash no longer matches, so the sidecar is dead weight until the
+#     next bake anyway;
+#   * any cache walk may call `sweep_orphan_sidecars`: an .osmbin with no .json
+#     sibling has lost its source of truth and is deleted. Without the sweep,
+#     orphaned sidecars accumulate forever and roughly double the OSM cache
+#     footprint (the sidecar is the same order of size as the JSON).
+#
+# Every delete here is best-effort (missing_ok + OSError swallowed): on Windows
+# an .osmbin held open by a concurrently rendering Arnis refuses deletion with a
+# sharing violation, and the correct response is to leave it for the next sweep,
+# never to fail the prune/bake that triggered the reap.
+# ---------------------------------------------------------------------------
+
+SIDECAR_SUFFIX = ".osmbin"
+
+
+def sidecar_path(json_path: Path) -> Path:
+    """The bincode sidecar paired with grid-tile `json_path` (suffix swap, same dir)."""
+    return Path(json_path).with_suffix(SIDECAR_SUFFIX)
+
+
+def reap_sidecar(json_path: Path) -> bool:
+    """Delete the .osmbin paired with `json_path`, if any. Call this in the same
+    operation as any delete/rewrite of the tile .json. Best-effort: returns True
+    only if a sidecar existed and was removed; a locked file is left for the next
+    orphan sweep rather than raising."""
+    sc = sidecar_path(json_path)
+    try:
+        sc.unlink()                         # racing reapers: first wins, second no-ops
+        return True
+    except FileNotFoundError:
+        return False                        # nothing to reap
+    except OSError:
+        return False                        # held open (Windows share lock) — next sweep
+
+
+def remove_tile(json_path: Path) -> None:
+    """Delete a grid tile .json AND its paired .osmbin as one operation. The one
+    entry point TTL prune / cache cleanup should use instead of unlinking the
+    .json directly (which would orphan the sidecar)."""
+    reap_sidecar(json_path)                 # sidecar first: never leave .osmbin without .json
+    try:
+        Path(json_path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def sweep_orphan_sidecars(cache_dir: Path) -> int:
+    """Delete every .osmbin in `cache_dir` whose .json sibling is gone; returns the
+    number removed. O(#sidecars) stat calls — cheap enough to run on any cache walk
+    (prefetch startup, bake coverage scan). Valid pairs and bare .json tiles are
+    never touched. Concurrency-safe by fail-open design: the worst race (a bake
+    republishing the .json while we look) leaves a deletable sidecar for the next
+    sweep or a reaped one the bake simply re-bakes."""
+    n = 0
+    try:
+        sidecars = list(Path(cache_dir).glob(f"*{SIDECAR_SUFFIX}"))
+        # Crash orphans: a bake that died between writing its tmp and the atomic rename
+        # leaves <tile>.osmbin.tmp<pid>. Nothing else ever deletes those; reap on sight.
+        for tmp in Path(cache_dir).glob(f"*{SIDECAR_SUFFIX}.tmp*"):
+            try:
+                tmp.unlink()
+                n += 1
+            except OSError:
+                pass
+    except OSError:
+        return 0
+    for sc in sidecars:
+        if sc.with_suffix(".json").exists():
+            continue                        # valid pair — leave it alone
+        try:
+            sc.unlink(missing_ok=True)
+            n += 1
+        except OSError:
+            pass                            # locked — count nothing, next sweep gets it
+    return n
+
+
 def merge_tiles(tile_paths: list[Path], out_path: Path) -> int:
     """Stitch several grid-tile Overpass JSONs into ONE file. Used by the offline .pbf bake
     to combine a border tile's copies baked from neighbouring countries.
@@ -112,6 +205,7 @@ def merge_tiles(tile_paths: list[Path], out_path: Path) -> int:
                     n += 1
             f.write("]}")
         os.replace(tmp, out_path)         # atomic publish; peak mem ~ the seen-set + one tile
+        reap_sidecar(out_path)            # rewrite stales any paired .osmbin — reap it (A7)
     except Exception:
         try:
             tmp.unlink(missing_ok=True)
