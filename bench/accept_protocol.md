@@ -104,3 +104,16 @@ Caveat kept honest: in large single-process bare-arnis renders tile_merge grows 
 the run (out-bare / out-barefull, 272 / 1089 regions). That is not the phase-5 unit — Meld
 drives one 16-region cell per process — so the per-cell 2.1% figure is the one the priority
 call uses. If the process model ever changes, re-price before trusting this verdict.
+
+## Reference baseline (re-baselined 2026-08-27, close-out mandate)
+
+Current committed-HEAD reference (arnis ee839534): **N=1 23.394 +/- 0.268 cpu-s, N=16 32.050
++/- 0.180 cpu-s** (5 repeats each). The older 24.5 / 32.6-33.7 row predates the sidecar +
+fast-path commit 8a9dd6fe and must not be used as a before-arm again. Likewise the B0 pricing
+table's ~200 ms tile_merge: it is ~100-109 ms at HEAD.
+
+Ledger after B1/C1: both booked at ZERO (B1 flat and shrinking with N; C1 +2.30% at N=16 -
+real, all five paired rounds positive, but at the 2.3% floor and under its own save_ms bar).
+Fleet 133.7 s vs 135.8 s = under the run spread. The 42-43 cells/min steady-state target now
+rests on WS-A (banked) and the VTune N=1-vs-N=16 contention profile, which is the live lead
+for the seat of the 37-46% inflation now that grid indirection is eliminated as a candidate.
