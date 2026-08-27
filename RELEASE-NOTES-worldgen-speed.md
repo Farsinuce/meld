@@ -84,13 +84,16 @@ deletes only the files.
 
 ## Also fixed in this release
 
-**Tall worlds + caves: the giant void above y~256 is gone.** The cave engine ported
-vanilla's world-top fade with vanilla's hardcoded coordinates, and above y=256 that
-arithmetic makes every underground block air regardless of the noise - one huge cavern
-under any mountain that reached past it. The fade now follows the world's own ceiling.
-Standard-height worlds are unaffected (bit-for-bit - the formula lands on the exact
-vanilla numbers there); tall worlds get real rock and real caves all the way up.
-Affected worlds heal per cell on regenerate, like every generator fix.
+**Caves now work at any world height.** The cave engine had vanilla's height limits
+baked in as fixed numbers, and worlds bigger than vanilla broke at both of them:
+above y~256 every underground block became air - one giant void under any mountain
+that reached past it (a field report caught this one) - and below y=-64 no caves
+generated at all, just solid rock. Both limits now follow the world's own floor and
+ceiling, whatever they are: a deep world gets caves to its true bottom, a tall world
+gets real rock and real caves all the way up its mountains, and the same holds for
+any ceiling a future Minecraft version might introduce. Standard-height worlds are
+unaffected, bit for bit - at vanilla bounds the new formulas land on exactly the old
+vanilla numbers. Affected worlds heal per cell on regenerate, like every generator fix.
 
 ## Versions and compatibility
 
