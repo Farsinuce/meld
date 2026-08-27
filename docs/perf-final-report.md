@@ -73,15 +73,19 @@ its own baseline; and the honest target shrank to 9.8% of a cell once the elevat
 was decomposed. Revisit if per-cell cost ever drops far enough that dense float grids
 dominate, or if one process ever owns many cells.
 
-## What remains, if anyone returns
+## Every open item, closed with evidence (verdict runs, 2026-08-27)
 
-| item | status |
+| item | verdict |
 |---|---|
-| D3-D7 halo write-drop | designed, gated behind a correctness corpus (the only-if-AIR merge rule); bracket 0.8-1.5 cpu-s at ~30% |
-| VTune N=1-vs-N=16 profile of element_placement | the live lead for the inflation seat; profiler work, unknown payoff |
-| A4 `--osm-preparse` early-exit mode | HOLD; the sidecar works without it |
-| Governor-lane utilization (ramp/drain shape) | out of scope here; the adaptive-scheduler plan on the root repo covers it |
-| Release | phases 1-5 are release-shaped: arnis is at 3.1.8 with additive flags, Meld defaults preserve 1.9.7 behaviour until `governor_mode`/`canonical_regions` are enabled. The runbook is the usual: arnis tag first, then Meld |
+| D3-D7 halo write-drop | **KILLED.** Built behind a flag and put through the 5-cell canonical-hash corpus: 5/5 cells FAIL, 49/80 kept regions differ, including a region 512 blocks inside the keep rectangle. Kept-region passes (seal/sweep/carves) genuinely read halo state - the halo is load-bearing, not waste. Deterministic both arms, guard geometry audited, so this is physics, not a bug. Code stripped; D1a (merge-time drop) is the permanent retreat and is already shipped. Do not retry a uniform write-drop; the only viable shape is D6's 16-block apron, and its ceiling is a fraction of an already-small bracket |
+| VTune profile of element_placement | **Infeasible on this box** - VTune is not installed. The lead itself stays sound (the 37-46% inflation lives in placement's structures, by elimination), but it needs the user to install a profiler. Closed as out of scope |
+| A4 `--osm-preparse` early-exit mode | **REMOVED.** Its only value was overlapping run-1 bakes with network wait; bake-on-miss already covers every case measured, and the mode carries the documented validate_args/gui.rs bug-class risk for zero measured upside |
+| B1 / B2 / C1 optimizations | **Booked zero** under the accept protocol (real but sub-floor); shipped as code quality with no-perf-claim commits |
+| Governor-lane utilization (ramp/drain shape) | Out of scope here; the adaptive-scheduler plan on the root repo covers it. The only remaining lane with measured headroom (80% -> ~94% utilization on the 81-cell wall) |
+| Release | Phases 1-5 are release-shaped: arnis 3.1.8 with additive flags, Meld defaults preserve 1.9.7 behaviour until `governor_mode`/`canonical_regions` are enabled. Runbook: arnis tag first, then Meld |
+
+Nothing on this branch is left as a maybe: every line above is shipped, killed with
+evidence, or explicitly handed off.
 
 ## Documents
 
