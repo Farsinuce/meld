@@ -616,6 +616,9 @@
           <label style="font-size:12px;margin-top:6px">Cell timeout (seconds)
             <span class="i" title="How long one cell may spend before it is given up on. The generator's own default is 600 s. Raise it for very dense cells that keep failing at the flood-fill step; blank keeps the default.">i</span>
             <input id="cellTimeout" type="number" min="60" max="7200" step="60" placeholder="600" style="width:110px"></label>
+          <label style="font-size:12px;margin-top:6px;display:flex;align-items:center;gap:6px">
+            <input id="osmSidecars" type="checkbox" style="width:auto"> OSM tile sidecars
+            <span class="i" title="Keeps a pre-parsed copy (.osmbin) next to each cached OSM tile, so repeat renders skip most of the JSON decoding - measured about half a second faster per cell. Costs roughly two thirds extra disk in the OSM cache; the files are cleaned up together with their tiles. Turn off on a tight disk; nothing else changes.">i</span></label>
         </div>
       </details>
 
@@ -2394,6 +2397,7 @@ async function refreshState() {
     $('staggerSec').value = ss; $('staggerSecVal').textContent = ss + 's';
   }
   if ($('staggerOn')) $('staggerOn').checked = st.cpu_stagger_enabled !== false;
+  if ($('osmSidecars')) $('osmSidecars').checked = st.osm_sidecars !== false;
   if ($('staggerAdaptive')) $('staggerAdaptive').checked = st.cpu_stagger_adaptive !== false;
   // Generation performance: mode + the two new budgets. A server that has never heard of the
   // governor sends none of these keys, _govSupported stays false, and applyGovMode() collapses
@@ -5448,6 +5452,8 @@ for (const id of ['workers', 'cpuPct', 'minThr']) {
 applyGovMode();
 if ($('staggerOn'))
   $('staggerOn').addEventListener('change', () => { api('/api/settings', { cpu_stagger_enabled: $('staggerOn').checked }); syncStaggerStep(); });
+if ($('osmSidecars'))
+  $('osmSidecars').addEventListener('change', () => { api('/api/settings', { osm_sidecars: $('osmSidecars').checked }); });
 if ($('staggerAdaptive'))
   $('staggerAdaptive').addEventListener('change', () => api('/api/settings', { cpu_stagger_adaptive: $('staggerAdaptive').checked }));
 syncStaggerStep();

@@ -242,6 +242,11 @@ def default_settings() -> dict:
         # entirely, so arnis writes exactly the same region files it writes today, and an older
         # bundled arnis.exe never sees an unknown clap argument.
         "canonical_regions": False,
+        # Pre-parsed OSM tile sidecars (.osmbin next to each cached tile .json). Cuts the
+        # repeat-render decode cost (measured 946 -> 429 ms/cell) at the price of roughly
+        # two thirds extra OSM cache size. On by default; turn off on tight disks. The
+        # lifecycle reaper keeps pairs consistent either way.
+        "osm_sidecars": True,
         # Ask the fork for its fast OSM tile parser (plan task A1: serde_json from_slice instead of
         # the from_reader IoRead path, plus a cheaper dedup key). False = the fork parses tiles
         # exactly as it does today. The switch exists so the replacement can be A/B'd against the

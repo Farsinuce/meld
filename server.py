@@ -2216,7 +2216,7 @@ _META_SKIP_SETTINGS = {
     # canonical_regions and parse_fast_json are kill switches for optimisations that must leave
     # the world byte-identical either way, and phase2_timers only decides whether a log line is
     # printed. Importing a world must never flip any of them on the importing machine.
-    "canonical_regions", "parse_fast_json", "phase2_timers",
+    "canonical_regions", "osm_sidecars", "parse_fast_json", "phase2_timers",
 }
 
 
@@ -2839,6 +2839,10 @@ def _runner(job: dict, state: dict) -> bool:
         # it forced on. An arnis without the variable ignores it and keeps the old rule.
         "ARNIS_FILL_BUDGET": "1",
     }
+    # OSM tile sidecars: on by default in arnis >= 3.1.8; the setting exists for tight
+    # disks (an .osmbin costs ~2/3 of its tile's size). Only the opt-out needs plumbing.
+    if not settings.get("osm_sidecars", True):
+        child_env["ARNIS_OSM_SIDECARS"] = "0"
     # Phase markers (arnis stdout protocol v1). Asked for whenever the governor is actually
     # running — no capability probe: the lines are machine output that arnis_cmd consumes
     # before on_line(), and a binary that predates the protocol just ignores an env var it
@@ -4222,7 +4226,7 @@ def api_settings():
     #                       the report fields are written either way)
     # Coerced to real bools rather than trusted, so a stray "false"/0/null from a client cannot
     # be stored as a truthy string and silently arm a kill switch that is supposed to be off.
-    for _p2 in ("canonical_regions", "parse_fast_json", "phase2_timers"):
+    for _p2 in ("canonical_regions", "osm_sidecars", "parse_fast_json", "phase2_timers"):
         if patch.get(_p2) is not None:
             _raw = patch[_p2]
             if isinstance(_raw, str):
