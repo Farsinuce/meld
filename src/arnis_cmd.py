@@ -469,6 +469,14 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     if rd in ("compact", "clean"):
         cmd += ["--road-detail", rd]
 
+    # Generator quality passes. Both default OFF in arnis, so omitting them
+    # reproduces 1.9.7 output exactly; both are deliberate output changes, so
+    # they are opt-in per project rather than machine-tuned like the governor.
+    if settings.get("river_bed_v1") and arnis_supports(arnis_exe, "--river-bed"):
+        cmd += ["--river-bed", "v1"]
+    if settings.get("road_grade") and arnis_supports(arnis_exe, "--road-grade"):
+        cmd += ["--road-grade", "on"]
+
     # Overpass endpoint override — only relevant when actually querying Overpass
     # (i.e. no pre-fetched --file for this cell).
     if not osm_file:

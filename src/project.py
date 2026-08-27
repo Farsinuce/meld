@@ -242,6 +242,14 @@ def default_settings() -> dict:
         # entirely, so arnis writes exactly the same region files it writes today, and an older
         # bundled arnis.exe never sees an unknown clap argument.
         "canonical_regions": False,
+        # Generator quality passes (arnis --river-bed / --road-grade). Unlike every other
+        # key here these deliberately CHANGE the generated world, so they stay off until
+        # asked for: a project regenerated with one of them on will not match cells it
+        # rendered before. Rivers get a smooth width-scaled U bed (lakes and oceans keep
+        # their own beds untouched); roads get a slope-limited longitudinal profile so a
+        # carriageway ramps instead of stepping on terrain contours.
+        "river_bed_v1": False,
+        "road_grade": False,
         # Pre-parsed OSM tile sidecars (.osmbin next to each cached tile .json). Cuts the
         # repeat-render decode cost (measured 946 -> 429 ms/cell) at the price of roughly
         # two thirds extra OSM cache size. On by default; turn off on tight disks. The
