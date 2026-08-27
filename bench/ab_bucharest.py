@@ -474,6 +474,11 @@ def harvest(name: str, arm: str, run: dict, wall_s: float, since: float = 0.0,
 
 
 def do_run(arm: str, run: dict, *, reuse: bool = False, tag: str = ""):
+    # Pin the arm's binary HERE, not only in mode_run: every custom driver that called
+    # do_run directly benchmarked whatever arnis.exe happened to be lying next to the
+    # server - a stale Aug-26 binary measured an entire "phase 5" arm that contained no
+    # phase-5 code. The pin is idempotent and costs a stat call.
+    pin_arnis(arm)
     name = project_name(arm, run["id"])
     print(f"\n-- {ARM[arm]['label']} / {run['id']} (cell {run['job_size_regions']}x"
           f"{run['job_size_regions']}) -------------")
