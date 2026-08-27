@@ -99,4 +99,6 @@ Affected worlds heal per cell on regenerate, like every generator fix.
   run is unchanged.
 - Meld: settings are per-project, new keys never travel in shared presets and never enter
   world metadata. Old projects open unchanged in Off mode.
-- Worlds generated before and after this release are identical, cell for cell.
+- Standard-height worlds generated before and after this release are identical, cell for
+  cell. The one intentional exception: tall worlds with caves differ above y~256, because
+  what the old code generated there was the void bug this release fixes.
