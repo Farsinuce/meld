@@ -4,6 +4,72 @@ All notable changes to Meld are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Meld follows
 [Semantic Versioning](https://semver.org).
 
+## [1.9.8] - 2026-08-27
+
+Bundles arnis fork 3.1.8. Generation is much faster and tunes itself, a long
+list of scheduling bugs is fixed, and two opt-in generator options reshape
+river beds and road surfaces. Default output is unchanged from 1.9.7, verified
+by hashing generated blocks on every build.
+
+### Added
+- **Meld picks its own worker count.** One generator process cannot fill a
+  modern CPU - measured, 10 of 24 cores - so Meld starts low, times every
+  finished cell, adds workers while that keeps improving throughput, backs off
+  when it stops, and remembers the answer per project and scale. It never
+  exceeds the worker ceiling, CPU percentage and free-memory floor you set.
+  Modes: Off (your numbers, used as typed), Advise (logs what Auto would pick,
+  changes nothing), Auto. `MELD_GOVERNOR=off` overrides everything.
+- **OSM tile sidecars**, on by default: cached map tiles carry a pre-parsed
+  companion so repeat renders skip most decoding, at roughly two thirds more
+  OSM cache on disk. Turn off on tight disks; it only touches the cache.
+- **Smooth river beds** and **road grading**, both off by default and both
+  deliberate changes to the world, so a project regenerated with either one on
+  will not match cells rendered earlier. Rivers get a rounded channel scaled to
+  their width, with lakes and oceans left untouched; roads get one
+  slope-limited height profile each, so a carriageway ramps instead of stepping
+  on terrain contours.
+
+### Fixed
+- **Stop now actually stops.** The flag that halts a run was never set, so
+  cancelled cells matched the retry filter and were resubmitted twice. Prefetch
+  had the mirror problem: it accepted a stop signal that was never passed, so a
+  stopped run could be revived by its own prefetcher.
+- **A project switch mid-run could merge cells into the wrong world.** The
+  destination path was re-resolved while the run was in flight; it is now frozen
+  at run start. A second path through the export hook reopened half the same
+  race and is closed too.
+- **The first run of a new project was much slower than later ones**, sitting at
+  about a third of the machine: startup stagger armed once per worker thread
+  instead of once per run, and the worker search could not recognise a good step
+  early. Cold runs went from 173.9 s to 144.8 s, CPU from 60% to 79%.
+- **The worker search could stop for the wrong reason.** Throughput was measured
+  over cells finished rather than over a window of time, so a burst read as a
+  rate spike and a lull as a collapse; the idle guard could only ever hasten a
+  stop, never keep the search alive.
+- **The memory guard was four times too pessimistic** while streaming to disk,
+  holding back workers there was room for.
+- **The CPU budget had two different defaults** (100% and 90%) depending on the
+  path taken; it is 90% everywhere.
+- **GPU acceleration no longer travels in shared presets** - it describes a
+  machine, not a world.
+- **Generation no longer depends on machine load**: the generator's flood-fill
+  limiter varied with system load, so identical input could differ on a busy
+  machine. Meld now sets it explicitly on every child process.
+- **Caves work at any world height** (generator fix). Worlds taller or deeper
+  than vanilla broke at both limits: above roughly y=256 every underground block
+  became air, and below y=-64 no caves generated at all. Both now follow the
+  world's own floor and ceiling; standard-height worlds are unaffected, bit for
+  bit.
+
+### Changed
+- Generation is **1.7x** a stock 1.9.7 install, **1.3x** a hand-tuned one, and
+  **1.8x** what the generator manages alone on the same ground: 230.3 s to
+  135.8 s on 81 cells of central Bucharest at 1:1, 338 to 573 region files per
+  minute, with peak memory down from 82-93% to 52-56%.
+- Cells no longer write the seam ring the merge deletes moments later (-12% per
+  cell), and per-worker memory is capped and constant in area, so city-sized
+  batches no longer climb toward swap.
+
 ## [1.9.7] - 2026-08-24
 
 Bundles arnis fork 3.1.7. No Meld-side changes; everything here comes from the
