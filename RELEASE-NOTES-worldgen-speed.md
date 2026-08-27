@@ -82,6 +82,16 @@ and the seam ring around each cell turned out to be load-bearing - deleting its
 *generation* (rather than its files) corrupts cell borders, which is why this release
 deletes only the files.
 
+## Also fixed in this release
+
+**Tall worlds + caves: the giant void above y~256 is gone.** The cave engine ported
+vanilla's world-top fade with vanilla's hardcoded coordinates, and above y=256 that
+arithmetic makes every underground block air regardless of the noise - one huge cavern
+under any mountain that reached past it. The fade now follows the world's own ceiling.
+Standard-height worlds are unaffected (bit-for-bit - the formula lands on the exact
+vanilla numbers there); tall worlds get real rock and real caves all the way up.
+Affected worlds heal per cell on regenerate, like every generator fix.
+
 ## Versions and compatibility
 
 - arnis **3.1.8**: all new behaviour is opt-in via env/flags (`--canonical-regions`,
