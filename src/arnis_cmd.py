@@ -366,6 +366,18 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     ng = str(settings.get("nordgrund") or "none").strip()
     if ng.lower() != "none" and arnis_supports(arnis_exe, "--nordgrund"):
         cmd += ["--nordgrund", ng]
+    # NordGrund: local Danmarks Hoejdemodel squares, and the flag that tells the fork to trust
+    # them (skip the repair stages written for coarse DEMs). Both gated on the --help handshake;
+    # both are the fork's defaults when unset, so a stock binary builds the same command line.
+    # NOTE: a missing DHM square is only FATAL when regional_elevation_only is also on -- without
+    # it the fork falls back to ~30m AWS terrain for that cell.
+    dhm = str(settings.get("dhm_dir") or "").strip()
+    if dhm and settings.get("terrain", True) and arnis_supports(arnis_exe, "--dhm-dir"):
+        cmd += ["--dhm-dir", dhm]
+    trust = str(settings.get("elevation_trust") or "off").strip()
+    if trust.lower() != "off" and settings.get("terrain", True) \
+            and arnis_supports(arnis_exe, "--elevation-trust"):
+        cmd += ["--elevation-trust", trust]
     if settings.get("fill_ground"):
         cmd.append("--fillground")
     if settings.get("caves"):

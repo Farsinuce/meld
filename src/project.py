@@ -25,6 +25,8 @@ def default_settings() -> dict:
         # carry across cells - see the note in arnis_cmd.build_arnis_cmd.
         "signage": "none",
         "nordgrund": "none",   # NordGrund fork extras: none | all | doors,torches,signs,lanterns,manholes
+        "dhm_dir": "",         # NordGrund: directory of local DHM_TERRAEN_1km_*.tif squares
+        "elevation_trust": "off",  # NordGrund: off | v1 (skip the coarse-DEM repair stages)
         "job_size_regions": 4,   # sweet spot: small save bursts, safe on any disk (see Workers note)
         # 8 chunks = 128 blocks per side. NOT a tuning knob, and lowering it saves nothing.
         #
