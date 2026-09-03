@@ -24,6 +24,7 @@ def default_settings() -> dict:
         # signage map payloads into the world's data/ directory, which merge.py does not
         # carry across cells - see the note in arnis_cmd.build_arnis_cmd.
         "signage": "none",
+        "nordgrund": "none",   # NordGrund fork extras: none | all | doors,torches,signs,lanterns,manholes
         "job_size_regions": 4,   # sweet spot: small save bursts, safe on any disk (see Workers note)
         # 8 chunks = 128 blocks per side. NOT a tuning knob, and lowering it saves nothing.
         #

@@ -361,6 +361,11 @@ def build_arnis_cmd(arnis_exe: str, bbox: dict, output_path: str,
     props_min = settings.get("props_min_scale")
     if props_min not in (None, "") and arnis_supports(arnis_exe, "--props-min-scale"):
         cmd += ["--props-min-scale", str(float(props_min))]
+    # NordGrund fork extras (our fork's --nordgrund, nordgrund.rs). Gated on the --help handshake
+    # like every fork-only flag; "none" is the fork's default, so it is never emitted.
+    ng = str(settings.get("nordgrund") or "none").strip()
+    if ng.lower() != "none" and arnis_supports(arnis_exe, "--nordgrund"):
+        cmd += ["--nordgrund", ng]
     if settings.get("fill_ground"):
         cmd.append("--fillground")
     if settings.get("caves"):
